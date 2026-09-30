@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useGameStore } from './store/useGameStore';
 import { LoginView } from './views/LoginView';
 import { CharacterCreationView } from './views/CharacterCreationView';
-import { PortGameInterface } from './components/PortGameInterface';
+import { GameInterface } from './components/GameInterface';
 import { DisconnectedView } from './views/DisconnectedView';
 import './App.css';
 
@@ -29,7 +29,7 @@ function App() {
     <div className="app-container">
       {screenMode === 'login' && <LoginView />}
       {screenMode === 'character_creation' && <CharacterCreationView />}
-      {screenMode === 'game' && <PortGameInterface />}
+      {screenMode === 'game' && <GameInterface />}
     </div>
   );
 }

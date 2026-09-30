@@ -11,7 +11,7 @@ import { InventoryPanel } from './panels/InventoryPanel';
 import { CreaturesPanel } from './panels/CreaturesPanel';
 import { LogPanel } from './panels/LogPanel';
 
-export const PortGameInterface = () => {
+export const GameInterface = () => {
   const activeTab = useGameStore((state) => state.activeTab);
   const setActiveTab = useGameStore((state) => state.setActiveTab);
   const syncFromMongo = useGameStore((state) => state.syncFromMongo);
@@ -42,12 +42,12 @@ export const PortGameInterface = () => {
 
   // Match active location from locations collection
   const currentLocation = locations.find(
-    (loc) => loc.locationId === player.location || loc.name === player.location
+    (loc) => loc.locationId === player?.location || loc.name === player?.location
   ) || locations[0] || {
-    name: '翠潯灣港口',
-    nameEn: 'Azure Bay Port',
-    description: '各種船隻進出，水手們的聚集地。',
-    descriptionEn: 'Bustling harbor where ships drop anchor and sailors gather.',
+    name: '',
+    nameEn: '',
+    description: '',
+    descriptionEn: '',
     image: '',
   };
 

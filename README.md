@@ -35,7 +35,7 @@ AetherImmersion/
     │   ├── BottomToolbar.jsx         # 底部直立/行動版切換工具列
     │   ├── CollapsiblePanel.jsx      # 面板通用可摺疊容器外殼
     │   ├── GoogleLoginButton.jsx     # Google 登入按鈕元件
-    │   ├── PortGameInterface.jsx     # 遊戲主介面與版面控制容器
+    │   ├── GameInterface.jsx         # 遊戲主介面與版面控制容器
     │   └── TopHUD.jsx                # 頂部狀態列 (血條/精力條/設定/角色資訊)
     ├── constants/
     │   └── translations.js           # 雙語字典檔 (繁體中文 / 英文)
@@ -61,7 +61,7 @@ AetherImmersion/
 | 檔案路徑 | 主要功能與職責 | 關聯與調用對象 |
 | :--- | :--- | :--- |
 | `src/main.jsx` | React 應用程式進入點，將 `<App />` 掛載至 HTML DOM `#root` 上。 | 引用 `src/App.jsx`。 |
-| `src/App.jsx` | 前端根元件。初始化進行 DB 同步（`syncFromMongo()`），並根據連線狀態與 Zustand 的 `screenMode` 切換顯示畫面。 | 調用 `src/store/useGameStore.js`；引用 `src/views/DisconnectedView.jsx`, `src/views/LoginView.jsx`, `src/views/CharacterCreationView.jsx`, `src/components/PortGameInterface.jsx`。 |
+| `src/App.jsx` | 前端根元件。初始化進行 DB 同步（`syncFromMongo()`），並根據連線狀態與 Zustand 的 `screenMode` 切換顯示畫面。 | 調用 `src/store/useGameStore.js`；引用 `src/views/DisconnectedView.jsx`, `src/views/LoginView.jsx`, `src/views/CharacterCreationView.jsx`, `src/components/GameInterface.jsx`。 |
 | `src/store/useGameStore.js` | Zustand 全域狀態中心。所有玩家資料、背包、地點、配方、NPC、日誌純線上即時載入，封裝 REST API 請求動作。 | 引用 `src/constants/translations.js`；供全專案元件訂閱與調用。 |
 | `src/constants/translations.js` | 專案雙語字庫字典檔，定義 `zh-TW` 與 `en` 的標籤、按鈕文字、系統提示語。 | 供 `src/store/useGameStore.js` 與各 UI 元件引用。 |
 
@@ -81,9 +81,9 @@ AetherImmersion/
 ### 核心遊戲介面與框架 (Layout Components)
 | 檔案路徑 | 主要功能與職責 | 關聯與調用對象 |
 | :--- | :--- | :--- |
-| `src/components/PortGameInterface.jsx` | 遊戲主介面容器。支援桌面版（左右 6 欄雙側邊欄）與行動版（單一抽屜 + 底部工具列 + 📍 地點說明彈窗）。 | 引用 `TopHUD.jsx`, `BottomToolbar.jsx` 以及 6 大子面板。 |
+| `src/components/GameInterface.jsx` | 遊戲主介面容器。支援桌面版（左右 6 欄雙側邊欄）與行動版（單一抽屜 + 底部工具列 + 📍 地點說明彈窗）。 | 引用 `TopHUD.jsx`, `BottomToolbar.jsx` 以及 6 大子面板。 |
 | `src/components/TopHUD.jsx` | 頂部狀態列。顯示玩家頭像、等級、可點擊彈出之能力值詳情面板（HP、力量、速度、精巧），以及齒輪設定選單（DB 狀態、Google 帳號連動、語系切換、版面開關）。 | 引用 `GoogleLoginButton.jsx` 與 `translations.js`。 |
-| `src/components/BottomToolbar.jsx` | 行動版 / 直立式檢視下固定於底部的 6 大功能頁籤分頁按鈕列。 | 傳遞頁籤點擊事件至 `PortGameInterface.jsx`。 |
+| `src/components/BottomToolbar.jsx` | 行動版 / 直立式檢視下固定於底部的 6 大功能頁籤分頁按鈕列。 | 傳遞頁籤點擊事件至 `GameInterface.jsx`。 |
 | `src/components/CollapsiblePanel.jsx` | 可摺疊面板通用外殼元件。提供統一的 Glassmorphism 標題列、折疊箭頭與展開/收合動畫容器。 | 被 6 大功能面板引用包裹。 |
 | `src/components/GoogleLoginButton.jsx` | 封裝 Google Identity Services 驗證登入按鈕。 | 被 `TopHUD.jsx` 與 `LoginView.jsx` 調用。 |
 
