@@ -67,52 +67,31 @@ router.post('/google', async (req, res) => {
       };
     }
 
-    // Save/Update in MongoDB if connected
-    if (isDbConnected()) {
-      let player = await Player.findOne({ googleId: googleUser.sub });
-      if (!player && googleUser.email) {
-        player = await Player.findOne({ email: googleUser.email });
-      }
-      if (!player) {
-        player = await Player.findOne({ googleId: null });
-      }
-
-      if (player) {
-        player.googleId = googleUser.sub;
-        player.email = googleUser.email;
-        if (!player.isCharacterCreated) {
-          player.name = googleUser.name;
-        }
-        player.pictureUrl = googleUser.picture;
-        player.isLoggedIn = true;
-        await player.save();
-      } else {
-        player = await Player.create({
-          name: googleUser.name,
-          googleId: googleUser.sub,
-          email: googleUser.email,
-          pictureUrl: googleUser.picture,
-          isLoggedIn: true,
-          isCharacterCreated: false,
-          level: 1,
-          hp: 100,
-          maxHp: 100,
-          energy: 4320,
-          maxEnergy: 4320,
-          location: 'AZURE_BAY_PORT',
-          locationEn: 'Azure Bay Port',
-        });
-      }
-      return res.json({ success: true, source: 'mongodb', user: googleUser, player });
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法登入！' });
     }
 
-    // Memory Fallback Mode
-    res.json({
-      success: true,
-      source: 'memory',
-      user: googleUser,
-      player: {
+    let player = await Player.findOne({ googleId: googleUser.sub });
+    if (!player && googleUser.email) {
+      player = await Player.findOne({ email: googleUser.email });
+    }
+    if (!player) {
+      player = await Player.findOne({ googleId: null });
+    }
+
+    if (player) {
+      player.googleId = googleUser.sub;
+      player.email = googleUser.email;
+      if (!player.isCharacterCreated) {
+        player.name = googleUser.name;
+      }
+      player.pictureUrl = googleUser.picture;
+      player.isLoggedIn = true;
+      await player.save();
+    } else {
+      player = await Player.create({
         name: googleUser.name,
+        googleId: googleUser.sub,
         email: googleUser.email,
         pictureUrl: googleUser.picture,
         isLoggedIn: true,
@@ -122,8 +101,11 @@ router.post('/google', async (req, res) => {
         maxHp: 100,
         energy: 4320,
         maxEnergy: 4320,
-      },
-    });
+        location: 'AZURE_BAY_PORT',
+        locationEn: 'Azure Bay Port',
+      });
+    }
+    return res.json({ success: true, source: 'mongodb', user: googleUser, player });
   } catch (err) {
     console.error('[Google Auth Error]:', err);
     res.status(500).json({ success: false, error: err.message });

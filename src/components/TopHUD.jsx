@@ -18,10 +18,10 @@ export const TopHUD = () => {
   const settingsRef = useRef(null);
   const playerDetailsRef = useRef(null);
 
-  const hpPercent = Math.min(100, Math.max(0, (player.hp / player.maxHp) * 100));
-  const energyPercent = Math.min(100, Math.max(0, (player.energy / player.maxEnergy) * 100));
+  const hpPercent = player ? Math.min(100, Math.max(0, (player.hp / player.maxHp) * 100)) : 0;
+  const energyPercent = player ? Math.min(100, Math.max(0, (player.energy / player.maxEnergy) * 100)) : 0;
 
-  const playerNameText = player.name || (user?.isLoggedIn ? user.name : language === 'en' ? 'Adventurer' : '冒險者');
+  const playerNameText = player?.name || (user?.isLoggedIn ? user.name : language === 'en' ? 'Adventurer' : '冒險者');
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -69,7 +69,7 @@ export const TopHUD = () => {
                 </div>
                 <div className="player-basic-info">
                   <span className="player-details-name">{playerNameText}</span>
-                  <span className="player-details-level">LV.{player.level}</span>
+                  <span className="player-details-level">LV.{player?.level ?? 1}</span>
                 </div>
                 <button
                   type="button"
@@ -85,7 +85,7 @@ export const TopHUD = () => {
                 <div className="status-bar-group hp-group details-hp">
                   <div className="status-bar-info">
                     <span className="bar-label">{t.hp}</span>
-                    <span className="bar-val">{player.hp} / {player.maxHp}</span>
+                    <span className="bar-val">{player?.hp ?? 0} / {player?.maxHp ?? 100}</span>
                   </div>
                   <div className="bar-track">
                     <div className="bar-fill hp-fill" style={{ width: `${hpPercent}%` }}></div>
@@ -97,17 +97,17 @@ export const TopHUD = () => {
                   <div className="stat-card str">
                     <span className="stat-icon">💪</span>
                     <span className="stat-label">{t.strLabel || '力量'}</span>
-                    <span className="stat-value">{player.str ?? 1}</span>
+                    <span className="stat-value">{player?.str ?? 1}</span>
                   </div>
                   <div className="stat-card spd">
                     <span className="stat-icon">⚡</span>
                     <span className="stat-label">{t.spdLabel || '速度'}</span>
-                    <span className="stat-value">{player.spd ?? 1}</span>
+                    <span className="stat-value">{player?.spd ?? 1}</span>
                   </div>
                   <div className="stat-card dex">
                     <span className="stat-icon">🎯</span>
                     <span className="stat-label">{t.dexLabel || '精巧'}</span>
-                    <span className="stat-value">{player.dex ?? 1}</span>
+                    <span className="stat-value">{player?.dex ?? 1}</span>
                   </div>
                 </div>
               </div>
@@ -212,7 +212,7 @@ export const TopHUD = () => {
         <div className="status-bar-group energy-group">
           <div className="status-bar-info">
             <span className="bar-label">{t.energy}</span>
-            <span className="bar-val">{player.energy} / {player.maxEnergy}</span>
+            <span className="bar-val">{player?.energy ?? 0} / {player?.maxEnergy ?? 4320}</span>
           </div>
           <div className="bar-track">
             <div className="bar-fill energy-fill" style={{ width: `${energyPercent}%` }}></div>

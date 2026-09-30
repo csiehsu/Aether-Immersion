@@ -6,17 +6,17 @@ import mongoose from 'mongoose';
 export const isDbConnected = () => mongoose.connection.readyState === 1;
 
 /**
- * Generic query helper to fetch documents from a MongoDB Model,
- * seeding automatically from initialData if collection is empty,
- * or returning initialData if DB is offline.
+ * Query helper to fetch documents from a MongoDB Model.
+ * Automatically seeds from initialData if database collection is empty.
+ * Throws an error if MongoDB is disconnected.
  */
 export const fetchCollectionData = async (Model, initialData) => {
-  if (isDbConnected()) {
-    let docs = await Model.find();
-    if (!docs || docs.length === 0) {
-      docs = await Model.insertMany(initialData);
-    }
-    return { source: 'mongodb', data: docs };
+  if (!isDbConnected()) {
+    throw new Error('資料庫未連線，請稍後重試！');
   }
-  return { source: 'memory', data: initialData };
+  let docs = await Model.find();
+  if (!docs || docs.length === 0) {
+    docs = await Model.insertMany(initialData);
+  }
+  return { source: 'mongodb', data: docs };
 };

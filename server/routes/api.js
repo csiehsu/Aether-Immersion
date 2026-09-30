@@ -14,38 +14,21 @@ import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
 
 const router = express.Router();
 
-// Memory Fallback Store if MongoDB is disconnected
-let memoryPlayer = {
-  name: '冒險者',
-  isCharacterCreated: false,
-  str: 1,
-  spd: 1,
-  dex: 1,
-  level: 1,
-  hp: 100,
-  maxHp: 100,
-  energy: 4320,
-  maxEnergy: 4320,
-  location: 'AZURE_BAY_PORT',
-  locationEn: 'Azure Bay Port',
-  knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
-  inventory: [
-    { id: 'item_001', itemId: 'item001', name: '小魚', nameEn: 'Small Fish', icon: '🐟', count: 1, quality: '普通' },
-  ],
-};
-
-let memoryLogs = [
-  { id: 1, time: '12:00:15', sender: '碼頭老水手', senderEn: 'Old Sailor', text: '「喂！新人，歡迎來到阿埃泰爾港口。」', textEn: '"Ahoy, newcomer! Welcome to Aether Port."', type: 'dialogue' },
-  { id: 2, time: '12:01:02', sender: '系統通知', senderEn: 'System', text: '您已進入【阿埃泰爾港口】安全區域。', textEn: 'Entered safe area [Aether Port].', type: 'system' },
-];
-
 // GET /api/health
 router.get('/health', (req, res) => {
   const connected = isDbConnected();
+  if (!connected) {
+    return res.status(503).json({
+      status: 'error',
+      mongodb: 'offline',
+      message: '資料庫未連線！',
+      timestamp: new Date().toISOString(),
+    });
+  }
   res.json({
     status: 'ok',
-    mongodb: connected ? 'connected' : 'offline',
-    dbName: connected ? mongoose.connection.name : null,
+    mongodb: 'connected',
+    dbName: mongoose.connection.name,
     timestamp: new Date().toISOString(),
   });
 });
@@ -57,7 +40,7 @@ router.get('/items', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[API Error] GET /api/items:', err);
-    res.status(500).json({ success: false, error: err.message, data: initialItems });
+    res.status(503).json({ success: false, error: err.message });
   }
 });
 
@@ -68,7 +51,7 @@ router.get('/locations', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[API Error] GET /api/locations:', err);
-    res.status(500).json({ success: false, error: err.message, data: initialLocations });
+    res.status(503).json({ success: false, error: err.message });
   }
 });
 
@@ -79,7 +62,7 @@ router.get('/recipes', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[API Error] GET /api/recipes:', err);
-    res.status(500).json({ success: false, error: err.message, data: initialRecipes });
+    res.status(503).json({ success: false, error: err.message });
   }
 });
 
@@ -90,31 +73,49 @@ router.get('/npcs', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[API Error] GET /api/npcs:', err);
-    res.status(500).json({ success: false, error: err.message, data: initialNpcs });
+    res.status(503).json({ success: false, error: err.message });
   }
 });
 
 // GET /api/player
 router.get('/player', async (req, res) => {
   try {
-    if (isDbConnected()) {
-      let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
-      if (!player) {
-        player = await Player.create(memoryPlayer);
-        console.log('[MongoDB] Initialized new player profile in MongoDB (AetherImmersion)');
-      }
-      return res.json({ success: true, source: 'mongodb', data: player });
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法載入玩家資料！' });
     }
-    res.json({ success: true, source: 'memory', data: memoryPlayer });
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      player = await Player.create({
+        name: '冒險者',
+        isCharacterCreated: false,
+        str: 1,
+        spd: 1,
+        dex: 1,
+        level: 1,
+        hp: 100,
+        maxHp: 100,
+        energy: 4320,
+        maxEnergy: 4320,
+        location: 'AZURE_BAY_PORT',
+        locationEn: 'Azure Bay Port',
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
+      });
+      console.log('[MongoDB] Created initial player record in MongoDB.');
+    }
+    return res.json({ success: true, source: 'mongodb', data: player });
   } catch (err) {
     console.error('[API Error] GET /api/player:', err);
-    res.status(500).json({ success: false, error: err.message, data: memoryPlayer });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // POST /api/player/create-character
 router.post('/player/create-character', async (req, res) => {
   try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法建立角色！' });
+    }
+
     const { name, str, spd, dex } = req.body;
 
     const nStr = Number(str);
@@ -156,19 +157,14 @@ router.post('/player/create-character', async (req, res) => {
       knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
     };
 
-    if (isDbConnected()) {
-      let player = await Player.findOne();
-      if (player) {
-        Object.assign(player, characterData);
-        await player.save();
-      } else {
-        player = await Player.create(characterData);
-      }
-      return res.json({ success: true, source: 'mongodb', data: player });
+    let player = await Player.findOne();
+    if (player) {
+      Object.assign(player, characterData);
+      await player.save();
+    } else {
+      player = await Player.create(characterData);
     }
-
-    memoryPlayer = { ...memoryPlayer, ...characterData };
-    res.json({ success: true, source: 'memory', data: memoryPlayer });
+    return res.json({ success: true, source: 'mongodb', data: player });
   } catch (err) {
     console.error('[API Error] POST /api/player/create-character:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -178,19 +174,16 @@ router.post('/player/create-character', async (req, res) => {
 // PUT /api/player
 router.put('/player', async (req, res) => {
   try {
-    const updateData = req.body;
-    if (isDbConnected()) {
-      let player = await Player.findOne();
-      if (player) {
-        Object.assign(player, updateData);
-        await player.save();
-      } else {
-        player = await Player.create({ ...memoryPlayer, ...updateData });
-      }
-      return res.json({ success: true, source: 'mongodb', data: player });
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法更新玩家資料！' });
     }
-    memoryPlayer = { ...memoryPlayer, ...updateData };
-    res.json({ success: true, source: 'memory', data: memoryPlayer });
+    const updateData = req.body;
+    let player = await Player.findOne();
+    if (player) {
+      Object.assign(player, updateData);
+      await player.save();
+    }
+    return res.json({ success: true, source: 'mongodb', data: player });
   } catch (err) {
     console.error('[API Error] PUT /api/player:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -200,48 +193,39 @@ router.put('/player', async (req, res) => {
 // POST /api/player/gather
 router.post('/player/gather', async (req, res) => {
   try {
-    const { cost = 5, yieldItem = '堅硬木材', yieldItemEn = 'Hard Timber', icon = '🪵' } = req.body;
-
-    if (isDbConnected()) {
-      let player = await Player.findOne();
-      if (!player) player = await Player.create(memoryPlayer);
-
-      if (player.energy < cost) {
-        return res.status(400).json({ success: false, message: '精力不足！' });
-      }
-
-      player.energy = Math.max(0, player.energy - cost);
-
-      const existingItem = player.inventory.find((i) => i.name === yieldItem);
-      if (existingItem) {
-        existingItem.count += 1;
-      } else {
-        player.inventory.push({
-          id: `item_${Date.now()}`,
-          name: yieldItem,
-          nameEn: yieldItemEn,
-          icon,
-          count: 1,
-          quality: '普通',
-        });
-      }
-
-      await player.save();
-      return res.json({ success: true, source: 'mongodb', data: player });
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法進行採集！' });
     }
 
-    // Memory Fallback
-    if (memoryPlayer.energy < cost) {
+    const { cost = 5, yieldItem = '小魚', yieldItemEn = 'Small Fish', icon = '🐟' } = req.body;
+
+    let player = await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家角色！' });
+    }
+
+    if (player.energy < cost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
-    memoryPlayer.energy = Math.max(0, memoryPlayer.energy - cost);
-    const existing = memoryPlayer.inventory.find((i) => i.name === yieldItem);
-    if (existing) {
-      existing.count += 1;
+
+    player.energy = Math.max(0, player.energy - cost);
+
+    const existingItem = player.inventory.find((i) => i.name === yieldItem);
+    if (existingItem) {
+      existingItem.count += 1;
     } else {
-      memoryPlayer.inventory.push({ id: `item_${Date.now()}`, name: yieldItem, nameEn: yieldItemEn, icon, count: 1, quality: '普通' });
+      player.inventory.push({
+        id: `item_${Date.now()}`,
+        name: yieldItem,
+        nameEn: yieldItemEn,
+        icon,
+        count: 1,
+        quality: '普通',
+      });
     }
-    res.json({ success: true, source: 'memory', data: memoryPlayer });
+
+    await player.save();
+    return res.json({ success: true, source: 'mongodb', data: player });
   } catch (err) {
     console.error('[API Error] POST /api/player/gather:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -251,38 +235,35 @@ router.post('/player/gather', async (req, res) => {
 // GET /api/logs
 router.get('/logs', async (req, res) => {
   try {
-    if (isDbConnected()) {
-      const logs = await GameLog.find().sort({ createdAt: -1 }).limit(20);
-      return res.json({ success: true, source: 'mongodb', data: logs });
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
-    res.json({ success: true, source: 'memory', data: memoryLogs });
+    const logs = await GameLog.find().sort({ createdAt: -1 }).limit(20);
+    return res.json({ success: true, source: 'mongodb', data: logs });
   } catch (err) {
     console.error('[API Error] GET /api/logs:', err);
-    res.json({ success: false, source: 'memory', data: memoryLogs });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // POST /api/logs
 router.post('/logs', async (req, res) => {
   try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
     const { sender, senderEn, text, textEn, type = 'dialogue' } = req.body;
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
 
-    if (isDbConnected()) {
-      const newLog = await GameLog.create({
-        time: timeStr,
-        sender,
-        senderEn: senderEn || sender,
-        text,
-        textEn: textEn || text,
-        type,
-      });
-      return res.json({ success: true, source: 'mongodb', data: newLog });
-    }
-
-    const newMemoryLog = { id: Date.now(), time: timeStr, sender, senderEn, text, textEn, type };
-    memoryLogs.unshift(newMemoryLog);
-    res.json({ success: true, source: 'memory', data: newMemoryLog });
+    const newLog = await GameLog.create({
+      time: timeStr,
+      sender,
+      senderEn: senderEn || sender,
+      text,
+      textEn: textEn || text,
+      type,
+    });
+    return res.json({ success: true, source: 'mongodb', data: newLog });
   } catch (err) {
     console.error('[API Error] POST /api/logs:', err);
     res.status(500).json({ success: false, error: err.message });
