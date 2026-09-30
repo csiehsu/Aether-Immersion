@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useGameStore, translations } from '../store/useGameStore';
 import { GoogleLoginButton } from './GoogleLoginButton';
 
@@ -15,40 +15,23 @@ export const TopHUD = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerDetailsOpen, setPlayerDetailsOpen] = useState(false);
 
-  const settingsRef = useRef(null);
-  const playerDetailsRef = useRef(null);
-
   const hpPercent = player ? Math.min(100, Math.max(0, (player.hp / player.maxHp) * 100)) : 0;
   const energyPercent = player ? Math.min(100, Math.max(0, (player.energy / player.maxEnergy) * 100)) : 0;
 
-  const playerNameText = player?.name || (user?.isLoggedIn ? user.name : language === 'en' ? 'Adventurer' : '冒險者');
-
-  // Close dropdowns on outside click
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (settingsRef.current && !settingsRef.current.contains(event.target)) {
-        setSettingsOpen(false);
-      }
-      if (playerDetailsRef.current && !playerDetailsRef.current.contains(event.target)) {
-        setPlayerDetailsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const playerNameText = player?.name || (user?.isLoggedIn ? user.name : t.playerDefaultName);
 
   return (
     <header className="top-hud-bar">
       <div className="hud-left">
-        {/* Avatar & Collapsible Player Details Popover */}
-        <div className="avatar-wrapper" ref={playerDetailsRef}>
+        <div className="avatar-wrapper">
           <div
             className="avatar-frame clickable"
             onClick={() => {
-              setPlayerDetailsOpen(!playerDetailsOpen);
-              if (!playerDetailsOpen) setSettingsOpen(false);
+              const nextState = !playerDetailsOpen;
+              setPlayerDetailsOpen(nextState);
+              if (nextState) setSettingsOpen(false);
             }}
-            title="點擊檢視角色詳情"
+            title="查看角色資料"
           >
             {user?.isLoggedIn && user?.pictureUrl ? (
               <img src={user.pictureUrl} alt={user.name} className="hud-google-avatar" />
@@ -71,17 +54,9 @@ export const TopHUD = () => {
                   <span className="player-details-name">{playerNameText}</span>
                   <span className="player-details-level">LV.{player?.level ?? 1}</span>
                 </div>
-                <button
-                  type="button"
-                  className="btn-close-settings"
-                  onClick={() => setPlayerDetailsOpen(false)}
-                >
-                  ✖
-                </button>
               </div>
 
               <div className="player-details-body">
-                {/* HP Bar */}
                 <div className="status-bar-group hp-group details-hp">
                   <div className="status-bar-info">
                     <span className="bar-label">{t.hp}</span>
@@ -92,7 +67,6 @@ export const TopHUD = () => {
                   </div>
                 </div>
 
-                {/* Attributes Grid (Str, Spd, Dex) */}
                 <div className="player-details-stats-grid">
                   <div className="stat-card str">
                     <span className="stat-icon">💪</span>
@@ -115,14 +89,14 @@ export const TopHUD = () => {
           )}
         </div>
 
-        {/* Gear Button & System Settings Menu */}
-        <div className="gear-wrapper" ref={settingsRef}>
+        <div className="gear-wrapper">
           <button
             type="button"
             className="btn-hud-gear standalone"
             onClick={() => {
-              setSettingsOpen(!settingsOpen);
-              if (!settingsOpen) setPlayerDetailsOpen(false);
+              const nextState = !settingsOpen;
+              setSettingsOpen(nextState);
+              if (nextState) setPlayerDetailsOpen(false);
             }}
             title={t.settingsTitle || '系統設定'}
           >
@@ -133,29 +107,23 @@ export const TopHUD = () => {
             <div className="settings-dropdown-menu">
               <div className="settings-menu-header">
                 <span className="settings-menu-title">{t.settingsTitle}</span>
-                <button type="button" className="btn-close-settings" onClick={() => setSettingsOpen(false)}>
-                  ✖
-                </button>
               </div>
 
               <div className="settings-menu-body">
-                {/* MongoDB Status Badge */}
                 <div className="menu-setting-item">
-                  <span className="menu-item-label">資料庫狀態:</span>
+                  <span className="menu-item-label">{t.dbStatusLabel}</span>
                   <span className={`mongo-badge status-${mongoStatus}`}>
                     {mongoStatus === 'connected' ? t.mongoConnected : t.mongoOffline}
                   </span>
                 </div>
 
-                {/* Google Sign-In Component */}
                 <div className="menu-setting-item">
-                  <span className="menu-item-label">帳號連動:</span>
+                  <span className="menu-item-label">{t.accountLinkLabel}</span>
                   <GoogleLoginButton />
                 </div>
 
-                {/* Language Switcher */}
                 <div className="menu-setting-item">
-                  <span className="menu-item-label">語言設定:</span>
+                  <span className="menu-item-label">{t.languageLabel}</span>
                   <div className="language-switcher">
                     <button
                       type="button"
@@ -174,9 +142,8 @@ export const TopHUD = () => {
                   </div>
                 </div>
 
-                {/* View Mode Toggles */}
                 <div className="menu-setting-item vertical">
-                  <span className="menu-item-label">{t.viewModeLabel}:</span>
+                  <span className="menu-item-label">{t.viewModeLabel}</span>
                   <div className="view-mode-buttons-row">
                     <button
                       type="button"
@@ -207,7 +174,6 @@ export const TopHUD = () => {
         </div>
       </div>
 
-      {/* Energy Bar Only in Right HUD */}
       <div className="hud-right-bars">
         <div className="status-bar-group energy-group">
           <div className="status-bar-info">

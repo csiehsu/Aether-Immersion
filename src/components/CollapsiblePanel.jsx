@@ -14,7 +14,7 @@ export const CollapsiblePanel = ({
       <div
         className="panel-header clickable-header"
         onClick={() => setIsOpen(!isOpen)}
-        title="點擊切換開合"
+        title="切換開合"
       >
         <h3 className="panel-title">
           <span>{title}</span>

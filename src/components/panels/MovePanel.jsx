@@ -27,7 +27,7 @@ export const MovePanel = () => {
                 <div className="location-title-row">
                   <span className="location-name">{getLocalizedName(loc, language)}</span>
                 </div>
-                <p className="location-desc">{getLocalizedDesc(loc, language)}</p>
+                {isCurrent && <p className="location-desc">{getLocalizedDesc(loc, language)}</p>}
               </div>
               <button
                 type="button"
