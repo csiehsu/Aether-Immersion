@@ -6,10 +6,8 @@ export const CharacterCreationView = () => {
   const language = useGameStore((state) => state.language);
   const createCharacter = useGameStore((state) => state.createCharacter);
 
-  // Requirement #1: 角色名稱留空，不要有預設文字
   const [charName, setCharName] = useState('');
 
-  // Requirement #5: 所有能力值預設值從 10 改為 1
   const [str, setStr] = useState(1);
   const [spd, setSpd] = useState(1);
   const [dex, setDex] = useState(1);
@@ -113,7 +111,6 @@ export const CharacterCreationView = () => {
 
           {/* Stat Allocation Controls */}
           <div className="stats-allocation-grid">
-            {/* Requirement #2: 力量的說明: 影響物理攻擊力、勞力型工作速度 */}
             <div className="stat-control-row">
               <div className="stat-info">
                 <span className="stat-icon">💪</span>
@@ -135,7 +132,6 @@ export const CharacterCreationView = () => {
               </div>
             </div>
 
-            {/* Requirement #3: 速度的說明: 影響戰鬥的行動順序、移動速度 */}
             <div className="stat-control-row">
               <div className="stat-info">
                 <span className="stat-icon">⚡</span>
@@ -157,7 +153,6 @@ export const CharacterCreationView = () => {
               </div>
             </div>
 
-            {/* Requirement #4: 精巧的說明: 影響間接戰鬥行為（如陷阱等）成功率、技術型工作速度 */}
             <div className="stat-control-row">
               <div className="stat-info">
                 <span className="stat-icon">🎯</span>
@@ -185,7 +180,6 @@ export const CharacterCreationView = () => {
           {/* Validation Error Message */}
           {errorMsg && <div className="char-error-alert">{errorMsg}</div>}
 
-          {/* Requirement #6: 送出按鈕文字改為簡單的開始 */}
           <button
             type="submit"
             className="btn-create-submit"

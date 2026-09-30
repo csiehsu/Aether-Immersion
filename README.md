@@ -136,7 +136,7 @@ AetherImmersion/
    - 伺服器斷線時：顯示 `src/views/DisconnectedView.jsx` 斷線錯誤畫面。
    - 未登入時：顯示 `src/views/LoginView.jsx` 畫面。
    - 登入後未創角時：進入 `src/views/CharacterCreationView.jsx` 畫面，玩家分配 30 點屬性後呼叫 `/api/player/create-character` 存檔。
-   - 完成創角後：進入 `src/components/PortGameInterface.jsx` 主介面。
+   - 完成創角後：進入 `src/components/GameInterface.jsx` 主介面。
 
 3. **依地點動態渲染與互動 (Location-Based Dynamics)**：
    - 玩家移動地點時，`CreaturesPanel` 根據 `currentLocation.npcs` 過濾僅顯示當前區域的 NPC。
