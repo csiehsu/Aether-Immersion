@@ -1,0 +1,69 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+
+:root {
+  --font-primary: 'Outfit', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+
+  /* Colors - High contrast for optimal legibility */
+  --bg-dark: #090c10;
+  --bg-card: rgba(18, 24, 38, 0.85);
+  --bg-card-hover: rgba(26, 35, 54, 0.95);
+  --glass-border: rgba(255, 255, 255, 0.18);
+  --glass-border-glow: rgba(0, 229, 255, 0.5);
+
+  --accent-cyan: #00e5ff;
+  --accent-purple: #a855f7;
+  --accent-gold: #ffc107;
+  --accent-red: #ff4d6d;
+  --accent-green: #00e676;
+
+  /* Brightened text colors to avoid dark gray legibility issues */
+  --text-main: #ffffff;
+  --text-muted: #e2e8f0;
+  --text-dim: #cbd5e1;
+
+  --shadow-glow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
+  --neon-glow-cyan: 0 0 15px rgba(0, 229, 255, 0.4);
+  --neon-glow-gold: 0 0 15px rgba(255, 193, 7, 0.4);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: var(--font-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  font-size: 15px; /* Increase base font size */
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(10, 14, 22, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-cyan);
+}

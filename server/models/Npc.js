@@ -1,0 +1,49 @@
+import mongoose from 'mongoose';
+
+const StatsSchema = new mongoose.Schema(
+  {
+    strength: { type: Number, default: 0 },
+    speed: { type: Number, default: 0 },
+    dexterity: { type: Number, default: 0 },
+    spiritual: { type: Number, default: 0 },
+    defense: { type: Number, default: 0 },
+    maxHP: { type: Number, default: 0 },
+    maxMP: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const DropSchema = new mongoose.Schema(
+  {
+    itemId: { type: String, default: '' },
+    dropRate: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const SkillSchema = new mongoose.Schema(
+  {
+    skillId: { type: String, default: 'normal_attack' },
+    level: { type: Number, default: 1 },
+  },
+  { _id: false }
+);
+
+const NpcSchema = new mongoose.Schema(
+  {
+    npcId: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    nameEn: { type: String, default: '' },
+    description: { type: String, default: '' },
+    descriptionEn: { type: String, default: '' },
+    imageUrl: { type: String, default: '' },
+    icon: { type: String, default: '🐾' },
+    type: { type: String, default: 'MONSTER' },
+    stats: { type: StatsSchema, default: () => ({}) },
+    drops: [DropSchema],
+    skills: [SkillSchema],
+  },
+  { timestamps: true }
+);
+
+export const Npc = mongoose.model('Npc', NpcSchema);
