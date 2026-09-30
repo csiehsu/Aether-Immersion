@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import portBg from '../assets/images/background/Port.png';
 import { useGameStore } from '../store/useGameStore';
 import { getLocalizedName, getLocalizedDesc } from '../utils/language';
@@ -21,26 +21,13 @@ export const GameInterface = () => {
 
   const [mobileOverlayOpen, setMobileOverlayOpen] = useState(true);
   const [locationPopoverOpen, setLocationPopoverOpen] = useState(false);
-  const locationRef = useRef(null);
 
   useEffect(() => {
     syncFromMongo();
   }, [syncFromMongo]);
 
-  // Close location popover on outside click
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (locationRef.current && !locationRef.current.contains(event.target)) {
-        setLocationPopoverOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   const language = useGameStore((state) => state.language);
 
-  // Match active location from locations collection
   const currentLocation = locations.find(
     (loc) => loc.locationId === player?.location || loc.name === player?.location
   ) || locations[0] || {
@@ -54,13 +41,11 @@ export const GameInterface = () => {
   const currentLocationName = getLocalizedName(currentLocation, language);
   const currentLocationDesc = getLocalizedDesc(currentLocation, language);
 
-  // Determine background image (custom location image or default portBg)
   const currentBg =
     currentLocation && currentLocation.image && currentLocation.image.trim() !== ''
       ? currentLocation.image
       : portBg;
 
-  // Handle toolbar icon click toggling open/closed
   const handleToolbarItemClick = (itemId) => {
     if (activeTab === itemId) {
       setMobileOverlayOpen(!mobileOverlayOpen);
@@ -91,29 +76,23 @@ export const GameInterface = () => {
 
   return (
     <div className={`game-root-wrapper view-mode-${viewMode}`}>
-      {/* Main Game Arena */}
       <div className="game-arena-container">
-        {/* Left Sidebars for Desktop (3 Panels) */}
         <aside className="desktop-side-column left-column">
           <div className="sidebar-slot"><MovePanel /></div>
           <div className="sidebar-slot"><CraftPanel /></div>
           <div className="sidebar-slot"><GatherPanel /></div>
         </aside>
 
-        {/* Center Game Viewport (Port View) */}
         <main className="center-viewport-column">
           <div className="port-viewport-frame">
-            {/* Top HUD */}
             <TopHUD />
 
-            {/* Static Port Background Image Layer */}
             <div className="static-background-layer">
               <img src={currentBg} alt={currentLocationName} className="port-static-img" />
               <div className="port-overlay-gradient"></div>
             </div>
 
-            {/* Mobile Location Info Trigger Button & Popover (Above Left of Bottom Toolbar) */}
-            <div className="mobile-location-wrapper" ref={locationRef}>
+            <div className="mobile-location-wrapper">
               <button
                 type="button"
                 className={`btn-mobile-location-trigger ${locationPopoverOpen ? 'active' : ''}`}
@@ -127,32 +106,22 @@ export const GameInterface = () => {
                 <div className="mobile-location-popover">
                   <div className="location-popover-header">
                     <h3 className="location-popover-title">📍 {currentLocationName}</h3>
-                    <button
-                      type="button"
-                      className="btn-close-popover"
-                      onClick={() => setLocationPopoverOpen(false)}
-                    >
-                      ✖
-                    </button>
                   </div>
                   <p className="location-popover-desc">{currentLocationDesc}</p>
                 </div>
               )}
             </div>
 
-            {/* Mobile / Portrait Sub-Page Content Drawer/Overlay */}
             <div className={`mobile-panel-overlay ${mobileOverlayOpen ? 'open' : 'minimized'}`}>
               <div className="mobile-panel-content">
                 {renderActiveMobilePanel()}
               </div>
             </div>
 
-            {/* Bottom Toolbar (Visible on Mobile / Portrait view) */}
             <BottomToolbar onItemClick={handleToolbarItemClick} isOverlayOpen={mobileOverlayOpen} />
           </div>
         </main>
 
-        {/* Right Sidebars for Desktop (3 Panels) */}
         <aside className="desktop-side-column right-column">
           <div className="sidebar-slot"><InventoryPanel /></div>
           <div className="sidebar-slot"><CreaturesPanel /></div>
