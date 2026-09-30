@@ -2,48 +2,7 @@
 
 ---
 
-## 🏗️ 1. 系統整體架構圖 (System Architecture)
-
-```mermaid
-flowchart TD
-    subgraph Frontend["前端 Front-end (React + Zustand)"]
-        Main["src/main.jsx"] --> App["src/App.jsx"]
-        App --> Views["src/views/\n(LoginView / CharacterCreationView)"]
-        App --> Interface["src/components/PortGameInterface.jsx"]
-        
-        Interface --> HUD["TopHUD.jsx"]
-        Interface --> Toolbar["BottomToolbar.jsx"]
-        Interface --> Panels["src/components/panels/\n(MovePanel, CraftPanel, GatherPanel,\nInventoryPanel, CreaturesPanel, LogPanel)"]
-        
-        Panels --> BasePanel["CollapsiblePanel.jsx"]
-        
-        Views & Interface & Panels --> Store["src/store/useGameStore.js"]
-        Store --> Utils["src/utils/\n(language.js, gameHelpers.js)"]
-        Store --> Constants["src/constants/translations.js"]
-      end
-
-    subgraph Backend["後端 Back-end (Express API Server)"]
-        Server["server/index.js"] --> DBConfig["server/config/db.js"]
-        Server --> APIRouter["server/routes/api.js"]
-        Server --> AuthRouter["server/routes/auth.js"]
-        
-        APIRouter & AuthRouter --> DBHelper["server/utils/dbHelper.js"]
-        APIRouter & AuthRouter --> Models["server/models/\n(Player, Location, Item,\nRecipe, Npc, GameLog)"]
-        Server --> Seeds["server/seeds/\n(seedItems.js, seedLocations.js,\nseedNpcs.js, seedRecipes.js)"]
-    end
-
-    subgraph Database["資料庫 (MongoDB Atlas)"]
-        MongoDB[("AetherImmersion DB")]
-    end
-
-    Store <--"HTTP / REST API (Port 5000)"--> APIRouter & AuthRouter
-    DBConfig --> MongoDB
-    Models --> MongoDB
-```
-
----
-
-## 📁 2. 專案目錄結構 (Directory Structure)
+## 📁 1. 專案目錄結構 (Directory Structure)
 
 ```text
 AetherImmersion/
@@ -95,7 +54,7 @@ AetherImmersion/
 
 ---
 
-## 🧩 3. 前端程式碼功能與關聯說明 (Frontend Architecture)
+## 🧩 2. 前端程式碼功能與關聯說明 (Frontend Architecture)
 
 ### 核心進入點與狀態管理 (Core & Store)
 | 檔案路徑 | 主要功能與職責 | 關聯與調用對象 |
@@ -138,27 +97,19 @@ AetherImmersion/
 
 ---
 
-## ⚙️ 4. 後端程式碼功能與關聯說明 (Backend Architecture)
+## ⚙️ 3. 後端程式碼功能與關聯說明 (Backend Architecture)
 
 ### 進入點與設定 (Entry & Configuration)
 | 檔案路徑 | 主要功能與職責 | 關聯與調用對象 |
 | :--- | :--- | :--- |
-| `server/index.js` | Express 後端主進入點。初始化 CORS 與 JSON 解析中介軟體、連線 MongoDB Atlas、執行數據種子腳本，並啟動 HTTP 伺服器 (Port 5000)。 | 引用 `server/config/db.js`, `server/routes/api.js`, `server/routes/auth.js` 及 `server/seeds/` 下的種子腳本。 |
+| `server/index.js` | Express 後端主進入點。初始化 CORS 與 JSON 解析中介軟體、連線 MongoDB Atlas，並啟動 HTTP 伺服器 (Port 5000)。 | 引用 `server/config/db.js`, `server/routes/api.js`, `server/routes/auth.js`。 |
 | `server/config/db.js` | 管理 Mongoose 與 MongoDB Atlas 的連線生命週期與錯誤監聽。 | 被 `server/index.js` 調用。 |
 | `server/utils/dbHelper.js` | 後端共用 Helper：`isDbConnected()` 判定 DB 狀態；`fetchCollectionData()` 提供統一的 MongoDB / 記憶體備援資料查詢。 | 被 `server/routes/api.js` 與 `server/routes/auth.js` 引用。 |
-
-### 種子資料腳本 (Seed Scripts)
-| 檔案路徑 | 主要功能與職責 |
-| :--- | :--- |
-| `server/seeds/seedItems.js` | 初始化寫入道具資料 (`item001` 小魚, `item002` 烤小魚) 至 MongoDB Atlas。 |
-| `server/seeds/seedLocations.js` | 初始化寫入地點資料 (`AZURE_BAY_PORT`, `AZURE_BAY_MARKET`) 與關聯的 `npcs` 陣列至 MongoDB Atlas。 |
-| `server/seeds/seedNpcs.js` | 初始化寫入 5 位 NPC / 怪物資料 (Seagull, Crab, Jellyfish, Cook, Grocer) 至 MongoDB Atlas。 |
-| `server/seeds/seedRecipes.js` | 初始化寫入合成配方資料 (`recipe001` 燒烤) 至 MongoDB Atlas。 |
 
 ### RESTful API 路由與驗證 (Routes)
 | 檔案路徑 | 主要功能與職責 | 關聯與調用對象 |
 | :--- | :--- | :--- |
-| `server/routes/api.js` | 提供 `/api/health`, `/api/items`, `/api/locations`, `/api/recipes`, `/api/npcs`, `/api/player`, `/api/player/create-character`, `/api/player/gather`, `/api/logs` 端點。支援資料庫連線與離線記憶體備援雙模式。 | 引用所有 Mongoose Models, `server/seeds/` 與 `server/utils/dbHelper.js`。 |
+| `server/routes/api.js` | 提供 `/api/health`, `/api/items`, `/api/locations`, `/api/recipes`, `/api/npcs`, `/api/player`, `/api/player/create-character`, `/api/player/gather`, `/api/logs` 端點。支援資料庫連線與離線記憶體備援雙模式。 | 引用所有 Mongoose Models 與 `server/utils/dbHelper.js`。 |
 | `server/routes/auth.js` | 提供 `/api/auth/google` 與 `/api/auth/logout` 驗證路由。解析 Google Credential JWT Token 並自動同步/建立 Player 資料。 | 引用 `server/models/Player.js` 與 `server/utils/dbHelper.js`。 |
 
 ### 資料模型 (Mongoose Models & Schemas)
@@ -173,7 +124,7 @@ AetherImmersion/
 
 ---
 
-## 🔄 5. 資料流與組件運作互動 (Data Flow Summary)
+## 🔄 4. 資料流與組件運作互動 (Data Flow Summary)
 
 1. **初始化啟動**：
    - 前端掛載時發起 `syncFromMongo()`，並行請求 `/api/health`, `/api/items`, `/api/locations`, `/api/recipes`, `/api/npcs`, `/api/player` 與 `/api/logs`。
@@ -191,7 +142,7 @@ AetherImmersion/
 
 ---
 
-## 🚀 6. 本地開發啟動步驟 (Getting Started)
+## 🚀 5. 本地開發啟動步驟 (Getting Started)
 
 ### 1. 安裝套件
 ```bash
