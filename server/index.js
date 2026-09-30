@@ -2,8 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { connectDB } from './config/db.js';
-import { seedItems } from './seedItems.js';
-import { seedLocations } from './seedLocations.js';
+import { seedItems } from './seeds/seedItems.js';
+import { seedLocations } from './seeds/seedLocations.js';
 import apiRouter from './routes/api.js';
 import authRouter from './routes/auth.js';
 

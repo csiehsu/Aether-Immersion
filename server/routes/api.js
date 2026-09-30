@@ -6,10 +6,10 @@ import { Item } from '../models/Item.js';
 import { Location } from '../models/Location.js';
 import { Recipe } from '../models/Recipe.js';
 import { Npc } from '../models/Npc.js';
-import { initialItems } from '../seedItems.js';
-import { initialLocations } from '../seedLocations.js';
-import { initialRecipes } from '../seedRecipes.js';
-import { initialNpcs } from '../seedNpcs.js';
+import { initialItems } from '../seeds/seedItems.js';
+import { initialLocations } from '../seeds/seedLocations.js';
+import { initialRecipes } from '../seeds/seedRecipes.js';
+import { initialNpcs } from '../seeds/seedNpcs.js';
 import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
 
 const router = express.Router();
