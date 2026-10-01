@@ -19,7 +19,7 @@ const GatherableSchema = new mongoose.Schema(
 const ConnectionSchema = new mongoose.Schema(
   {
     targetLocationId: { type: String, required: true },
-    staminaCost: { type: Number, default: 1 },
+    energyCost: { type: Number, default: 1 },
   },
   { _id: false }
 );

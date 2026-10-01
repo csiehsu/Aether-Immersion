@@ -4,9 +4,9 @@
   --font-primary: 'Outfit', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
 
   /* Colors - High contrast for optimal legibility */
-  --bg-dark: #090c10;
-  --bg-card: rgba(18, 24, 38, 0.85);
-  --bg-card-hover: rgba(26, 35, 54, 0.95);
+  --bg-dark: #08192D;
+  --bg-card: #0F2540;
+  --bg-card-hover: #173860;
   --glass-border: rgba(255, 255, 255, 0.18);
   --glass-border-glow: rgba(0, 229, 255, 0.5);
 

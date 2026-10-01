@@ -4,7 +4,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: radial-gradient(circle at 50% 20%, #151d2a 0%, #080b10 100%);
+  background: #08192D;
 }
 
 .game-root-wrapper {
@@ -550,13 +550,7 @@
 }
 
 .port-overlay-gradient {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(180deg, rgba(8, 12, 20, 0.4) 0%, rgba(8, 12, 20, 0.1) 40%, rgba(8, 12, 20, 0.75) 100%);
-  pointer-events: none;
+  display: none;
 }
 
 /* Mobile Location Info Trigger & Popover (Above Left of Bottom Toolbar) */
@@ -682,7 +676,7 @@
 
 /* Sub-page Panel Component Styling */
 .panel-container {
-  background: var(--bg-card);
+  background: #0F2540;
   backdrop-filter: blur(14px);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
@@ -733,6 +727,171 @@
   margin-bottom: 0;
   border-bottom: none;
   padding-bottom: 0;
+}
+
+.recipes-panel-wrapper,
+.gather-panel-wrapper,
+.inventory-panel-wrapper,
+.creatures-panel-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recipes-horizontal-grid,
+.gather-horizontal-grid,
+.inventory-grid,
+.creatures-horizontal-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empty-gather-notice,
+.empty-inventory-notice {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+.recipe-tile,
+.gather-tile,
+.inventory-item-card,
+.creature-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.recipe-tile:hover,
+.recipe-tile.selected,
+.gather-tile:hover,
+.gather-tile.selected,
+.inventory-item-card:hover,
+.inventory-item-card.selected,
+.creature-tile:hover,
+.creature-tile.selected {
+  background: rgba(0, 229, 255, 0.15);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+.recipe-tile-name,
+.gather-tile-name,
+.item-name,
+.creature-tile-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #ffffff;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.gather-tile-icon,
+.creature-tile-avatar,
+.item-icon-box {
+  font-size: 1.6rem;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.gather-item-img,
+.inventory-item-img,
+.creature-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.gather-item-img-small,
+.inventory-item-img-small {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.recipe-detail-window,
+.gather-detail-window,
+.inventory-detail-window,
+.creature-detail-window {
+  background: #0F2540;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+  animation: locationFadeIn 0.2s ease;
+}
+
+.recipe-detail-header,
+.gather-detail-header,
+.inventory-detail-header,
+.creature-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recipe-detail-actions,
+.gather-detail-actions,
+.creature-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.inventory-detail-desc,
+.creature-detail-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.btn-move,
+.btn-craft,
+.btn-gather,
+.btn-attack,
+.btn-observe,
+.btn-trade,
+.btn-send-dialogue {
+  background: #2E5C6E;
+  border: none;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.btn-move:hover:not(:disabled),
+.btn-craft:hover:not(:disabled),
+.btn-gather:hover:not(:disabled),
+.btn-attack:hover:not(:disabled),
+.btn-observe:hover:not(:disabled),
+.btn-trade:hover:not(:disabled),
+.btn-send-dialogue:hover:not(:disabled) {
+  background: #397086;
+  border: none;
+  box-shadow: none;
 }
 
 /* Move Panel */
@@ -811,74 +970,19 @@
 }
 
 /* Craft Panel */
-.recipes-panel-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.recipes-horizontal-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .recipe-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
   gap: 2px;
-}
-
-.recipe-tile:hover,
-.recipe-tile.selected {
-  background: rgba(0, 229, 255, 0.15);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
 }
 
 .recipe-tile-name {
   font-size: 0.84rem;
-  font-weight: 700;
-  color: #ffffff;
 }
 
 .recipe-tile-level {
   font-size: 0.72rem;
   color: var(--accent-gold);
   font-weight: 700;
-}
-
-.recipe-detail-window {
-  background: rgba(12, 16, 26, 0.95);
-  border: 1px solid var(--accent-cyan);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
-  animation: locationFadeIn 0.2s ease;
-}
-
-.recipe-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.recipe-detail-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #ffffff;
 }
 
 .recipe-detail-body {
@@ -901,128 +1005,9 @@
   color: #ffffff;
 }
 
-.recipe-detail-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 4px;
-}
-
-.btn-craft {
-  background: #2E5C6E;
-  border: none;
-  box-shadow: none;
-  color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 7px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.btn-craft:hover {
-  background: #397086;
-  border: none;
-  box-shadow: none;
-}
-
 /* Gather Panel */
-.gather-panel-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.gather-horizontal-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .gather-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   width: 72px;
-  padding: 8px 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.gather-tile:hover,
-.gather-tile.selected {
-  background: rgba(0, 229, 255, 0.15);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
-}
-
-.gather-tile-icon {
-  font-size: 1.6rem;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.gather-item-img {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-
-.gather-item-img-small {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-}
-
-.gather-tile-name {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #ffffff;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-.gather-detail-window {
-  background: rgba(12, 16, 26, 0.95);
-  border: 1px solid var(--accent-cyan);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
-  animation: locationFadeIn 0.2s ease;
-}
-
-.gather-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.gather-detail-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.gather-detail-icon {
-  font-size: 1.3rem;
-}
-
-.gather-detail-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #ffffff;
 }
 
 .gather-cost {
@@ -1031,121 +1016,15 @@
   font-weight: 700;
 }
 
-.gather-detail-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 2px;
-}
-
-.btn-gather {
-  background: #2E5C6E;
-  border: none;
-  box-shadow: none;
-  color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 7px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.btn-gather:hover {
-  background: #397086;
-  border: none;
-  box-shadow: none;
-}
-
-.empty-gather-notice {
-  padding: 16px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  width: 100%;
-}
-
 /* Inventory Panel */
-.inventory-panel-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.inventory-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  overflow-y: auto;
-  max-height: 280px;
-}
-
 .inventory-item-card {
   position: relative;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 6px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
   width: 64px;
   min-height: 64px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.inventory-item-card:hover,
-.inventory-item-card.selected {
-  background: rgba(0, 229, 255, 0.15);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
 }
 
 .quality-稀有 { border-color: #3b82f6; box-shadow: inset 0 0 10px rgba(59, 130, 246, 0.3); }
 .quality-史詩 { border-color: var(--accent-gold); box-shadow: inset 0 0 10px rgba(255, 193, 7, 0.3); }
-
-.item-icon-box {
-  font-size: 1.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.inventory-item-img {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-
-.inventory-item-img-small {
-  width: 22px;
-  height: 22px;
-  object-fit: contain;
-}
-
-.empty-inventory-notice {
-  padding: 16px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  width: 100%;
-}
-
-.item-name {
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: #ffffff;
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
 
 .item-count {
   position: absolute;
@@ -1156,190 +1035,23 @@
   color: var(--accent-cyan);
 }
 
-.inventory-detail-window {
-  background: rgba(12, 16, 26, 0.95);
-  border: 1px solid var(--accent-cyan);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
-  animation: locationFadeIn 0.2s ease;
-}
-
-.inventory-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.inventory-detail-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.inventory-detail-icon {
-  font-size: 1.3rem;
-}
-
-.inventory-detail-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.inventory-detail-count {
-  font-size: 0.84rem;
-  font-weight: 800;
-  color: var(--accent-cyan);
-}
-
-.inventory-detail-desc {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  line-height: 1.3;
-}
-
 .slot-empty {
   opacity: 0.4;
   border-style: dashed;
 }
+
 .empty-plus {
   font-size: 1.1rem;
   color: var(--text-muted);
 }
 
 /* Creatures Panel */
-.creatures-panel-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.creatures-horizontal-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.creature-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  padding: 8px 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.creature-tile:hover,
-.creature-tile.selected {
-  background: rgba(0, 229, 255, 0.15);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
-}
-
-.creature-tile-avatar {
-  font-size: 1.6rem;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-
-.creature-tile-name {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #ffffff;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-.creature-detail-window {
-  background: rgba(12, 16, 26, 0.95);
-  border: 1px solid var(--accent-cyan);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
-  animation: locationFadeIn 0.2s ease;
-}
-
-.creature-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.creature-detail-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.creature-detail-icon {
-  font-size: 1.3rem;
-}
-
-.creature-detail-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.creature-detail-desc {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  line-height: 1.3;
-}
-
 .creature-detail-stats {
   display: flex;
   gap: 12px;
   font-size: 0.78rem;
   color: var(--text-dim);
   font-weight: 600;
-}
-
-.creature-detail-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 2px;
-}
-
-.btn-attack,
-.btn-observe,
-.btn-trade {
-  background: #2E5C6E;
-  border: none;
-  box-shadow: none;
-  color: #ffffff;
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.btn-attack:hover,
-.btn-observe:hover,
-.btn-trade:hover {
-  transform: none;
-  background: #397086;
-  border: none;
-  box-shadow: none;
 }
 
 /* Log Panel */
@@ -1405,26 +1117,7 @@
   color: #ffffff;
   padding: 8px 10px;
   border-radius: 6px;
-  font-size: 0.82rem; /* Min 13.1px */
-}
-
-.btn-send-dialogue {
-  background: #2E5C6E;
-  color: #ffffff;
-  border: none;
-  box-shadow: none;
-  font-weight: 700;
   font-size: 0.82rem;
-  padding: 0 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-send-dialogue:hover {
-  background: #397086;
-  border: none;
-  box-shadow: none;
 }
 
 /* Mobile Sub-Page Overlay/Drawer */
@@ -1433,7 +1126,7 @@
   bottom: 60px;
   left: 0;
   width: 100%;
-  background: rgba(10, 14, 22, 0.94);
+  background: #0F2540;
   backdrop-filter: blur(16px);
   border-top: 1px solid var(--glass-border-glow);
   z-index: 30;

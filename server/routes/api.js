@@ -97,7 +97,6 @@ router.get('/player', async (req, res) => {
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
-        locationEn: 'Azure Bay Port',
         knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
@@ -153,7 +152,6 @@ router.post('/player/create-character', async (req, res) => {
       energy: maxEnergy,
       maxEnergy,
       location: 'AZURE_BAY_PORT',
-      locationEn: 'Azure Bay Port',
       knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
     };
 

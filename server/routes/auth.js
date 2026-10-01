@@ -102,7 +102,6 @@ router.post('/google', async (req, res) => {
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
-        locationEn: 'Azure Bay Port',
       });
     }
     return res.json({ success: true, source: 'mongodb', user: googleUser, player });

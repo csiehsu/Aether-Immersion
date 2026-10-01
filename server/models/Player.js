@@ -26,7 +26,6 @@ const PlayerSchema = new mongoose.Schema(
     energy: { type: Number, default: 4320 },
     maxEnergy: { type: Number, default: 4320 },
     location: { type: String, default: 'AZURE_BAY_PORT' },
-    locationEn: { type: String, default: 'Azure Bay Port' },
     knownLocations: {
       type: [String],
       default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],

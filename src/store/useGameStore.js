@@ -136,7 +136,6 @@ export const useGameStore = create((set, get) => ({
               energy: dbP?.energy ?? 4320,
               maxEnergy: dbP?.maxEnergy ?? 4320,
               location: dbP?.location || 'AZURE_BAY_PORT',
-              locationEn: dbP?.locationEn || 'Azure Bay Port',
             },
             screenMode: dbP && dbP.isCharacterCreated ? 'game' : 'character_creation',
           }));
@@ -292,7 +291,6 @@ export const useGameStore = create((set, get) => ({
               maxEnergy: dbP.maxEnergy ?? state.player.maxEnergy,
               level: dbP.level ?? 1,
               location: dbP.location || state.player.location,
-              locationEn: dbP.locationEn || state.player.locationEn,
               knownLocations: (dbP.knownLocations && dbP.knownLocations.length > 0)
                 ? dbP.knownLocations
                 : state.player.knownLocations,
@@ -344,24 +342,26 @@ export const useGameStore = create((set, get) => ({
 
   changeLocation: async (targetLocId) => {
     const { locations, player } = get();
-    const targetLoc = locations.find((l) => l.locationId === targetLocId || l.name === targetLocId);
-    const locName = targetLoc ? targetLoc.name : targetLocId;
+    if (!player) return;
 
-    const currentKnown = player.knownLocations || ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'];
-    const updatedKnown = currentKnown.includes(targetLocId)
-      ? currentKnown
-      : [...currentKnown, targetLocId];
+    const currentLoc = locations.find((l) => l.locationId === player.location);
+    const connection = currentLoc?.connections?.find((c) => c.targetLocationId === targetLocId);
+    const cost = connection?.energyCost ?? 1;
+
+    if (player.energy < cost) {
+      get().addLog('系統警告', 'System Warning', '精力不足，無法進行移動！', 'Not enough energy to move!', 'system');
+      return;
+    }
+
+    const newEnergy = player.energy - cost;
 
     set((state) => ({
       player: {
         ...state.player,
         location: targetLocId,
-        locationEn: targetLocId,
-        knownLocations: updatedKnown,
+        energy: newEnergy,
       },
     }));
-
-    get().addLog('系統通知', 'System', `您已移動至【${locName}】。`, `Moved to [${locName}].`, 'system');
 
     try {
       const res = await fetch(`${API_BASE}/player`, {
@@ -369,8 +369,7 @@ export const useGameStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           location: targetLocId,
-          locationEn: targetLocId,
-          knownLocations: updatedKnown,
+          energy: newEnergy,
         }),
       });
       if (!res.ok) {

@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import portBg from '../assets/images/background/Port.png';
 import { useGameStore } from '../store/useGameStore';
 import { getLocalizedName, getLocalizedDesc } from '../utils/language';
 import { TopHUD } from './TopHUD';
@@ -41,10 +40,7 @@ export const GameInterface = () => {
   const currentLocationName = getLocalizedName(currentLocation, language);
   const currentLocationDesc = getLocalizedDesc(currentLocation, language);
 
-  const currentBg =
-    currentLocation && currentLocation.image && currentLocation.image.trim() !== ''
-      ? currentLocation.image
-      : portBg;
+  const currentBg = currentLocation?.image || '';
 
   const handleToolbarItemClick = (itemId) => {
     if (activeTab === itemId) {
@@ -89,7 +85,6 @@ export const GameInterface = () => {
 
             <div className="static-background-layer">
               <img src={currentBg} alt={currentLocationName} className="port-static-img" />
-              <div className="port-overlay-gradient"></div>
             </div>
 
             <div className="mobile-location-wrapper">
