@@ -34,9 +34,7 @@ export const GatherPanel = () => {
             {gatherables.map((spot, idx) => {
               const spotId = spot.itemId || idx;
               const dbItem = items.find((i) => i.itemId === spot.itemId);
-              const spotName = dbItem
-                ? getLocalizedName(dbItem, language)
-                : (language === 'en' ? (spot.nameEn || spot.name || spot.itemId) : (spot.name || spot.itemId));
+              const spotName = dbItem ? getLocalizedName(dbItem, language) : spot.itemId;
               const isSelected = selectedSpotId === spotId;
 
               return (
@@ -49,7 +47,7 @@ export const GatherPanel = () => {
                     {dbItem && dbItem.imageUrl ? (
                       <img src={dbItem.imageUrl} alt={spotName} className="gather-item-img" />
                     ) : (
-                      <span>{spot.icon || '🐟'}</span>
+                      <span>📦</span>
                     )}
                   </div>
                   <span className="gather-tile-name">{spotName}</span>
@@ -61,11 +59,9 @@ export const GatherPanel = () => {
           {selectedSpot && (() => {
             const spot = selectedSpot;
             const dbItem = items.find((i) => i.itemId === spot.itemId);
-            const spotName = dbItem
-              ? getLocalizedName(dbItem, language)
-              : (language === 'en' ? (spot.nameEn || spot.name || spot.itemId) : (spot.name || spot.itemId));
+            const spotName = dbItem ? getLocalizedName(dbItem, language) : spot.itemId;
             const spotYield = spotName;
-            const cost = spot.cost ?? 5;
+            const cost = spot.cost ?? 1;
 
             return (
               <div className="gather-detail-window">
@@ -85,7 +81,7 @@ export const GatherPanel = () => {
                         spotYield,
                         spotYield,
                         cost,
-                        dbItem?.imageUrl ? '🐟' : (spot.icon || '🐟')
+                        '📦'
                       );
                     }}
                   >

@@ -45,7 +45,7 @@ export const InventoryPanel = () => {
                     {imageUrl ? (
                       <img src={imageUrl} alt={itemName} className="inventory-item-img" />
                     ) : (
-                      <span>{item.icon || '🐟'}</span>
+                      <span>📦</span>
                     )}
                   </div>
                   <div className="item-info">

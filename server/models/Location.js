@@ -3,15 +3,8 @@ import mongoose from 'mongoose';
 const GatherableSchema = new mongoose.Schema(
   {
     itemId: { type: String, required: true },
-    name: { type: String },
-    nameEn: { type: String },
-    icon: { type: String, default: '🌿' },
-    yield: { type: String },
-    yieldEn: { type: String },
-    cost: { type: Number, default: 5 },
+    cost: { type: Number, default: 1 },
     chance: { type: Number, default: 100 },
-    desc: { type: String, default: '' },
-    descEn: { type: String, default: '' },
   },
   { _id: false }
 );
