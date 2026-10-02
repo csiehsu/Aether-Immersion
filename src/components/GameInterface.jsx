@@ -7,7 +7,6 @@ import { MovePanel } from './panels/MovePanel';
 import { CraftPanel } from './panels/CraftPanel';
 import { GatherPanel } from './panels/GatherPanel';
 import { InventoryPanel } from './panels/InventoryPanel';
-import { CreaturesPanel } from './panels/CreaturesPanel';
 import { LogPanel } from './panels/LogPanel';
 
 export const GameInterface = () => {
@@ -61,8 +60,6 @@ export const GameInterface = () => {
         return <GatherPanel />;
       case 'inventory':
         return <InventoryPanel />;
-      case 'creatures':
-        return <CreaturesPanel />;
       case 'log':
         return <LogPanel />;
       default:
@@ -119,7 +116,6 @@ export const GameInterface = () => {
 
         <aside className="desktop-side-column right-column">
           <div className="sidebar-slot"><InventoryPanel /></div>
-          <div className="sidebar-slot"><CreaturesPanel /></div>
           <div className="sidebar-slot"><LogPanel /></div>
         </aside>
       </div>

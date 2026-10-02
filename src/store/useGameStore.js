@@ -51,7 +51,8 @@ export const useGameStore = create((set, get) => ({
   // Creatures / Monsters Data (Strictly empty, loaded live from MongoDB Atlas)
   creatures: [],
 
-  // Logs (Strictly empty, loaded live from MongoDB Atlas)
+  buildings: [],
+
   logs: [],
 
   // --- Character Creation Action ---
@@ -251,6 +252,23 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  fetchBuildings: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/buildings`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set({ buildings: result.data });
+        }
+      } else {
+        set({ mongoStatus: 'offline', isDisconnected: true });
+      }
+    } catch (err) {
+      console.error('[Fetch Buildings Error]', err);
+      set({ mongoStatus: 'offline', isDisconnected: true });
+    }
+  },
+
   syncFromMongo: async () => {
     try {
       const status = await get().checkMongoStatus();
@@ -263,6 +281,7 @@ export const useGameStore = create((set, get) => ({
       await get().fetchLocations();
       await get().fetchRecipes();
       await get().fetchNpcs();
+      await get().fetchBuildings();
 
       const res = await fetch(`${API_BASE}/player`);
       if (!res.ok) {

@@ -4,9 +4,8 @@ import { useGameStore } from '../store/useGameStore';
 export const toolbarItems = [
   { id: 'move', label: '移動', icon: '🧭' },
   { id: 'craft', label: '製作', icon: '🔨' },
-  { id: 'gather', label: '採集', icon: '🌿' },
+  { id: 'gather', label: '區域資源', icon: '🌿' },
   { id: 'inventory', label: '背包', icon: '🎒' },
-  { id: 'creatures', label: '生物', icon: '🐾' },
   { id: 'log', label: '對話紀錄', icon: '📜' },
 ];
 

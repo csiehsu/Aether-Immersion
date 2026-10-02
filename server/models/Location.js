@@ -17,6 +17,14 @@ const ConnectionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const LocationBuildingSchema = new mongoose.Schema(
+  {
+    buildingId: { type: String, required: true },
+    lifespan: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const LocationSchema = new mongoose.Schema(
   {
     locationId: { type: String, required: true, unique: true },
@@ -27,6 +35,7 @@ const LocationSchema = new mongoose.Schema(
     image: { type: String, default: '' },
     gatherables: [GatherableSchema],
     connections: [ConnectionSchema],
+    buildings: [LocationBuildingSchema],
     npcs: [{ type: String }],
     hasEvent: { type: Boolean, default: false },
   },

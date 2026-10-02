@@ -741,7 +741,8 @@
 .recipes-horizontal-grid,
 .gather-horizontal-grid,
 .inventory-grid,
-.creatures-horizontal-grid {
+.creatures-horizontal-grid,
+.buildings-horizontal-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -759,7 +760,8 @@
 .recipe-tile,
 .gather-tile,
 .inventory-item-card,
-.creature-tile {
+.creature-tile,
+.building-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1006,7 +1008,8 @@
 }
 
 /* Gather Panel */
-.gather-tile {
+.gather-tile,
+.creature-tile {
   width: 72px;
 }
 

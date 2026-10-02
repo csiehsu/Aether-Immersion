@@ -6,10 +6,12 @@ import { Item } from '../models/Item.js';
 import { Location } from '../models/Location.js';
 import { Recipe } from '../models/Recipe.js';
 import { Npc } from '../models/Npc.js';
+import { Building } from '../models/Building.js';
 import { initialItems } from '../seeds/seedItems.js';
 import { initialLocations } from '../seeds/seedLocations.js';
 import { initialRecipes } from '../seeds/seedRecipes.js';
 import { initialNpcs } from '../seeds/seedNpcs.js';
+import { initialBuildings } from '../seeds/seedBuildings.js';
 import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
 
 const router = express.Router();
@@ -73,6 +75,17 @@ router.get('/npcs', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('[API Error] GET /api/npcs:', err);
+    res.status(503).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/buildings
+router.get('/buildings', async (req, res) => {
+  try {
+    const result = await fetchCollectionData(Building, initialBuildings);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API Error] GET /api/buildings:', err);
     res.status(503).json({ success: false, error: err.message });
   }
 });
