@@ -291,9 +291,7 @@ export const useGameStore = create((set, get) => ({
               maxEnergy: dbP.maxEnergy ?? state.player.maxEnergy,
               level: dbP.level ?? 1,
               location: dbP.location || state.player.location,
-              knownLocations: (dbP.knownLocations && dbP.knownLocations.length > 0)
-                ? dbP.knownLocations
-                : state.player.knownLocations,
+              knownLocations: dbP.knownLocations || state.player?.knownLocations || [],
             },
             user: dbP.isLoggedIn
               ? { isLoggedIn: true, name: dbP.name, email: dbP.email, pictureUrl: dbP.pictureUrl }

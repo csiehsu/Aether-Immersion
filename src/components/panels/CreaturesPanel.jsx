@@ -15,7 +15,7 @@ export const CreaturesPanel = () => {
   const [selectedNpcId, setSelectedNpcId] = useState(null);
 
   const currentLocation = locations.find(
-    (loc) => loc.locationId === player.location || loc.name === player.location
+    (loc) => loc.locationId === player?.location
   );
   const locationNpcIds = currentLocation?.npcs || [];
 

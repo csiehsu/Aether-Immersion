@@ -10,16 +10,27 @@ export const MovePanel = () => {
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
-  const knownList = player.knownLocations || ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'];
-  const knownLocationsList = locations.filter(
-    (loc) => knownList.includes(loc.locationId) || knownList.includes(loc.name)
+  const currentLocation = locations.find(
+    (l) => l.locationId === player?.location
   );
+  const connectedIds = (currentLocation?.connections || []).map((c) => c.targetLocationId);
+
+  const knownList = player?.knownLocations || [];
+  const availableLocations = locations.filter((loc) => {
+    const isCurrent = loc.locationId === player?.location;
+    if (isCurrent) return true;
+
+    const isKnown = knownList.includes(loc.locationId);
+    const isAdjacent = connectedIds.includes(loc.locationId);
+
+    return isKnown && isAdjacent;
+  });
 
   return (
     <CollapsiblePanel title={t.moveTitle} className="move-panel">
       <div className="location-list">
-        {knownLocationsList.map((loc) => {
-          const isCurrent = player.location === loc.locationId || player.location === loc.name;
+        {availableLocations.map((loc) => {
+          const isCurrent = player?.location === loc.locationId;
 
           return (
             <div key={loc.locationId} className={`location-card ${isCurrent ? 'current' : ''}`}>

@@ -28,7 +28,7 @@ export const GameInterface = () => {
   const language = useGameStore((state) => state.language);
 
   const currentLocation = locations.find(
-    (loc) => loc.locationId === player?.location || loc.name === player?.location
+    (loc) => loc.locationId === player?.location
   ) || locations[0] || {
     name: '',
     nameEn: '',
