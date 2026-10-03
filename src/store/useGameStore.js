@@ -440,7 +440,217 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
-  performCraft: (recipeName, recipeNameEn) => {
+  performCraft: async (recipe, selectedMaterials = {}) => {
+    const { player, inventory, items, locations, buildings } = get();
+    if (!player || !recipe) return false;
+
+    const currentLocation = locations.find((l) => l.locationId === player.location);
+    const locBuildingList = currentLocation?.buildings || [];
+    const locBuildingTypes = locBuildingList.map((b) => {
+      const dbB = buildings.find((item) => item.buildingId === b.buildingId);
+      return dbB ? dbB.type : b.buildingId;
+    });
+
+    const invToolTypes = inventory.flatMap((inv) => {
+      const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
+      if (!dbI || !dbI.type) return [];
+      return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
+    });
+
+    const reqTools = recipe.requiredToolTypes || [];
+    const hasTools = reqTools.every(
+      (t) => locBuildingTypes.includes(t) || invToolTypes.includes(t)
+    );
+
+    if (!hasTools) {
+      get().addLog(
+        '製作系統',
+        'Craft System',
+        `合成失敗！缺少所需工具。`,
+        `Craft failed! Missing required tools.`,
+        'system'
+      );
+      return false;
+    }
+
+    const reqItems = recipe.requiredItems || [];
+    let updatedInv = inventory.map((item) => ({ ...item }));
+
+    for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
+      const req = reqItems[reqIdx];
+      const selectedId = selectedMaterials[reqIdx];
+
+      if (!selectedId) {
+        get().addLog(
+          '製作系統',
+          'Craft System',
+          `合成失敗！請先選擇材料選項。`,
+          `Craft failed! Please select material options first.`,
+          'system'
+        );
+        return false;
+      }
+
+      const invIndex = updatedInv.findIndex(
+        (i) => (i.id || i.itemId) === selectedId
+      );
+
+      if (invIndex < 0) {
+        get().addLog(
+          '製作系統',
+          'Craft System',
+          `合成失敗！找不到所選材料。`,
+          `Craft failed! Selected material not found.`,
+          'system'
+        );
+        return false;
+      }
+
+      const invItem = updatedInv[invIndex];
+      const dbI = items.find((i) => i.itemId === invItem.itemId || i.name === invItem.name);
+      const types = dbI && dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+
+      if (!types.includes(req.type)) {
+        get().addLog(
+          '製作系統',
+          'Craft System',
+          `合成失敗！所選材料類型不符。`,
+          `Craft failed! Selected material type mismatch.`,
+          'system'
+        );
+        return false;
+      }
+
+      const curCount = invItem.count || 1;
+      if (curCount < req.quantity) {
+        get().addLog(
+          '製作系統',
+          'Craft System',
+          `合成失敗！所選材料數量不足（需 ≥${req.quantity}）。`,
+          `Craft failed! Selected material count insufficient (req >= ${req.quantity}).`,
+          'system'
+        );
+        return false;
+      }
+
+      if (curCount === req.quantity) {
+        updatedInv[invIndex] = { ...invItem, count: 0 };
+      } else {
+        updatedInv[invIndex] = { ...invItem, count: curCount - req.quantity };
+      }
+    }
+
+    updatedInv = updatedInv.filter((i) => i.count > 0);
+
+    let calculatedDurability = -1;
+    const firstSelId = selectedMaterials[0];
+    if (firstSelId) {
+      const selectedMatInv = inventory.find((i) => (i.id || i.itemId) === firstSelId);
+      if (selectedMatInv) {
+        const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId || i.name === selectedMatInv.name);
+        const matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
+          ? selectedMatInv.durability
+          : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
+
+        if (recipe.durabilityFormula && matDurability > 0) {
+          try {
+            const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);
+            calculatedDurability = computeFn({ durability: matDurability });
+          } catch (err) {
+            console.error('[Durability Formula Error]', err);
+          }
+        }
+      }
+    }
+
+    const outputItems = recipe.outputItems || [];
+    for (const out of outputItems) {
+      const outItemId = out.itemId || recipe.recipeId;
+      const dbOut = items.find(
+        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
+      );
+      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+      const outName = dbOut ? dbOut.name : recipe.name;
+      const outNameEn = dbOut ? dbOut.nameEn : (recipe.nameEn || recipe.name);
+      const addQty = out.quantity || 1;
+
+      const existingMatchIndex = updatedInv.findIndex((inv) => {
+        const matchId = inv.itemId || (items.find((i) => i.name === inv.name)?.itemId);
+        if (matchId !== finalItemId && inv.name !== outName) {
+          return false;
+        }
+
+        const oldDurability = inv.durability !== undefined && inv.durability > 0 ? inv.durability : -1;
+        const newDurability = calculatedDurability > 0 ? calculatedDurability : -1;
+
+        if (oldDurability <= 0 && newDurability <= 0) {
+          return true;
+        }
+
+        if (oldDurability > 0 && newDurability > 0) {
+          const minAllowed = oldDurability * 0.9;
+          const maxAllowed = oldDurability * 1.1;
+          return newDurability >= minAllowed && newDurability <= maxAllowed;
+        }
+
+        return false;
+      });
+
+      if (existingMatchIndex >= 0) {
+        const existingItem = updatedInv[existingMatchIndex];
+        const oldCount = existingItem.count || 1;
+        const newTotalCount = oldCount + addQty;
+        const oldDurability = existingItem.durability !== undefined && existingItem.durability > 0 ? existingItem.durability : -1;
+
+        const updatedItem = {
+          ...existingItem,
+          count: newTotalCount,
+        };
+
+        if (oldDurability > 0 && calculatedDurability > 0) {
+          const weightedDurability = Math.round(
+            (oldDurability * oldCount + calculatedDurability * addQty) / newTotalCount
+          );
+          updatedItem.durability = weightedDurability;
+        } else if (calculatedDurability > 0) {
+          updatedItem.durability = calculatedDurability;
+        }
+
+        updatedInv[existingMatchIndex] = updatedItem;
+      } else {
+        const newItem = {
+          id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+          itemId: finalItemId,
+          name: outName,
+          nameEn: outNameEn,
+          count: addQty,
+          quality: '普通',
+        };
+
+        if (calculatedDurability > 0) {
+          newItem.durability = calculatedDurability;
+        }
+
+        updatedInv.push(newItem);
+      }
+    }
+
+    set({ inventory: updatedInv });
+
+    const recipeName = recipe.name;
+    const recipeNameEn = recipe.nameEn || recipe.name;
     get().addLog('製作系統', 'Craft System', `成功合成了道具 [${recipeName}]！`, `Successfully crafted [${recipeNameEn}]!`, 'event');
+
+    try {
+      await fetch(`${API_BASE}/player`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inventory: updatedInv }),
+      });
+    } catch (err) {
+      console.error('[Craft Sync Error]', err);
+    }
+
+    return true;
   },
 }));

@@ -63,7 +63,9 @@ export const InventoryPanel = () => {
             );
             const itemName = dbItem ? getLocalizedName(dbItem, language) : getLocalizedName(selectedItem, language);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : getLocalizedDesc(selectedItem, language);
-            const imageUrl = dbItem?.imageUrl;
+            const durabilityVal = selectedItem.durability !== undefined && selectedItem.durability !== null && selectedItem.durability > 0
+              ? selectedItem.durability
+              : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
 
             return (
               <div className="inventory-detail-window">
@@ -73,6 +75,11 @@ export const InventoryPanel = () => {
                   <p className="inventory-detail-desc text-muted">
                     {language === 'en' ? 'No description available.' : '暫無道具說明。'}
                   </p>
+                )}
+                {durabilityVal !== null && (
+                  <div style={{ fontSize: '0.78rem', color: '#34d399', fontWeight: 600, marginTop: '4px' }}>
+                    <span>{language === 'en' ? 'Durability' : '耐久度'}: {durabilityVal}</span>
+                  </div>
                 )}
               </div>
             );

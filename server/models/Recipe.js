@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 
 const ItemRequirementSchema = new mongoose.Schema(
   {
-    type: { type: String, required: true },
+    type: { type: String, required: false },
+    itemId: { type: String, required: false },
     quantity: { type: Number, default: 1 },
   },
   { _id: false }
@@ -16,7 +17,7 @@ const RecipeSchema = new mongoose.Schema(
     outputItems: [ItemRequirementSchema],
     requiredItems: [ItemRequirementSchema],
     requiredToolTypes: [{ type: String }],
-    icon: { type: String, default: '🔥' },
+    durabilityFormula: { type: String, default: '' },
   },
   { timestamps: true }
 );

@@ -896,6 +896,61 @@
   box-shadow: none;
 }
 
+.recipe-tile.disabled {
+  opacity: 0.65;
+}
+
+.recipe-tile-name.disabled {
+  color: #94a3b8;
+}
+
+.btn-craft:disabled {
+  background: #334155 !important;
+  color: #64748b !important;
+  cursor: not-allowed !important;
+  opacity: 0.6;
+  box-shadow: none !important;
+}
+
+.material-options-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.btn-material-option {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-main);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.btn-material-option:hover {
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.4);
+}
+
+.btn-material-option.selected {
+  background: rgba(0, 229, 255, 0.25);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+  font-weight: 700;
+}
+
+.no-material-notice {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Move Panel */
 .location-list {
   display: flex;

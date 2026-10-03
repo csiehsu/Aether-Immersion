@@ -24,7 +24,7 @@ const ItemSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     descriptionEn: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
-    type: { type: String, default: '' },
+    type: [{ type: String }],
     durability: { type: Number, default: -1 },
     weight: { type: Number, default: 1 },
     smell: { type: SmellSchema, default: () => ({}) },
