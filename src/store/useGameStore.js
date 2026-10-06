@@ -53,32 +53,57 @@ export const useGameStore = create((set, get) => ({
 
   buildings: [],
 
+  battleSkills: [],
+
   logs: [],
 
-  // --- Character Creation Action ---
+  isBattling: false,
+
   createCharacter: async (name, str, spd, dex) => {
+    const strength = typeof str === 'object' ? str.strength : str;
+    const speed = typeof str === 'object' ? str.speed : spd;
+    const dexerity = typeof str === 'object' ? str.dexerity : dex;
+
     try {
       const res = await fetch(`${API_BASE}/player/create-character`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, str, spd, dex }),
+        body: JSON.stringify({
+          name,
+          stats: {
+            strength,
+            speed,
+            dexerity,
+          },
+        }),
       });
 
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
           const dbP = result.data;
+          const dbStats = dbP.stats || {};
+          const stats = {
+            strength: dbStats.strength ?? dbP.str ?? str ?? 1,
+            speed: dbStats.speed ?? dbP.spd ?? spd ?? 1,
+            dexerity: dbStats.dexerity ?? dbP.dex ?? dex ?? 1,
+            maxHp: dbStats.maxHp ?? dbP.maxHp ?? 100,
+            defense: dbStats.defense ?? 0,
+          };
+
           set((state) => ({
             player: {
               ...state.player,
               name: dbP.name,
-              str: dbP.str,
-              spd: dbP.spd,
-              dex: dbP.dex,
+              stats,
+              skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+              str: stats.strength,
+              spd: stats.speed,
+              dex: stats.dexerity,
+              maxHp: stats.maxHp,
               level: 1,
               isCharacterCreated: true,
               hp: dbP.hp,
-              maxHp: dbP.maxHp,
               energy: dbP.energy,
               maxEnergy: dbP.maxEnergy,
             },
@@ -88,8 +113,8 @@ export const useGameStore = create((set, get) => ({
           get().addLog(
             '創角系統',
             'Character System',
-            `角色【${dbP.name}】建立成功！能力值：力量 ${dbP.str}, 速度 ${dbP.spd}, 精巧 ${dbP.dex}。`,
-            `Character [${dbP.name}] created! Stats: STR ${dbP.str}, SPD ${dbP.spd}, DEX ${dbP.dex}.`,
+            `角色【${dbP.name}】建立成功！能力值：力量 ${stats.strength}, 速度 ${stats.speed}, 精巧 ${stats.dexerity}。`,
+            `Character [${dbP.name}] created! Stats: STR ${stats.strength}, SPD ${stats.speed}, DEX ${stats.dexerity}.`,
             'system'
           );
           return true;
@@ -102,7 +127,6 @@ export const useGameStore = create((set, get) => ({
     return false;
   },
 
-  // --- Google Auth Methods ---
   loginWithGoogle: async (credential) => {
     try {
       const res = await fetch(`${API_BASE}/auth/google`, {
@@ -116,6 +140,14 @@ export const useGameStore = create((set, get) => ({
         if (result.success && result.user) {
           const gUser = result.user;
           const dbP = result.player;
+          const dbStats = dbP?.stats || {};
+          const stats = {
+            strength: dbStats.strength ?? dbP?.str ?? 1,
+            speed: dbStats.speed ?? dbP?.spd ?? 1,
+            dexerity: dbStats.dexerity ?? dbP?.dex ?? 1,
+            maxHp: dbStats.maxHp ?? dbP?.maxHp ?? 100,
+            defense: dbStats.defense ?? 0,
+          };
 
           set((state) => ({
             user: {
@@ -128,12 +160,14 @@ export const useGameStore = create((set, get) => ({
               ...state.player,
               name: dbP?.name || gUser.name,
               isCharacterCreated: dbP ? dbP.isCharacterCreated : false,
-              str: dbP?.str ?? 1,
-              spd: dbP?.spd ?? 1,
-              dex: dbP?.dex ?? 1,
+              stats,
+              skills: dbP?.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+              str: stats.strength,
+              spd: stats.speed,
+              dex: stats.dexerity,
+              maxHp: stats.maxHp,
               level: dbP?.level ?? 1,
               hp: dbP?.hp ?? 100,
-              maxHp: dbP?.maxHp ?? 100,
               energy: dbP?.energy ?? 4320,
               maxEnergy: dbP?.maxEnergy ?? 4320,
               location: dbP?.location || 'AZURE_BAY_PORT',
@@ -156,7 +190,6 @@ export const useGameStore = create((set, get) => ({
     try {
       await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
     } catch {
-      // Silent catch
     }
 
     set({
@@ -167,7 +200,6 @@ export const useGameStore = create((set, get) => ({
     get().addLog('系統驗證', 'Auth System', '已成功登出 Google 帳號。', 'Logged out of Google account.', 'system');
   },
 
-  // --- MongoDB Sync Methods ---
   checkMongoStatus: async () => {
     try {
       const res = await fetch(`${API_BASE}/health`);
@@ -269,6 +301,23 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  fetchBattleSkills: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/battle-skills`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set({ battleSkills: result.data });
+        }
+      } else {
+        set({ mongoStatus: 'offline', isDisconnected: true });
+      }
+    } catch (err) {
+      console.error('[Fetch Battle Skills Error]', err);
+      set({ mongoStatus: 'offline', isDisconnected: true });
+    }
+  },
+
   syncFromMongo: async () => {
     try {
       const status = await get().checkMongoStatus();
@@ -282,6 +331,7 @@ export const useGameStore = create((set, get) => ({
       await get().fetchRecipes();
       await get().fetchNpcs();
       await get().fetchBuildings();
+      await get().fetchBattleSkills();
 
       const res = await fetch(`${API_BASE}/player`);
       if (!res.ok) {
@@ -291,6 +341,15 @@ export const useGameStore = create((set, get) => ({
       const result = await res.json();
       if (result.success && result.data) {
         const dbP = result.data;
+        const dbStats = dbP.stats || {};
+        const stats = {
+          strength: dbStats.strength ?? dbP.str ?? 1,
+          speed: dbStats.speed ?? dbP.spd ?? 1,
+          dexerity: dbStats.dexerity ?? dbP.dex ?? 1,
+          maxHp: dbStats.maxHp ?? dbP.maxHp ?? 100,
+          defense: dbStats.defense ?? 0,
+        };
+
         set((state) => {
           const isCreated = dbP.isCharacterCreated || false;
           const nextScreen = !dbP.isLoggedIn ? 'login' : !isCreated ? 'character_creation' : 'game';
@@ -299,17 +358,19 @@ export const useGameStore = create((set, get) => ({
             isDisconnected: false,
             player: {
               ...state.player,
-              name: dbP.name || state.player.name,
+              name: dbP.name || state.player?.name || '冒險者',
               isCharacterCreated: isCreated,
-              str: dbP.str ?? state.player.str,
-              spd: dbP.spd ?? state.player.spd,
-              dex: dbP.dex ?? state.player.dex,
-              hp: dbP.hp ?? state.player.hp,
-              maxHp: dbP.maxHp ?? state.player.maxHp,
-              energy: dbP.energy ?? state.player.energy,
-              maxEnergy: dbP.maxEnergy ?? state.player.maxEnergy,
+              stats,
+              skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+              str: stats.strength,
+              spd: stats.speed,
+              dex: stats.dexerity,
+              maxHp: stats.maxHp,
+              hp: dbP.hp ?? state.player?.hp ?? stats.maxHp ?? 100,
+              energy: dbP.energy ?? state.player?.energy ?? 4320,
+              maxEnergy: dbP.maxEnergy ?? state.player?.maxEnergy ?? 4320,
               level: dbP.level ?? 1,
-              location: dbP.location || state.player.location,
+              location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
               knownLocations: dbP.knownLocations || state.player?.knownLocations || [],
             },
             user: dbP.isLoggedIn
@@ -337,7 +398,7 @@ export const useGameStore = create((set, get) => ({
   // Actions
   addLog: async (sender, senderEn, text, textEn, type = 'dialogue') => {
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-    const newEntry = { id: Date.now(), time: timeStr, sender, senderEn, text, textEn, type };
+    const newEntry = { id: `${Date.now()}-${Math.random()}`, time: timeStr, sender, senderEn, text, textEn, type };
 
     set((state) => ({
       logs: [newEntry, ...state.logs],
@@ -744,6 +805,158 @@ export const useGameStore = create((set, get) => ({
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });
     }
+
+    return true;
+  },
+
+  startBattle: (creature) => {
+    const { player, isBattling } = get();
+    if (!player || isBattling) return false;
+
+    if ((player.hp ?? 0) <= 0) {
+      get().addLog('戰鬥系統', 'Combat System', '體力耗盡，無法進行戰鬥！', 'HP depleted, cannot enter combat!', 'system');
+      return false;
+    }
+
+    const enemyName = creature.name || creature.npcId || '生物';
+    const enemyNameEn = creature.nameEn || creature.name || 'Creature';
+
+    const pSpeed = player.stats?.speed ?? player.spd ?? 1;
+    const pStr = player.stats?.strength ?? player.str ?? 1;
+    const pDef = player.stats?.defense ?? 0;
+
+    const eSpeed = creature.stats?.speed ?? 1;
+    const eStr = creature.stats?.strength ?? creature.stats?.str ?? 5;
+    const eDef = creature.stats?.defense ?? 0;
+    const eMaxHp = creature.stats?.maxHP ?? creature.hp ?? 50;
+
+    let pCurrentHp = player.hp;
+    let eCurrentHp = eMaxHp;
+
+    const playerGoesFirst = pSpeed >= eSpeed;
+    let currentTurn = playerGoesFirst ? 'player' : 'enemy';
+
+    set({ isBattling: true });
+
+    const firstAttackerStr = playerGoesFirst
+      ? `我方先手 (我方 SPD: ${pSpeed}, 敵方 SPD: ${eSpeed})`
+      : `敵方先手 (敵方 SPD: ${eSpeed}, 我方 SPD: ${pSpeed})`;
+    const firstAttackerStrEn = playerGoesFirst
+      ? `Player goes first (Player SPD: ${pSpeed}, Enemy SPD: ${eSpeed})`
+      : `Enemy goes first (Enemy SPD: ${eSpeed}, Player SPD: ${pSpeed})`;
+
+    get().addLog(
+      '戰鬥系統',
+      'Combat System',
+      `對【${enemyName}】發起戰鬥！${firstAttackerStr}`,
+      `Initiated combat against [${enemyNameEn}]! ${firstAttackerStrEn}`,
+      'event'
+    );
+
+    const intervalId = setInterval(async () => {
+      const state = get();
+      if (!state.isBattling) {
+        clearInterval(intervalId);
+        return;
+      }
+
+      if (currentTurn === 'player') {
+        const hitRate = Math.min(1, Math.max(0.1, (pSpeed - eSpeed) / eSpeed * 0.5 + 0.5));
+        const isHit = Math.random() <= hitRate;
+        const damage = isHit ? Math.max(1, pStr - eDef) : 0;
+
+        if (isHit) {
+          eCurrentHp = Math.max(0, eCurrentHp - damage);
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${player.name}】使用【普通攻擊】命中【${enemyName}】，造成 ${damage} 點傷害！(敵方剩餘 HP: ${eCurrentHp}/${eMaxHp})`,
+            `[${player.name}] used [Normal Attack] on [${enemyNameEn}] for ${damage} damage! (Enemy HP: ${eCurrentHp}/${eMaxHp})`,
+            'event'
+          );
+        } else {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${player.name}】使用【普通攻擊】攻擊【${enemyName}】，未命中！`,
+            `[${player.name}] used [Normal Attack] on [${enemyNameEn}], missed!`,
+            'event'
+          );
+        }
+
+        if (eCurrentHp <= 0) {
+          clearInterval(intervalId);
+          set({ isBattling: false });
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `戰鬥結束！【${player.name}】擊敗了【${enemyName}】，獲得勝利！(剩餘 HP: ${pCurrentHp})`,
+            `Combat ended! [${player.name}] defeated [${enemyNameEn}]! (Remaining HP: ${pCurrentHp})`,
+            'event'
+          );
+          try {
+            await fetch(`${API_BASE}/player`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hp: pCurrentHp }),
+            });
+          } catch (err) {
+            console.error('[Battle HP Sync Error]', err);
+          }
+          return;
+        }
+
+        currentTurn = 'enemy';
+      } else {
+        const hitRate = Math.min(1, Math.max(0.1, (eSpeed - pSpeed) / pSpeed * 0.5 + 0.5));
+        const isHit = Math.random() <= hitRate;
+        const damage = isHit ? Math.max(1, eStr - pDef) : 0;
+
+        if (isHit) {
+          pCurrentHp = Math.max(0, pCurrentHp - damage);
+          set((s) => ({ player: { ...s.player, hp: pCurrentHp } }));
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${enemyName}】使用【普通攻擊】命中【${player.name}】，造成 ${damage} 點傷害！(玩家剩餘 HP: ${pCurrentHp})`,
+            `[${enemyNameEn}] used [Normal Attack] on [${player.name}] for ${damage} damage! (Player HP: ${pCurrentHp})`,
+            'event'
+          );
+        } else {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${enemyName}】使用【普通攻擊】攻擊【${player.name}】，未命中！`,
+            `[${enemyNameEn}] used [Normal Attack] on [${player.name}], missed!`,
+            'event'
+          );
+        }
+
+        if (pCurrentHp <= 0) {
+          clearInterval(intervalId);
+          set({ isBattling: false });
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `戰鬥結束！【${player.name}】不敵【${enemyName}】，戰敗了...`,
+            `Combat ended! [${player.name}] was defeated by [${enemyNameEn}]...`,
+            'event'
+          );
+          try {
+            await fetch(`${API_BASE}/player`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hp: pCurrentHp }),
+            });
+          } catch (err) {
+            console.error('[Battle HP Sync Error]', err);
+          }
+          return;
+        }
+
+        currentTurn = 'player';
+      }
+    }, 1000);
 
     return true;
   },

@@ -23,7 +23,7 @@ const DropSchema = new mongoose.Schema(
 
 const SkillSchema = new mongoose.Schema(
   {
-    skillId: { type: String, default: 'normal_attack' },
+    skillId: { type: String, default: 'NORMAL_ATTACK' },
     level: { type: Number, default: 1 },
   },
   { _id: false }

@@ -10,6 +10,25 @@ const InventoryItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const StatsSchema = new mongoose.Schema(
+  {
+    strength: { type: Number, default: 1 },
+    speed: { type: Number, default: 1 },
+    dexerity: { type: Number, default: 1 },
+    maxHp: { type: Number, default: 100 },
+    defense: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const PlayerSkillSchema = new mongoose.Schema(
+  {
+    skillId: { type: String, default: 'NORMAL_ATTACK' },
+    level: { type: Number, default: 1 },
+  },
+  { _id: false }
+);
+
 const PlayerSchema = new mongoose.Schema(
   {
     name: { type: String, default: '冒險者' },
@@ -18,12 +37,16 @@ const PlayerSchema = new mongoose.Schema(
     pictureUrl: { type: String, default: null },
     isLoggedIn: { type: Boolean, default: false },
     isCharacterCreated: { type: Boolean, default: false },
-    str: { type: Number, default: 1 },
-    spd: { type: Number, default: 1 },
-    dex: { type: Number, default: 1 },
+    stats: {
+      type: StatsSchema,
+      default: () => ({ strength: 1, speed: 1, dexerity: 1, maxHp: 100, defense: 0 }),
+    },
+    skills: {
+      type: [PlayerSkillSchema],
+      default: () => [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+    },
     level: { type: Number, default: 1 },
     hp: { type: Number, default: 100 },
-    maxHp: { type: Number, default: 100 },
     energy: { type: Number, default: 4320 },
     maxEnergy: { type: Number, default: 4320 },
     location: { type: String, default: 'AZURE_BAY_PORT' },

@@ -7,11 +7,13 @@ import { Location } from '../models/Location.js';
 import { Recipe } from '../models/Recipe.js';
 import { Npc } from '../models/Npc.js';
 import { Building } from '../models/Building.js';
+import { BattleSkill } from '../models/BattleSkill.js';
 import { initialItems } from '../seeds/seedItems.js';
 import { initialLocations } from '../seeds/seedLocations.js';
 import { initialRecipes } from '../seeds/seedRecipes.js';
 import { initialNpcs } from '../seeds/seedNpcs.js';
 import { initialBuildings } from '../seeds/seedBuildings.js';
+import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
 import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
 
 const router = express.Router();
@@ -90,6 +92,17 @@ router.get('/buildings', async (req, res) => {
   }
 });
 
+// GET /api/battle-skills
+router.get('/battle-skills', async (req, res) => {
+  try {
+    const result = await fetchCollectionData(BattleSkill, initialBattleSkills);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API Error] GET /api/battle-skills:', err);
+    res.status(503).json({ success: false, error: err.message });
+  }
+});
+
 const sanitizeInventoryItems = (inventory) => {
   if (!Array.isArray(inventory)) return [];
   const clean = [];
@@ -108,6 +121,22 @@ const sanitizeInventoryItems = (inventory) => {
   return clean;
 };
 
+const formatPlayerResponse = (playerDoc) => {
+  const p = playerDoc.toObject ? playerDoc.toObject() : { ...playerDoc };
+  const rawStats = p.stats || {};
+  p.stats = {
+    strength: rawStats.strength ?? p.str ?? 1,
+    speed: rawStats.speed ?? p.spd ?? 1,
+    dexerity: rawStats.dexerity ?? p.dex ?? 1,
+    maxHp: rawStats.maxHp ?? p.maxHp ?? 100,
+    defense: rawStats.defense ?? 0,
+  };
+  p.skills = Array.isArray(p.skills) && p.skills.length > 0
+    ? p.skills
+    : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
+  return p;
+};
+
 // GET /api/player
 router.get('/player', async (req, res) => {
   try {
@@ -119,12 +148,10 @@ router.get('/player', async (req, res) => {
       player = await Player.create({
         name: '冒險者',
         isCharacterCreated: false,
-        str: 1,
-        spd: 1,
-        dex: 1,
+        stats: { strength: 1, speed: 1, dexerity: 1, maxHp: 100, defense: 0 },
+        skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
         level: 1,
         hp: 100,
-        maxHp: 100,
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
@@ -132,7 +159,7 @@ router.get('/player', async (req, res) => {
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
     }
-    return res.json({ success: true, source: 'mongodb', data: player });
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
     console.error('[API Error] GET /api/player:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -146,11 +173,11 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法建立角色！' });
     }
 
-    const { name, str, spd, dex } = req.body;
+    const { name, strength, speed, dexerity, str, spd, dex, stats } = req.body;
 
-    const nStr = Number(str);
-    const nSpd = Number(spd);
-    const nDex = Number(dex);
+    const nStr = Number(stats?.strength ?? strength ?? str);
+    const nSpd = Number(stats?.speed ?? speed ?? spd);
+    const nDex = Number(stats?.dexerity ?? dexerity ?? dex);
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: '請輸入角色名稱！' });
@@ -168,18 +195,22 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(400).json({ success: false, message: '三項能力值總和必須精確等於 30！' });
     }
 
-    const maxHp = 100 + (nStr - 1) * 10;
+    const maxHp = 100;
     const maxEnergy = 4320;
 
     const characterData = {
       name: name.trim(),
-      str: nStr,
-      spd: nSpd,
-      dex: nDex,
+      stats: {
+        strength: nStr,
+        speed: nSpd,
+        dexerity: nDex,
+        maxHp,
+        defense: 0,
+      },
+      skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
       level: 1,
       isCharacterCreated: true,
       hp: maxHp,
-      maxHp,
       energy: maxEnergy,
       maxEnergy,
       location: 'AZURE_BAY_PORT',
@@ -193,7 +224,7 @@ router.post('/player/create-character', async (req, res) => {
     } else {
       player = await Player.create(characterData);
     }
-    return res.json({ success: true, source: 'mongodb', data: player });
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
     console.error('[API Error] POST /api/player/create-character:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -212,10 +243,17 @@ router.put('/player', async (req, res) => {
     }
     let player = await Player.findOne();
     if (player) {
+      if (updateData.stats) {
+        player.stats = {
+          ...player.stats?.toObject(),
+          ...updateData.stats,
+        };
+        delete updateData.stats;
+      }
       Object.assign(player, updateData);
       await player.save();
     }
-    return res.json({ success: true, source: 'mongodb', data: player });
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
     console.error('[API Error] PUT /api/player:', err);
     res.status(500).json({ success: false, error: err.message });

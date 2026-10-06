@@ -12,6 +12,8 @@ export const GatherPanel = () => {
   const buildings = useGameStore((state) => state.buildings || []);
   const player = useGameStore((state) => state.player || {});
   const performGather = useGameStore((state) => state.performGather);
+  const startBattle = useGameStore((state) => state.startBattle);
+  const isBattling = useGameStore((state) => state.isBattling);
   const addLog = useGameStore((state) => state.addLog);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
@@ -31,16 +33,6 @@ export const GatherPanel = () => {
 
   const gatherables = currentLocation?.gatherables || [];
   const locationBuildings = currentLocation?.buildings || [];
-
-  const handleAttack = (cName, cNameEn) => {
-    addLog(
-      '戰鬥系統',
-      'Combat System',
-      `發起攻擊！對【${cName}】展開對決！`,
-      `Initiated attack against [${cNameEn}]!`,
-      'event'
-    );
-  };
 
   const handleTrade = (cName, cNameEn) => {
     addLog(
@@ -139,12 +131,15 @@ export const GatherPanel = () => {
                         <button
                           type="button"
                           className="btn-attack"
+                          disabled={isBattling}
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleAttack(c.name, c.nameEn || c.name);
+                            startBattle(c);
                           }}
                         >
-                          {t.attackBtn || (language === 'en' ? 'Attack' : '攻擊')}
+                          {isBattling
+                            ? (language === 'en' ? 'Battling...' : '戰鬥中...')
+                            : (t.attackBtn || (language === 'en' ? 'Attack' : '攻擊'))}
                         </button>
                       )}
                     </div>

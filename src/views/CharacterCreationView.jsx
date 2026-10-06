@@ -8,33 +8,33 @@ export const CharacterCreationView = () => {
 
   const [charName, setCharName] = useState('');
 
-  const [str, setStr] = useState(1);
-  const [spd, setSpd] = useState(1);
-  const [dex, setDex] = useState(1);
+  const [strength, setStrength] = useState(1);
+  const [speed, setSpeed] = useState(1);
+  const [dexerity, setDexerity] = useState(1);
 
   const TOTAL_POINTS = 30;
-  const currentSum = str + spd + dex;
+  const currentSum = strength + speed + dexerity;
   const remainingPoints = TOTAL_POINTS - currentSum;
 
   const [errorMsg, setErrorMsg] = useState('');
 
   const handleStatChange = (stat, delta) => {
     setErrorMsg('');
-    if (stat === 'str') {
-      const next = str + delta;
+    if (stat === 'strength') {
+      const next = strength + delta;
       if (next < 1) return;
       if (delta > 0 && remainingPoints <= 0) return;
-      setStr(next);
-    } else if (stat === 'spd') {
-      const next = spd + delta;
+      setStrength(next);
+    } else if (stat === 'speed') {
+      const next = speed + delta;
       if (next < 1) return;
       if (delta > 0 && remainingPoints <= 0) return;
-      setSpd(next);
-    } else if (stat === 'dex') {
-      const next = dex + delta;
+      setSpeed(next);
+    } else if (stat === 'dexerity') {
+      const next = dexerity + delta;
       if (next < 1) return;
       if (delta > 0 && remainingPoints <= 0) return;
-      setDex(next);
+      setDexerity(next);
     }
   };
 
@@ -47,7 +47,7 @@ export const CharacterCreationView = () => {
       return;
     }
 
-    if (str < 1 || spd < 1 || dex < 1) {
+    if (strength < 1 || speed < 1 || dexerity < 1) {
       setErrorMsg(language === 'en' ? 'Minimum value for each attribute is 1!' : '每項能力值最低必須為 1！');
       return;
     }
@@ -61,7 +61,7 @@ export const CharacterCreationView = () => {
       return;
     }
 
-    const success = await createCharacter(charName.trim(), str, spd, dex);
+    const success = await createCharacter(charName.trim(), strength, speed, dexerity);
     if (!success) {
       setErrorMsg(language === 'en' ? 'Failed to create character. Please try again.' : '建立角色失敗，請重試！');
     }
@@ -69,13 +69,11 @@ export const CharacterCreationView = () => {
 
   return (
     <div className="char-creation-container">
-      {/* Background image */}
       <div className="login-bg-layer">
         <img src={portBg} alt="Port Background" className="login-bg-img" />
         <div className="login-bg-overlay"></div>
       </div>
 
-      {/* Creation Card */}
       <div className="char-creation-card">
         <div className="char-header">
           <h2 className="char-title">{language === 'en' ? 'Create Character' : '創立角色'}</h2>
@@ -87,7 +85,6 @@ export const CharacterCreationView = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="char-form">
-          {/* Character Name Input */}
           <div className="form-group">
             <label className="form-label">{language === 'en' ? 'Character Name' : '角色名稱'}</label>
             <input
@@ -101,7 +98,6 @@ export const CharacterCreationView = () => {
             />
           </div>
 
-          {/* Remaining Points Display */}
           <div className="points-counter-box">
             <span className="points-label">{language === 'en' ? 'Remaining Points:' : '剩餘可分配點數:'}</span>
             <span className={`points-val ${remainingPoints === 0 ? 'valid' : 'invalid'}`}>
@@ -109,7 +105,6 @@ export const CharacterCreationView = () => {
             </span>
           </div>
 
-          {/* Stat Allocation Controls */}
           <div className="stats-allocation-grid">
             <div className="stat-control-row">
               <div className="stat-info">
@@ -122,11 +117,11 @@ export const CharacterCreationView = () => {
                 </div>
               </div>
               <div className="stepper-wrap">
-                <button type="button" className="btn-step" onClick={() => handleStatChange('str', -1)} disabled={str <= 1}>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('strength', -1)} disabled={strength <= 1}>
                   -
                 </button>
-                <span className="stat-value">{str}</span>
-                <button type="button" className="btn-step" onClick={() => handleStatChange('str', 1)} disabled={remainingPoints <= 0}>
+                <span className="stat-value">{strength}</span>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('strength', 1)} disabled={remainingPoints <= 0}>
                   +
                 </button>
               </div>
@@ -143,11 +138,11 @@ export const CharacterCreationView = () => {
                 </div>
               </div>
               <div className="stepper-wrap">
-                <button type="button" className="btn-step" onClick={() => handleStatChange('spd', -1)} disabled={spd <= 1}>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('speed', -1)} disabled={speed <= 1}>
                   -
                 </button>
-                <span className="stat-value">{spd}</span>
-                <button type="button" className="btn-step" onClick={() => handleStatChange('spd', 1)} disabled={remainingPoints <= 0}>
+                <span className="stat-value">{speed}</span>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('speed', 1)} disabled={remainingPoints <= 0}>
                   +
                 </button>
               </div>
@@ -166,24 +161,23 @@ export const CharacterCreationView = () => {
                 </div>
               </div>
               <div className="stepper-wrap">
-                <button type="button" className="btn-step" onClick={() => handleStatChange('dex', -1)} disabled={dex <= 1}>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('dexerity', -1)} disabled={dexerity <= 1}>
                   -
                 </button>
-                <span className="stat-value">{dex}</span>
-                <button type="button" className="btn-step" onClick={() => handleStatChange('dex', 1)} disabled={remainingPoints <= 0}>
+                <span className="stat-value">{dexerity}</span>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('dexerity', 1)} disabled={remainingPoints <= 0}>
                   +
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Validation Error Message */}
           {errorMsg && <div className="char-error-alert">{errorMsg}</div>}
 
           <button
             type="submit"
             className="btn-create-submit"
-            disabled={remainingPoints !== 0 || !charName.trim() || str < 1 || spd < 1 || dex < 1}
+            disabled={remainingPoints !== 0 || !charName.trim() || strength < 1 || speed < 1 || dexerity < 1}
           >
             {language === 'en' ? 'Start' : '開始'}
           </button>

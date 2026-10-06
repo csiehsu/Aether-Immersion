@@ -9,6 +9,8 @@ export const CreaturesPanel = () => {
   const locations = useGameStore((state) => state.locations || []);
   const player = useGameStore((state) => state.player || {});
   const addLog = useGameStore((state) => state.addLog);
+  const startBattle = useGameStore((state) => state.startBattle);
+  const isBattling = useGameStore((state) => state.isBattling);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
@@ -26,16 +28,6 @@ export const CreaturesPanel = () => {
   const selectedCreature = visibleCreatures.find(
     (c) => (c.npcId || c.id) === selectedNpcId
   );
-
-  const handleAttack = (cName, cNameEn) => {
-    addLog(
-      '戰鬥系統',
-      'Combat System',
-      `發起攻擊！對【${cName}】展開對決！`,
-      `Initiated attack against [${cNameEn}]!`,
-      'event'
-    );
-  };
 
   const handleTrade = (cName, cNameEn) => {
     addLog(
@@ -119,12 +111,15 @@ export const CreaturesPanel = () => {
                     <button
                       type="button"
                       className="btn-attack"
+                      disabled={isBattling}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleAttack(c.name, c.nameEn || c.name);
+                        startBattle(c);
                       }}
                     >
-                      {t.attackBtn || (language === 'en' ? 'Attack' : '攻擊')}
+                      {isBattling
+                        ? (language === 'en' ? 'Battling...' : '戰鬥中...')
+                        : (t.attackBtn || (language === 'en' ? 'Attack' : '攻擊'))}
                     </button>
                   )}
                 </div>
