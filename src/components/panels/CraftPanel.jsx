@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
+import { QuantitySelector } from '../common/QuantitySelector';
 
 export const CraftPanel = () => {
   const recipes = useGameStore((state) => state.recipes || []);
@@ -16,6 +17,7 @@ export const CraftPanel = () => {
 
   const [selectedRecipeId, setSelectedRecipeId] = useState(null);
   const [selectedMaterials, setSelectedMaterials] = useState({});
+  const [craftQty, setCraftQty] = useState(1);
 
   const currentLocation = locations.find((l) => l.locationId === player?.location);
 
@@ -62,16 +64,18 @@ export const CraftPanel = () => {
     if (selectedRecipeId === recId) {
       setSelectedRecipeId(null);
       setSelectedMaterials({});
+      setCraftQty(1);
     } else {
       setSelectedRecipeId(recId);
       setSelectedMaterials({});
+      setCraftQty(1);
     }
   };
 
   const handleStartCraft = async (rec, e, isReady) => {
     e.stopPropagation();
     if (!isReady) return;
-    const success = await performCraft(rec, selectedMaterials);
+    const success = await performCraft(rec, selectedMaterials, craftQty);
     if (success) {
       setSelectedMaterials({});
     }
@@ -126,7 +130,7 @@ export const CraftPanel = () => {
               if (!selId) return false;
               const inv = inventory.find((i) => (i.id || i.itemId) === selId);
               if (!inv) return false;
-              return (inv.count || 1) >= req.quantity;
+              return (inv.count || 1) >= req.quantity * craftQty;
             });
 
             const isReadyToCraft = hasTools && hasSelectedAllMaterials;
@@ -141,17 +145,18 @@ export const CraftPanel = () => {
 
                 <div className="recipe-detail-body">
                   {reqItemsList.map((req, reqIdx) => {
+                    const reqTotal = req.quantity * craftQty;
                     const eligibleItems = inventory.filter((inv) => {
                       const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
                       if (!dbI || !dbI.type) return false;
                       const types = Array.isArray(dbI.type) ? dbI.type : [dbI.type];
-                      return types.includes(req.type) && (inv.count || 1) >= req.quantity;
+                      return types.includes(req.type) && (inv.count || 1) >= reqTotal;
                     });
 
                     return (
                       <div className="recipe-detail-row vertical" key={reqIdx} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                         <span className="recipe-detail-label">
-                          {availableMatLabelText} ({req.type} x{req.quantity})：
+                          {availableMatLabelText} ({req.type} x{reqTotal})：
                         </span>
                         <div className="material-options-wrapper">
                           {eligibleItems.length > 0 ? (
@@ -174,15 +179,15 @@ export const CraftPanel = () => {
                                     }));
                                   }}
                                 >
-                                  {itemName} ({inv.count || 1}/{req.quantity})
+                                  {itemName} ({inv.count || 1}/{reqTotal})
                                 </button>
                               );
                             })
                           ) : (
                             <span className="no-material-notice">
                               {language === 'en'
-                                ? `No single item matching ${req.type} (req >= ${req.quantity})`
-                                : `無符合數量 (≥${req.quantity}) 的 ${req.type} 材料`}
+                                ? `No single item matching ${req.type} (req >= ${reqTotal})`
+                                : `無符合數量 (≥${reqTotal}) 的 ${req.type} 材料`}
                             </span>
                           )}
                         </div>
@@ -196,7 +201,8 @@ export const CraftPanel = () => {
                   </div>
                 </div>
 
-                <div className="recipe-detail-actions">
+                <div className="recipe-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                  <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} />
                   <button
                     type="button"
                     className="btn-craft"

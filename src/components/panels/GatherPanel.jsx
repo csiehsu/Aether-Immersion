@@ -3,6 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { getNpcIcon } from '../../utils/gameHelpers';
+import { QuantitySelector } from '../common/QuantitySelector';
 
 export const GatherPanel = () => {
   const locations = useGameStore((state) => state.locations || []);
@@ -17,6 +18,7 @@ export const GatherPanel = () => {
 
   const [selectedType, setSelectedType] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [gatherQty, setGatherQty] = useState(1);
 
   const currentLocation = locations.find(
     (loc) => loc.locationId === player?.location
@@ -54,9 +56,11 @@ export const GatherPanel = () => {
     if (selectedType === type && selectedId === id) {
       setSelectedType(null);
       setSelectedId(null);
+      setGatherQty(1);
     } else {
       setSelectedType(type);
       setSelectedId(id);
+      setGatherQty(1);
     }
   };
 
@@ -184,12 +188,14 @@ export const GatherPanel = () => {
                 const dbItem = items.find((i) => i.itemId === spot.itemId);
                 const spotName = dbItem ? getLocalizedName(dbItem, language) : spot.itemId;
                 const spotYield = spotName;
-                const cost = spot.cost ?? 1;
+                const unitCost = spot.cost ?? 1;
+                const totalCost = unitCost * gatherQty;
 
                 return (
                   <div className="gather-detail-window">
-                    <div className="gather-detail-header">
-                      <span className="gather-cost">{t.costEnergy}: -{cost}</span>
+                    <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      <span className="gather-cost">{t.costEnergy}: -{totalCost}</span>
+                      <QuantitySelector value={gatherQty} onChange={setGatherQty} min={1} />
                     </div>
 
                     <div className="gather-detail-actions">
@@ -203,8 +209,9 @@ export const GatherPanel = () => {
                             spotName,
                             spotYield,
                             spotYield,
-                            cost,
-                            '📦'
+                            unitCost,
+                            '📦',
+                            gatherQty
                           );
                         }}
                       >

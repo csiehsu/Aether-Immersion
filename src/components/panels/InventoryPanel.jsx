@@ -2,14 +2,27 @@ import React, { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
+import { QuantitySelector } from '../common/QuantitySelector';
 
 export const InventoryPanel = () => {
   const inventory = useGameStore((state) => state.inventory || []);
   const items = useGameStore((state) => state.items || []);
+  const useItem = useGameStore((state) => state.useItem);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
   const [selectedItemId, setSelectedItemId] = useState(null);
+  const [useQty, setUseQty] = useState(1);
+
+  const handleSelectItem = (itemId) => {
+    if (selectedItemId === itemId) {
+      setSelectedItemId(null);
+      setUseQty(1);
+    } else {
+      setSelectedItemId(itemId);
+      setUseQty(1);
+    }
+  };
 
   const selectedItem = inventory.find(
     (item, idx) => (item.id || item.itemId || idx) === selectedItemId
@@ -39,7 +52,7 @@ export const InventoryPanel = () => {
                 <div
                   key={itemId}
                   className={`inventory-item-card quality-${quality} ${isSelected ? 'selected' : ''}`}
-                  onClick={() => setSelectedItemId(isSelected ? null : itemId)}
+                  onClick={() => handleSelectItem(itemId)}
                 >
                   <div className="item-icon-box">
                     {imageUrl ? (
@@ -61,11 +74,14 @@ export const InventoryPanel = () => {
             const dbItem = items.find(
               (i) => i.itemId === selectedItem.itemId || i.itemId === selectedItem.id || i.name === selectedItem.name
             );
-            const itemName = dbItem ? getLocalizedName(dbItem, language) : getLocalizedName(selectedItem, language);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : getLocalizedDesc(selectedItem, language);
             const durabilityVal = selectedItem.durability !== undefined && selectedItem.durability !== null && selectedItem.durability > 0
               ? selectedItem.durability
               : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
+
+            const hasNutrition = Boolean(
+              dbItem?.nutrition && (dbItem.nutrition.hp !== 0 || dbItem.nutrition.strength !== 0)
+            );
 
             return (
               <div className="inventory-detail-window">
@@ -79,6 +95,26 @@ export const InventoryPanel = () => {
                 {durabilityVal !== null && (
                   <div style={{ fontSize: '0.78rem', color: '#34d399', fontWeight: 600, marginTop: '4px' }}>
                     <span>{language === 'en' ? 'Durability' : '耐久度'}: {durabilityVal}</span>
+                  </div>
+                )}
+                {hasNutrition && (
+                  <div className="inventory-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                    <QuantitySelector
+                      value={useQty}
+                      onChange={setUseQty}
+                      min={1}
+                      max={selectedItem.count || 1}
+                    />
+                    <button
+                      type="button"
+                      className="btn-use-item"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await useItem(selectedItem.id || selectedItem.itemId, useQty);
+                      }}
+                    >
+                      {t.useBtn || (language === 'en' ? 'Use' : '使用')}
+                    </button>
                   </div>
                 )}
               </div>

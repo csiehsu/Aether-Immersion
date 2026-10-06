@@ -397,15 +397,18 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
-  performGather: async (spotName, spotNameEn, yieldItem, yieldItemEn, cost, icon = '🪵') => {
+  performGather: async (spotName, spotNameEn, yieldItem, yieldItemEn, cost, icon = '🪵', qty = 1) => {
     const { player } = get();
-    if (player.energy < cost) {
+    const addQty = Math.max(1, Number(qty) || 1);
+    const totalCost = cost * addQty;
+
+    if (player.energy < totalCost) {
       get().addLog('系統警告', 'System Warning', '精力不足，無法進行採集！', 'Not enough energy to gather!', 'system');
       return;
     }
 
     set((state) => ({
-      player: { ...state.player, energy: state.player.energy - cost },
+      player: { ...state.player, energy: state.player.energy - totalCost },
     }));
 
     set((state) => {
@@ -413,24 +416,25 @@ export const useGameStore = create((set, get) => ({
       let updatedInv;
       if (existing) {
         updatedInv = state.inventory.map((i) =>
-          i.name === yieldItem ? { ...i, count: i.count + 1 } : i
+          i.name === yieldItem ? { ...i, count: (i.count || 1) + addQty } : i
         );
       } else {
         updatedInv = [
           ...state.inventory,
-          { id: `item_${Date.now()}`, name: yieldItem, nameEn: yieldItemEn, icon, count: 1, quality: '普通' },
+          { id: `item_${Date.now()}`, name: yieldItem, nameEn: yieldItemEn, icon, count: addQty, quality: '普通' },
         ];
       }
       return { inventory: updatedInv };
     });
 
-    get().addLog('採集系統', 'Gather System', `在【${spotName}】成功採集獲得 [${yieldItem}]！(精力 -${cost})`, `Gathered [${yieldItemEn}] at [${spotNameEn}]! (-${cost} Energy)`, 'event');
+    const qtySuffix = addQty > 1 ? ` x${addQty}` : '';
+    get().addLog('採集系統', 'Gather System', `在【${spotName}】成功採集獲得 [${yieldItem}]${qtySuffix}！(精力 -${totalCost})`, `Gathered [${yieldItemEn}]${qtySuffix} at [${spotNameEn}]! (-${totalCost} Energy)`, 'event');
 
     try {
       const res = await fetch(`${API_BASE}/player/gather`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cost, yieldItem, yieldItemEn, icon }),
+        body: JSON.stringify({ cost: totalCost, yieldItem, yieldItemEn, icon, qty: addQty }),
       });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
@@ -440,9 +444,11 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
-  performCraft: async (recipe, selectedMaterials = {}) => {
+  performCraft: async (recipe, selectedMaterials = {}, craftQty = 1) => {
     const { player, inventory, items, locations, buildings } = get();
     if (!player || !recipe) return false;
+
+    const numCraftQty = Math.max(1, Number(craftQty) || 1);
 
     const currentLocation = locations.find((l) => l.locationId === player.location);
     const locBuildingList = currentLocation?.buildings || [];
@@ -478,6 +484,7 @@ export const useGameStore = create((set, get) => ({
 
     for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
       const req = reqItems[reqIdx];
+      const requiredTotalCount = req.quantity * numCraftQty;
       const selectedId = selectedMaterials[reqIdx];
 
       if (!selectedId) {
@@ -522,21 +529,21 @@ export const useGameStore = create((set, get) => ({
       }
 
       const curCount = invItem.count || 1;
-      if (curCount < req.quantity) {
+      if (curCount < requiredTotalCount) {
         get().addLog(
           '製作系統',
           'Craft System',
-          `合成失敗！所選材料數量不足（需 ≥${req.quantity}）。`,
-          `Craft failed! Selected material count insufficient (req >= ${req.quantity}).`,
+          `合成失敗！所選材料數量不足（需 ≥${requiredTotalCount}）。`,
+          `Craft failed! Selected material count insufficient (req >= ${requiredTotalCount}).`,
           'system'
         );
         return false;
       }
 
-      if (curCount === req.quantity) {
+      if (curCount === requiredTotalCount) {
         updatedInv[invIndex] = { ...invItem, count: 0 };
       } else {
-        updatedInv[invIndex] = { ...invItem, count: curCount - req.quantity };
+        updatedInv[invIndex] = { ...invItem, count: curCount - requiredTotalCount };
       }
     }
 
@@ -572,7 +579,7 @@ export const useGameStore = create((set, get) => ({
       const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
       const outName = dbOut ? dbOut.name : recipe.name;
       const outNameEn = dbOut ? dbOut.nameEn : (recipe.nameEn || recipe.name);
-      const addQty = out.quantity || 1;
+      const addQty = (out.quantity || 1) * numCraftQty;
 
       const existingMatchIndex = updatedInv.findIndex((inv) => {
         const matchId = inv.itemId || (items.find((i) => i.name === inv.name)?.itemId);
@@ -639,7 +646,8 @@ export const useGameStore = create((set, get) => ({
 
     const recipeName = recipe.name;
     const recipeNameEn = recipe.nameEn || recipe.name;
-    get().addLog('製作系統', 'Craft System', `成功合成了道具 [${recipeName}]！`, `Successfully crafted [${recipeNameEn}]!`, 'event');
+    const qtySuffix = numCraftQty > 1 ? ` x${numCraftQty}` : '';
+    get().addLog('製作系統', 'Craft System', `成功合成了道具 [${recipeName}]${qtySuffix}！`, `Successfully crafted [${recipeNameEn}]${qtySuffix}!`, 'event');
 
     try {
       await fetch(`${API_BASE}/player`, {
@@ -649,6 +657,94 @@ export const useGameStore = create((set, get) => ({
       });
     } catch (err) {
       console.error('[Craft Sync Error]', err);
+    }
+
+    return true;
+  },
+
+  useItem: async (inventoryItemId, qty = 1) => {
+    const { player, inventory, items } = get();
+    if (!player || !inventoryItemId) return false;
+
+    const invIndex = inventory.findIndex(
+      (i) => (i.id || i.itemId) === inventoryItemId
+    );
+    if (invIndex < 0) return false;
+
+    const invItem = inventory[invIndex];
+    const dbItem = items.find(
+      (i) => i.itemId === invItem.itemId || i.name === invItem.name
+    );
+
+    const availableCount = invItem.count || 1;
+    const useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
+
+    const hpGain = (dbItem?.nutrition?.hp || 0) * useCount;
+    const strGain = (dbItem?.nutrition?.strength || 0) * useCount;
+
+    const currentHp = player.hp ?? 100;
+    const maxHp = player.maxHp ?? 100;
+    const newHp = hpGain !== 0 ? Math.min(maxHp, currentHp + hpGain) : currentHp;
+
+    const currentStr = player.str ?? 1;
+    const newStr = strGain !== 0 ? currentStr + strGain : currentStr;
+
+    let updatedInv = [...inventory];
+    if (availableCount <= useCount) {
+      updatedInv.splice(invIndex, 1);
+    } else {
+      updatedInv[invIndex] = {
+        ...invItem,
+        count: availableCount - useCount,
+      };
+    }
+
+    set((state) => ({
+      player: {
+        ...state.player,
+        hp: newHp,
+        str: newStr,
+      },
+      inventory: updatedInv,
+    }));
+
+    const itemName = dbItem ? dbItem.name : invItem.name;
+    const itemNameEn = dbItem ? dbItem.nameEn : (invItem.nameEn || invItem.name);
+
+    let effectStr = '';
+    let effectStrEn = '';
+    if (hpGain !== 0) {
+      effectStr += ` (回復 HP +${hpGain})`;
+      effectStrEn += ` (+${hpGain} HP)`;
+    }
+    if (strGain !== 0) {
+      effectStr += ` (力量 +${strGain})`;
+      effectStrEn += ` (+${strGain} STR)`;
+    }
+
+    get().addLog(
+      '道具系統',
+      'Item System',
+      `使用了 [${itemName}] x${useCount}${effectStr}。`,
+      `Used [${itemNameEn}] x${useCount}${effectStrEn}.`,
+      'event'
+    );
+
+    try {
+      const res = await fetch(`${API_BASE}/player`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hp: newHp,
+          str: newStr,
+          inventory: updatedInv,
+        }),
+      });
+      if (!res.ok) {
+        set({ mongoStatus: 'offline', isDisconnected: true });
+      }
+    } catch {
+      set({ mongoStatus: 'offline', isDisconnected: true });
     }
 
     return true;

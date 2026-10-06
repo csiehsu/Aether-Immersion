@@ -208,7 +208,8 @@ router.post('/player/gather', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法進行採集！' });
     }
 
-    const { cost = 5, yieldItem = '小魚', yieldItemEn = 'Small Fish', icon = '🐟' } = req.body;
+    const { cost = 5, yieldItem = '小魚', yieldItemEn = 'Small Fish', icon = '🐟', qty = 1 } = req.body;
+    const addQty = Math.max(1, Number(qty) || 1);
 
     let player = await Player.findOne();
     if (!player) {
@@ -223,14 +224,14 @@ router.post('/player/gather', async (req, res) => {
 
     const existingItem = player.inventory.find((i) => i.name === yieldItem);
     if (existingItem) {
-      existingItem.count += 1;
+      existingItem.count += addQty;
     } else {
       player.inventory.push({
         id: `item_${Date.now()}`,
         name: yieldItem,
         nameEn: yieldItemEn,
         icon,
-        count: 1,
+        count: addQty,
         quality: '普通',
       });
     }
