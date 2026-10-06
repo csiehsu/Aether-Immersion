@@ -2,8 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { connectDB } from './config/db.js';
-import { seedItems } from './seeds/seedItems.js';
-import { seedLocations } from './seeds/seedLocations.js';
 import apiRouter from './routes/api.js';
 import authRouter from './routes/auth.js';
 
@@ -25,11 +23,7 @@ app.get('/', (req, res) => {
 
 // Start Server & Connect Database
 const startServer = async () => {
-  const connected = await connectDB();
-  if (connected) {
-    await seedItems();
-    await seedLocations();
-  }
+  await connectDB();
   app.listen(PORT, () => {
     console.log(`[Express Server] API running at http://localhost:${PORT}`);
     console.log(`[Express Server] Health Check at http://localhost:${PORT}/api/health`);
