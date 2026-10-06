@@ -25,7 +25,7 @@ export const InventoryPanel = () => {
   };
 
   const selectedItem = inventory.find(
-    (item, idx) => (item.id || item.itemId || idx) === selectedItemId
+    (item) => item.itemId === selectedItemId
   );
 
   return (
@@ -38,19 +38,16 @@ export const InventoryPanel = () => {
         <div className="inventory-panel-wrapper">
           <div className="inventory-grid">
             {inventory.map((item, idx) => {
-              const itemId = item.id || item.itemId || idx;
-              const dbItem = items.find(
-                (i) => i.itemId === item.itemId || i.itemId === item.id || i.name === item.name
-              );
-
-              const itemName = dbItem ? getLocalizedName(dbItem, language) : getLocalizedName(item, language);
+              const itemId = item.itemId;
+              const dbItem = items.find((i) => i.itemId === item.itemId);
+              const itemName = dbItem ? getLocalizedName(dbItem, language) : item.itemId;
               const imageUrl = dbItem?.imageUrl;
               const quality = item.quality || '普通';
               const isSelected = selectedItemId === itemId;
 
               return (
                 <div
-                  key={itemId}
+                  key={`${itemId}_${idx}`}
                   className={`inventory-item-card quality-${quality} ${isSelected ? 'selected' : ''}`}
                   onClick={() => handleSelectItem(itemId)}
                 >
@@ -71,10 +68,8 @@ export const InventoryPanel = () => {
           </div>
 
           {selectedItem && (() => {
-            const dbItem = items.find(
-              (i) => i.itemId === selectedItem.itemId || i.itemId === selectedItem.id || i.name === selectedItem.name
-            );
-            const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : getLocalizedDesc(selectedItem, language);
+            const dbItem = items.find((i) => i.itemId === selectedItem.itemId);
+            const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : null;
             const durabilityVal = selectedItem.durability !== undefined && selectedItem.durability !== null && selectedItem.durability > 0
               ? selectedItem.durability
               : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
@@ -110,7 +105,7 @@ export const InventoryPanel = () => {
                       className="btn-use-item"
                       onClick={async (e) => {
                         e.stopPropagation();
-                        await useItem(selectedItem.id || selectedItem.itemId, useQty);
+                        await useItem(selectedItem.itemId, useQty);
                       }}
                     >
                       {t.useBtn || (language === 'en' ? 'Use' : '使用')}

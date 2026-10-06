@@ -90,6 +90,24 @@ router.get('/buildings', async (req, res) => {
   }
 });
 
+const sanitizeInventoryItems = (inventory) => {
+  if (!Array.isArray(inventory)) return [];
+  const clean = [];
+  for (const item of inventory) {
+    const raw = item && item.toObject ? item.toObject() : item;
+    if (!raw) continue;
+    const itemId = raw.itemId || raw.id || '';
+    if (!itemId) continue;
+    clean.push({
+      itemId,
+      count: raw.count || 1,
+      durability: raw.durability !== undefined ? raw.durability : -1,
+      quality: raw.quality || '普通',
+    });
+  }
+  return clean;
+};
+
 // GET /api/player
 router.get('/player', async (req, res) => {
   try {
@@ -189,6 +207,9 @@ router.put('/player', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法更新玩家資料！' });
     }
     const updateData = req.body;
+    if (updateData.inventory) {
+      updateData.inventory = sanitizeInventoryItems(updateData.inventory);
+    }
     let player = await Player.findOne();
     if (player) {
       Object.assign(player, updateData);
@@ -208,7 +229,7 @@ router.post('/player/gather', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法進行採集！' });
     }
 
-    const { cost = 5, yieldItem = '小魚', yieldItemEn = 'Small Fish', icon = '🐟', qty = 1 } = req.body;
+    const { cost = 5, itemId, qty = 1 } = req.body;
     const addQty = Math.max(1, Number(qty) || 1);
 
     let player = await Player.findOne();
@@ -221,16 +242,14 @@ router.post('/player/gather', async (req, res) => {
     }
 
     player.energy = Math.max(0, player.energy - cost);
+    player.inventory = sanitizeInventoryItems(player.inventory);
 
-    const existingItem = player.inventory.find((i) => i.name === yieldItem);
+    const existingItem = player.inventory.find((i) => i.itemId === itemId);
     if (existingItem) {
       existingItem.count += addQty;
     } else {
       player.inventory.push({
-        id: `item_${Date.now()}`,
-        name: yieldItem,
-        nameEn: yieldItemEn,
-        icon,
+        itemId,
         count: addQty,
         quality: '普通',
       });

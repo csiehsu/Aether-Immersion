@@ -205,12 +205,8 @@ export const GatherPanel = () => {
                         onClick={(e) => {
                           e.stopPropagation();
                           performGather(
-                            spotName,
-                            spotName,
-                            spotYield,
-                            spotYield,
+                            spot.itemId,
                             unitCost,
-                            '📦',
                             gatherQty
                           );
                         }}

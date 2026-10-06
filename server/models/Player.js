@@ -1,15 +1,14 @@
 import mongoose from 'mongoose';
 
-const InventoryItemSchema = new mongoose.Schema({
-  id: { type: String, required: true },
-  itemId: { type: String, default: '' },
-  name: { type: String, required: true },
-  nameEn: { type: String, default: '' },
-  icon: { type: String, default: '📦' },
-  count: { type: Number, default: 1 },
-  durability: { type: Number, default: -1 },
-  quality: { type: String, default: '普通' },
-});
+const InventoryItemSchema = new mongoose.Schema(
+  {
+    itemId: { type: String, default: '' },
+    count: { type: Number, default: 1 },
+    durability: { type: Number, default: -1 },
+    quality: { type: String, default: '普通' },
+  },
+  { _id: false }
+);
 
 const PlayerSchema = new mongoose.Schema(
   {

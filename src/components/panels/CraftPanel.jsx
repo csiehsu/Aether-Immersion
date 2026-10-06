@@ -32,7 +32,7 @@ export const CraftPanel = () => {
     });
 
     const invToolTypes = inventory.flatMap((inv) => {
-      const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
+      const dbI = items.find((i) => i.itemId === inv.itemId);
       if (!dbI || !dbI.type) return [];
       return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
     });
@@ -48,7 +48,7 @@ export const CraftPanel = () => {
     }
     return rec.requiredItems.every((req) => {
       return inventory.some((inv) => {
-        const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
+        const dbI = items.find((i) => i.itemId === inv.itemId);
         if (!dbI || !dbI.type) return false;
         const types = Array.isArray(dbI.type) ? dbI.type : [dbI.type];
         return types.includes(req.type) && (inv.count || 1) >= req.quantity;
@@ -128,7 +128,7 @@ export const CraftPanel = () => {
             const hasSelectedAllMaterials = reqItemsList.length === 0 || reqItemsList.every((req, reqIdx) => {
               const selId = selectedMaterials[reqIdx];
               if (!selId) return false;
-              const inv = inventory.find((i) => (i.id || i.itemId) === selId);
+              const inv = inventory.find((i) => i.itemId === selId);
               if (!inv) return false;
               return (inv.count || 1) >= req.quantity * craftQty;
             });
@@ -147,7 +147,7 @@ export const CraftPanel = () => {
                   {reqItemsList.map((req, reqIdx) => {
                     const reqTotal = req.quantity * craftQty;
                     const eligibleItems = inventory.filter((inv) => {
-                      const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
+                      const dbI = items.find((i) => i.itemId === inv.itemId);
                       if (!dbI || !dbI.type) return false;
                       const types = Array.isArray(dbI.type) ? dbI.type : [dbI.type];
                       return types.includes(req.type) && (inv.count || 1) >= reqTotal;
@@ -161,9 +161,9 @@ export const CraftPanel = () => {
                         <div className="material-options-wrapper">
                           {eligibleItems.length > 0 ? (
                             eligibleItems.map((inv) => {
-                              const invKey = inv.id || inv.itemId;
-                              const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
-                              const itemName = dbI ? getLocalizedName(dbI, language) : getLocalizedName(inv, language);
+                              const invKey = inv.itemId;
+                              const dbI = items.find((i) => i.itemId === inv.itemId);
+                              const itemName = dbI ? getLocalizedName(dbI, language) : inv.itemId;
                               const isOptionSelected = selectedMaterials[reqIdx] === invKey;
 
                               return (

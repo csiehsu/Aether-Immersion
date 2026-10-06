@@ -397,8 +397,8 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
-  performGather: async (spotName, spotNameEn, yieldItem, yieldItemEn, cost, icon = '🪵', qty = 1) => {
-    const { player } = get();
+  performGather: async (itemId, cost, qty = 1) => {
+    const { player, items } = get();
     const addQty = Math.max(1, Number(qty) || 1);
     const totalCost = cost * addQty;
 
@@ -407,34 +407,38 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
+    const dbItem = items.find((i) => i.itemId === itemId);
+    const spotName = dbItem ? dbItem.name : itemId;
+    const spotNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
+
     set((state) => ({
       player: { ...state.player, energy: state.player.energy - totalCost },
     }));
 
     set((state) => {
-      const existing = state.inventory.find((i) => i.name === yieldItem);
+      const existing = state.inventory.find((i) => i.itemId === itemId);
       let updatedInv;
       if (existing) {
         updatedInv = state.inventory.map((i) =>
-          i.name === yieldItem ? { ...i, count: (i.count || 1) + addQty } : i
+          i.itemId === itemId ? { ...i, count: (i.count || 1) + addQty } : i
         );
       } else {
         updatedInv = [
           ...state.inventory,
-          { id: `item_${Date.now()}`, name: yieldItem, nameEn: yieldItemEn, icon, count: addQty, quality: '普通' },
+          { itemId, count: addQty, quality: '普通' },
         ];
       }
       return { inventory: updatedInv };
     });
 
     const qtySuffix = addQty > 1 ? ` x${addQty}` : '';
-    get().addLog('採集系統', 'Gather System', `在【${spotName}】成功採集獲得 [${yieldItem}]${qtySuffix}！(精力 -${totalCost})`, `Gathered [${yieldItemEn}]${qtySuffix} at [${spotNameEn}]! (-${totalCost} Energy)`, 'event');
+    get().addLog('採集系統', 'Gather System', `在【${spotName}】成功採集獲得 [${spotName}]${qtySuffix}！(精力 -${totalCost})`, `Gathered [${spotNameEn}]${qtySuffix} at [${spotNameEn}]! (-${totalCost} Energy)`, 'event');
 
     try {
       const res = await fetch(`${API_BASE}/player/gather`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cost: totalCost, yieldItem, yieldItemEn, icon, qty: addQty }),
+        body: JSON.stringify({ cost: totalCost, itemId, qty: addQty }),
       });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
@@ -458,7 +462,7 @@ export const useGameStore = create((set, get) => ({
     });
 
     const invToolTypes = inventory.flatMap((inv) => {
-      const dbI = items.find((i) => i.itemId === inv.itemId || i.name === inv.name);
+      const dbI = items.find((i) => i.itemId === inv.itemId);
       if (!dbI || !dbI.type) return [];
       return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
     });
@@ -499,7 +503,7 @@ export const useGameStore = create((set, get) => ({
       }
 
       const invIndex = updatedInv.findIndex(
-        (i) => (i.id || i.itemId) === selectedId
+        (i) => i.itemId === selectedId
       );
 
       if (invIndex < 0) {
@@ -514,7 +518,7 @@ export const useGameStore = create((set, get) => ({
       }
 
       const invItem = updatedInv[invIndex];
-      const dbI = items.find((i) => i.itemId === invItem.itemId || i.name === invItem.name);
+      const dbI = items.find((i) => i.itemId === invItem.itemId);
       const types = dbI && dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
 
       if (!types.includes(req.type)) {
@@ -552,9 +556,9 @@ export const useGameStore = create((set, get) => ({
     let calculatedDurability = -1;
     const firstSelId = selectedMaterials[0];
     if (firstSelId) {
-      const selectedMatInv = inventory.find((i) => (i.id || i.itemId) === firstSelId);
+      const selectedMatInv = inventory.find((i) => i.itemId === firstSelId);
       if (selectedMatInv) {
-        const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId || i.name === selectedMatInv.name);
+        const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId);
         const matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
           ? selectedMatInv.durability
           : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
@@ -577,13 +581,10 @@ export const useGameStore = create((set, get) => ({
         (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
       );
       const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
-      const outName = dbOut ? dbOut.name : recipe.name;
-      const outNameEn = dbOut ? dbOut.nameEn : (recipe.nameEn || recipe.name);
       const addQty = (out.quantity || 1) * numCraftQty;
 
       const existingMatchIndex = updatedInv.findIndex((inv) => {
-        const matchId = inv.itemId || (items.find((i) => i.name === inv.name)?.itemId);
-        if (matchId !== finalItemId && inv.name !== outName) {
+        if (inv.itemId !== finalItemId) {
           return false;
         }
 
@@ -626,10 +627,7 @@ export const useGameStore = create((set, get) => ({
         updatedInv[existingMatchIndex] = updatedItem;
       } else {
         const newItem = {
-          id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
           itemId: finalItemId,
-          name: outName,
-          nameEn: outNameEn,
           count: addQty,
           quality: '普通',
         };
@@ -667,13 +665,13 @@ export const useGameStore = create((set, get) => ({
     if (!player || !inventoryItemId) return false;
 
     const invIndex = inventory.findIndex(
-      (i) => (i.id || i.itemId) === inventoryItemId
+      (i) => i.itemId === inventoryItemId
     );
     if (invIndex < 0) return false;
 
     const invItem = inventory[invIndex];
     const dbItem = items.find(
-      (i) => i.itemId === invItem.itemId || i.name === invItem.name
+      (i) => i.itemId === invItem.itemId
     );
 
     const availableCount = invItem.count || 1;
@@ -708,8 +706,8 @@ export const useGameStore = create((set, get) => ({
       inventory: updatedInv,
     }));
 
-    const itemName = dbItem ? dbItem.name : invItem.name;
-    const itemNameEn = dbItem ? dbItem.nameEn : (invItem.nameEn || invItem.name);
+    const itemName = dbItem ? dbItem.name : invItem.itemId;
+    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId;
 
     let effectStr = '';
     let effectStrEn = '';
