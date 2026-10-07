@@ -894,6 +894,90 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
+  performSell: async (npc, itemId, price, qty = 1) => {
+    const { player, inventory, items } = get();
+    if (!player || !npc || !itemId) return false;
+
+    const sellQty = Math.max(1, Number(qty) || 1);
+    const unitPrice = Math.max(0, Number(price) || 0);
+    const totalGain = unitPrice * sellQty;
+
+    const existingIdx = inventory.findIndex((i) => i.itemId === itemId);
+    if (existingIdx < 0) {
+      get().addLog('系統警告', 'System Warning', '物品不足，無法進行出售！', 'Not enough items to sell!', 'system');
+      return false;
+    }
+
+    const currentOwned = inventory[existingIdx].count || 1;
+    if (currentOwned < sellQty) {
+      get().addLog('系統警告', 'System Warning', '物品數量不足，無法進行出售！', 'Insufficient item count to sell!', 'system');
+      return false;
+    }
+
+    const dbItem = items.find((i) => i.itemId === itemId);
+    const itemName = dbItem ? dbItem.name : itemId;
+    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
+    const npcName = npc.name || npc.npcId;
+    const npcNameEn = npc.nameEn || npc.name || npc.npcId;
+
+    const currentMoney = player.money ?? 0;
+    const newMoney = currentMoney + totalGain;
+
+    let updatedInv = [...inventory];
+    if (currentOwned <= sellQty) {
+      updatedInv.splice(existingIdx, 1);
+    } else {
+      updatedInv[existingIdx] = {
+        ...updatedInv[existingIdx],
+        count: currentOwned - sellQty,
+      };
+    }
+
+    set((state) => ({
+      player: {
+        ...state.player,
+        money: newMoney,
+      },
+      inventory: updatedInv,
+    }));
+
+    get().addLog(
+      '交易系統',
+      'Trade System',
+      `向【${npcName}】出售了 [${itemName}] x${sellQty}！(金錢 +${totalGain})`,
+      `Sold [${itemNameEn}] x${sellQty} to [${npcNameEn}]! (+${totalGain} Money)`,
+      'event'
+    );
+
+    try {
+      const res = await fetch(`${API_BASE}/player`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          money: newMoney,
+          inventory: updatedInv,
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set((state) => ({
+            player: {
+              ...state.player,
+              money: result.data.money ?? newMoney,
+            },
+          }));
+        }
+      } else {
+        set({ mongoStatus: 'offline', isDisconnected: true });
+      }
+    } catch (err) {
+      console.error('[Sell Sync Error]', err);
+    }
+
+    return true;
+  },
+
   startBattle: (creature) => {
     const { player, isBattling } = get();
     if (!player || isBattling) return false;

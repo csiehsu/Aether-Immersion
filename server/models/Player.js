@@ -53,7 +53,7 @@ const PlayerSchema = new mongoose.Schema(
     location: { type: String, default: 'AZURE_BAY_PORT' },
     knownLocations: {
       type: [String],
-      default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
+      default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
     },
     inventory: [InventoryItemSchema],
   },

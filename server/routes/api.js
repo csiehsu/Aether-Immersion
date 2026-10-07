@@ -157,9 +157,12 @@ router.get('/player', async (req, res) => {
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
-        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
+    } else if (player.knownLocations && !player.knownLocations.includes('AZURE_BAY_ROOM')) {
+      player.knownLocations.push('AZURE_BAY_ROOM');
+      await player.save();
     }
     return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
@@ -217,7 +220,7 @@ router.post('/player/create-character', async (req, res) => {
       energy: maxEnergy,
       maxEnergy,
       location: 'AZURE_BAY_PORT',
-      knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
+      knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
     };
 
     let player = await Player.findOne();

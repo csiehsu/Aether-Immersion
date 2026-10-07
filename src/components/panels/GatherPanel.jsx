@@ -11,8 +11,10 @@ export const GatherPanel = () => {
   const items = useGameStore((state) => state.items || []);
   const buildings = useGameStore((state) => state.buildings || []);
   const player = useGameStore((state) => state.player || {});
+  const inventory = useGameStore((state) => state.inventory || []);
   const performGather = useGameStore((state) => state.performGather);
   const performBuy = useGameStore((state) => state.performBuy);
+  const performSell = useGameStore((state) => state.performSell);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
   const addLog = useGameStore((state) => state.addLog);
@@ -23,9 +25,18 @@ export const GatherPanel = () => {
   const [selectedId, setSelectedId] = useState(null);
   const [gatherQty, setGatherQty] = useState(1);
   const [buyQtys, setBuyQtys] = useState({});
+  const [sellQtys, setSellQtys] = useState({});
+  const [tradeTab, setTradeTab] = useState('buy');
 
   const handleBuyQtyChange = (itemId, val) => {
     setBuyQtys((prev) => ({
+      ...prev,
+      [itemId]: Math.max(1, Number(val) || 1),
+    }));
+  };
+
+  const handleSellQtyChange = (itemId, val) => {
+    setSellQtys((prev) => ({
       ...prev,
       [itemId]: Math.max(1, Number(val) || 1),
     }));
@@ -52,6 +63,7 @@ export const GatherPanel = () => {
       setSelectedType(type);
       setSelectedId(id);
       setGatherQty(1);
+      setTradeTab('buy');
     }
   };
 
@@ -105,14 +117,13 @@ export const GatherPanel = () => {
                   <div className="creature-detail-window">
                     {cDesc ? <p className="creature-detail-desc">{cDesc}</p> : null}
 
-                    {isHuman ? (
-                      <div className="npc-goodies-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                        {(!c.goodies || c.goodies.length === 0) ? (
-                          <div style={{ padding: '8px', color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center' }}>
-                            {language === 'en' ? 'No items for sale.' : '此 NPC 暫無販售物品。'}
-                          </div>
-                        ) : (
-                          c.goodies.map((goodie, gIdx) => {
+                    {isHuman ? (() => {
+                      const hasGoodies = Array.isArray(c.goodies) && c.goodies.length > 0;
+                      const hasPurchase = Array.isArray(c.purchase) && c.purchase.length > 0;
+
+                      const renderBuyList = () => (
+                        <div className="npc-goodies-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {c.goodies.map((goodie, gIdx) => {
                             const dbItem = items.find((i) => i.itemId === goodie.itemId);
                             const gName = dbItem ? getLocalizedName(dbItem, language) : goodie.itemId;
                             const currentQty = buyQtys[goodie.itemId] || 1;
@@ -172,10 +183,147 @@ export const GatherPanel = () => {
                                 </div>
                               </div>
                             );
-                          })
-                        )}
-                      </div>
-                    ) : (
+                          })}
+                        </div>
+                      );
+
+                      const renderSellList = () => (
+                        <div className="npc-purchase-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {c.purchase.map((pItem, pIdx) => {
+                            const dbItem = items.find((i) => i.itemId === pItem.itemId);
+                            const pName = dbItem ? getLocalizedName(dbItem, language) : pItem.itemId;
+                            const unitPrice = pItem.price || 0;
+                            const invItem = inventory.find((i) => i.itemId === pItem.itemId);
+                            const ownedQty = invItem ? (invItem.count || 1) : 0;
+                            const currentQty = sellQtys[pItem.itemId] || 1;
+                            const isSellable = ownedQty > 0 && currentQty <= ownedQty;
+
+                            return (
+                              <div
+                                key={pItem.itemId || pIdx}
+                                className="purchase-item-card"
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '6px',
+                                  padding: '8px',
+                                  background: 'rgba(255, 255, 255, 0.05)',
+                                  borderRadius: '6px',
+                                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 'bold' }}>{pName}</span>
+                                  <div style={{ display: 'flex', gap: '12px', fontSize: '0.875rem' }}>
+                                    <span style={{ color: '#fbbf24' }}>
+                                      {language === 'en' ? `Price: ${unitPrice}` : `收購價: ${unitPrice}`}
+                                    </span>
+                                    <span style={{ color: '#94a3b8' }}>
+                                      {language === 'en' ? `Owned: ${ownedQty}` : `持有: ${ownedQty}`}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                  <QuantitySelector
+                                    value={currentQty}
+                                    onChange={(val) => handleSellQtyChange(pItem.itemId, val)}
+                                    min={1}
+                                    max={Math.max(1, ownedQty)}
+                                    disabled={ownedQty === 0}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn-sell"
+                                    disabled={!isSellable}
+                                    style={{
+                                      height: '36px',
+                                      padding: '0 16px',
+                                      background: isSellable ? '#f59e0b' : '#64748b',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: isSellable ? 'pointer' : 'not-allowed',
+                                      fontWeight: 'bold',
+                                      opacity: isSellable ? 1 : 0.6,
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      performSell(c, pItem.itemId, unitPrice, currentQty);
+                                    }}
+                                  >
+                                    {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+
+                      if (hasGoodies && hasPurchase) {
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px' }}>
+                              <button
+                                type="button"
+                                style={{
+                                  flex: 1,
+                                  padding: '6px 12px',
+                                  background: tradeTab === 'buy' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 'bold',
+                                }}
+                                onClick={() => setTradeTab('buy')}
+                              >
+                                {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
+                              </button>
+                              <button
+                                type="button"
+                                style={{
+                                  flex: 1,
+                                  padding: '6px 12px',
+                                  background: tradeTab === 'sell' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 'bold',
+                                }}
+                                onClick={() => setTradeTab('sell')}
+                              >
+                                {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
+                              </button>
+                            </div>
+                            {tradeTab === 'buy' ? renderBuyList() : renderSellList()}
+                          </div>
+                        );
+                      }
+
+                      if (hasGoodies) {
+                        return (
+                          <div style={{ marginTop: '8px' }}>
+                            {renderBuyList()}
+                          </div>
+                        );
+                      }
+
+                      if (hasPurchase) {
+                        return (
+                          <div style={{ marginTop: '8px' }}>
+                            {renderSellList()}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div style={{ padding: '8px', color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center', marginTop: '8px' }}>
+                          {language === 'en' ? 'No items for sale or purchase.' : '此 NPC 暫無販售或收購物品。'}
+                        </div>
+                      );
+                    })() : (
                       <div className="creature-detail-actions" style={{ marginTop: '8px' }}>
                         <button
                           type="button"
