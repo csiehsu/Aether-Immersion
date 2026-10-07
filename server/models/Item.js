@@ -11,7 +11,9 @@ const SmellSchema = new mongoose.Schema(
 const NutritionSchema = new mongoose.Schema(
   {
     strength: { type: Number, default: 0 },
+    speed: { type: Number, default: 0 },
     hp: { type: Number, default: 0 },
+    water: { type: Number, default: 0 },
   },
   { _id: false }
 );

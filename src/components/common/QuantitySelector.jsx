@@ -54,7 +54,7 @@ export const QuantitySelector = ({
         type="button"
         className="btn-qty-step step-large"
         onClick={() => handleAdjust(-stepLarge)}
-        disabled={disabled || current <= min}
+        disabled={disabled || (current - stepLarge) < min}
         title={`-${stepLarge}`}
       >
         -{stepLarge}
@@ -63,7 +63,7 @@ export const QuantitySelector = ({
         type="button"
         className="btn-qty-step step-small"
         onClick={() => handleAdjust(-stepSmall)}
-        disabled={disabled || current <= min}
+        disabled={disabled || (current - stepSmall) < min}
         title={`-${stepSmall}`}
       >
         -{stepSmall}
@@ -82,7 +82,7 @@ export const QuantitySelector = ({
         type="button"
         className="btn-qty-step step-small"
         onClick={() => handleAdjust(stepSmall)}
-        disabled={disabled || current >= max}
+        disabled={disabled || (current + stepSmall) > max}
         title={`+${stepSmall}`}
       >
         +{stepSmall}
@@ -91,7 +91,7 @@ export const QuantitySelector = ({
         type="button"
         className="btn-qty-step step-large"
         onClick={() => handleAdjust(stepLarge)}
-        disabled={disabled || current >= max}
+        disabled={disabled || (current + stepLarge) > max}
         title={`+${stepLarge}`}
       >
         +{stepLarge}

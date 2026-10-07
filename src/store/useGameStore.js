@@ -104,6 +104,7 @@ export const useGameStore = create((set, get) => ({
               level: 1,
               isCharacterCreated: true,
               hp: dbP.hp,
+              money: dbP.money ?? 0,
               energy: dbP.energy,
               maxEnergy: dbP.maxEnergy,
             },
@@ -168,6 +169,7 @@ export const useGameStore = create((set, get) => ({
               maxHp: stats.maxHp,
               level: dbP?.level ?? 1,
               hp: dbP?.hp ?? 100,
+              money: dbP?.money ?? 0,
               energy: dbP?.energy ?? 4320,
               maxEnergy: dbP?.maxEnergy ?? 4320,
               location: dbP?.location || 'AZURE_BAY_PORT',
@@ -367,6 +369,7 @@ export const useGameStore = create((set, get) => ({
               dex: stats.dexerity,
               maxHp: stats.maxHp,
               hp: dbP.hp ?? state.player?.hp ?? stats.maxHp ?? 100,
+              money: dbP.money ?? state.player?.money ?? 0,
               energy: dbP.energy ?? state.player?.energy ?? 4320,
               maxEnergy: dbP.maxEnergy ?? state.player?.maxEnergy ?? 4320,
               level: dbP.level ?? 1,
@@ -804,6 +807,88 @@ export const useGameStore = create((set, get) => ({
       }
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });
+    }
+
+    return true;
+  },
+
+  performBuy: async (npc, itemId, price, qty = 1) => {
+    const { player, inventory, items } = get();
+    if (!player || !npc || !itemId) return false;
+
+    const buyQty = Math.max(1, Number(qty) || 1);
+    const unitPrice = Math.max(0, Number(price) || 0);
+    const totalCost = unitPrice * buyQty;
+
+    const currentMoney = player.money ?? 0;
+    if (currentMoney < totalCost) {
+      get().addLog('系統警告', 'System Warning', '金錢不足，無法進行購買！', 'Not enough money to buy!', 'system');
+      return false;
+    }
+
+    const dbItem = items.find((i) => i.itemId === itemId);
+    const itemName = dbItem ? dbItem.name : itemId;
+    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
+    const npcName = npc.name || npc.npcId;
+    const npcNameEn = npc.nameEn || npc.name || npc.npcId;
+
+    const newMoney = currentMoney - totalCost;
+
+    let updatedInv = [...inventory];
+    const existingIdx = updatedInv.findIndex((i) => i.itemId === itemId);
+    if (existingIdx >= 0) {
+      updatedInv[existingIdx] = {
+        ...updatedInv[existingIdx],
+        count: (updatedInv[existingIdx].count || 1) + buyQty,
+      };
+    } else {
+      updatedInv.push({
+        itemId,
+        count: buyQty,
+        quality: '普通',
+      });
+    }
+
+    set((state) => ({
+      player: {
+        ...state.player,
+        money: newMoney,
+      },
+      inventory: updatedInv,
+    }));
+
+    get().addLog(
+      '交易系統',
+      'Trade System',
+      `向【${npcName}】購買了 [${itemName}] x${buyQty}！(金錢 -${totalCost})`,
+      `Bought [${itemNameEn}] x${buyQty} from [${npcNameEn}]! (-${totalCost} Money)`,
+      'event'
+    );
+
+    try {
+      const res = await fetch(`${API_BASE}/player`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          money: newMoney,
+          inventory: updatedInv,
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set((state) => ({
+            player: {
+              ...state.player,
+              money: result.data.money ?? newMoney,
+            },
+          }));
+        }
+      } else {
+        set({ mongoStatus: 'offline', isDisconnected: true });
+      }
+    } catch (err) {
+      console.error('[Buy Sync Error]', err);
     }
 
     return true;

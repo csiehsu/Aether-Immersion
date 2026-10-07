@@ -134,6 +134,7 @@ const formatPlayerResponse = (playerDoc) => {
   p.skills = Array.isArray(p.skills) && p.skills.length > 0
     ? p.skills
     : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
+  p.money = p.money ?? 0;
   return p;
 };
 
@@ -152,6 +153,7 @@ router.get('/player', async (req, res) => {
         skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
         level: 1,
         hp: 100,
+        money: 0,
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
@@ -211,6 +213,7 @@ router.post('/player/create-character', async (req, res) => {
       level: 1,
       isCharacterCreated: true,
       hp: maxHp,
+      money: 0,
       energy: maxEnergy,
       maxEnergy,
       location: 'AZURE_BAY_PORT',

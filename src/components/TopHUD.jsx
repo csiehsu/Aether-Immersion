@@ -190,6 +190,10 @@ export const TopHUD = () => {
             <div className="bar-fill energy-fill" style={{ width: `${energyPercent}%` }}></div>
           </div>
         </div>
+        <div className="hud-money-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '0.8125rem', fontWeight: 'bold', color: '#fbbf24' }}>
+          <span>💰</span>
+          <span>{player?.money ?? 0}</span>
+        </div>
       </div>
     </header>
   );

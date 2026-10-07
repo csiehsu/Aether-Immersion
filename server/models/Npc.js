@@ -30,6 +30,14 @@ const SkillSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const GoodieSchema = new mongoose.Schema(
+  {
+    itemId: { type: String, default: '' },
+    price: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const NpcSchema = new mongoose.Schema(
   {
     npcId: { type: String, required: true, unique: true },
@@ -43,6 +51,7 @@ const NpcSchema = new mongoose.Schema(
     stats: { type: StatsSchema, default: () => ({}) },
     drops: [DropSchema],
     skills: [SkillSchema],
+    goodies: [GoodieSchema],
   },
   { timestamps: true }
 );

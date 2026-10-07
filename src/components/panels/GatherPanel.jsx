@@ -12,6 +12,7 @@ export const GatherPanel = () => {
   const buildings = useGameStore((state) => state.buildings || []);
   const player = useGameStore((state) => state.player || {});
   const performGather = useGameStore((state) => state.performGather);
+  const performBuy = useGameStore((state) => state.performBuy);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
   const addLog = useGameStore((state) => state.addLog);
@@ -21,6 +22,14 @@ export const GatherPanel = () => {
   const [selectedType, setSelectedType] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [gatherQty, setGatherQty] = useState(1);
+  const [buyQtys, setBuyQtys] = useState({});
+
+  const handleBuyQtyChange = (itemId, val) => {
+    setBuyQtys((prev) => ({
+      ...prev,
+      [itemId]: Math.max(1, Number(val) || 1),
+    }));
+  };
 
   const currentLocation = locations.find(
     (loc) => loc.locationId === player?.location
@@ -33,16 +42,6 @@ export const GatherPanel = () => {
 
   const gatherables = currentLocation?.gatherables || [];
   const locationBuildings = currentLocation?.buildings || [];
-
-  const handleTrade = (cName, cNameEn) => {
-    addLog(
-      '交易系統',
-      'Trade System',
-      `開啟【${cName}】的交易選單。`,
-      `Opened trade menu for [${cNameEn}].`,
-      'dialogue'
-    );
-  };
 
   const toggleSelect = (type, id) => {
     if (selectedType === type && selectedId === id) {
@@ -100,34 +99,84 @@ export const GatherPanel = () => {
                 const cName = getLocalizedName(c, language);
                 const cDesc = getLocalizedDesc(c, language);
                 const rawType = c.typeEn || c.type || 'MONSTER';
-                const cType = language === 'en'
-                  ? rawType
-                  : (rawType === 'MONSTER' ? '怪物' : rawType === 'HUMAN' ? '人類' : rawType);
-                const cHp = c.stats?.maxHP ?? c.hp;
                 const isHuman = rawType === 'HUMAN';
 
                 return (
                   <div className="creature-detail-window">
                     {cDesc ? <p className="creature-detail-desc">{cDesc}</p> : null}
 
-                    <div className="creature-detail-stats">
-                      <span className="creature-type">{t.typeCreature}: {cType}</span>
-                      {cHp ? <span className="creature-hp">{t.creatureHp}: {cHp}</span> : null}
-                    </div>
+                    {isHuman ? (
+                      <div className="npc-goodies-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                        {(!c.goodies || c.goodies.length === 0) ? (
+                          <div style={{ padding: '8px', color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center' }}>
+                            {language === 'en' ? 'No items for sale.' : '此 NPC 暫無販售物品。'}
+                          </div>
+                        ) : (
+                          c.goodies.map((goodie, gIdx) => {
+                            const dbItem = items.find((i) => i.itemId === goodie.itemId);
+                            const gName = dbItem ? getLocalizedName(dbItem, language) : goodie.itemId;
+                            const currentQty = buyQtys[goodie.itemId] || 1;
+                            const unitPrice = goodie.price || 0;
+                            const maxAffordableQty = unitPrice > 0 ? Math.floor((player.money ?? 0) / unitPrice) : Infinity;
+                            const isAffordable = unitPrice === 0 || (currentQty * unitPrice <= (player.money ?? 0));
 
-                    <div className="creature-detail-actions">
-                      {isHuman ? (
-                        <button
-                          type="button"
-                          className="btn-trade"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleTrade(c.name, c.nameEn || c.name);
-                          }}
-                        >
-                          {t.tradeBtn || (language === 'en' ? 'Trade' : '交易')}
-                        </button>
-                      ) : (
+                            return (
+                              <div
+                                key={goodie.itemId || gIdx}
+                                className="goodie-item-card"
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '6px',
+                                  padding: '8px',
+                                  background: 'rgba(255, 255, 255, 0.05)',
+                                  borderRadius: '6px',
+                                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 'bold' }}>{gName}</span>
+                                  <span style={{ color: '#fbbf24', fontSize: '0.875rem' }}>
+                                    {language === 'en' ? `Price: ${unitPrice}` : `單價: ${unitPrice}`}
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                  <QuantitySelector
+                                    value={currentQty}
+                                    onChange={(val) => handleBuyQtyChange(goodie.itemId, val)}
+                                    min={1}
+                                    max={maxAffordableQty}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn-buy"
+                                    disabled={!isAffordable}
+                                    style={{
+                                      height: '36px',
+                                      padding: '0 16px',
+                                      background: isAffordable ? '#10b981' : '#64748b',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: isAffordable ? 'pointer' : 'not-allowed',
+                                      fontWeight: 'bold',
+                                      opacity: isAffordable ? 1 : 0.6,
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      performBuy(c, goodie.itemId, unitPrice, currentQty);
+                                    }}
+                                  >
+                                    {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    ) : (
+                      <div className="creature-detail-actions" style={{ marginTop: '8px' }}>
                         <button
                           type="button"
                           className="btn-attack"
@@ -141,8 +190,8 @@ export const GatherPanel = () => {
                             ? (language === 'en' ? 'Battling...' : '戰鬥中...')
                             : (t.attackBtn || (language === 'en' ? 'Attack' : '攻擊'))}
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}

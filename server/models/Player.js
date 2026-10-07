@@ -47,6 +47,7 @@ const PlayerSchema = new mongoose.Schema(
     },
     level: { type: Number, default: 1 },
     hp: { type: Number, default: 100 },
+    money: { type: Number, default: 0 },
     energy: { type: Number, default: 4320 },
     maxEnergy: { type: Number, default: 4320 },
     location: { type: String, default: 'AZURE_BAY_PORT' },
