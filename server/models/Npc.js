@@ -16,7 +16,8 @@ const StatsSchema = new mongoose.Schema(
 const DropSchema = new mongoose.Schema(
   {
     itemId: { type: String, default: '' },
-    dropRate: { type: Number, default: 0 },
+    min: { type: Number, default: 0 },
+    max: { type: Number, default: 0 },
   },
   { _id: false }
 );

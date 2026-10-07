@@ -886,7 +886,6 @@ export const useGameStore = create((set, get) => ({
 
         if (eCurrentHp <= 0) {
           clearInterval(intervalId);
-          set({ isBattling: false });
           get().addLog(
             '戰鬥系統',
             'Combat System',
@@ -894,14 +893,53 @@ export const useGameStore = create((set, get) => ({
             `Combat ended! [${player.name}] defeated [${enemyNameEn}]! (Remaining HP: ${pCurrentHp})`,
             'event'
           );
+
+          let updatedInv = [...(get().inventory || [])];
+          const drops = creature.drops || [];
+          for (const drop of drops) {
+            const min = Math.max(0, Number(drop.min) || 0);
+            const max = Math.max(min, Number(drop.max) || 0);
+            if (max <= 0 && min <= 0) continue;
+            const dropQty = Math.floor(Math.random() * (max - min + 1)) + min;
+            if (dropQty > 0) {
+              const dbItem = get().items.find((i) => i.itemId === drop.itemId);
+              const itemName = dbItem ? dbItem.name : drop.itemId;
+              const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : drop.itemId;
+
+              const existingIdx = updatedInv.findIndex((i) => i.itemId === drop.itemId);
+              if (existingIdx >= 0) {
+                updatedInv[existingIdx] = {
+                  ...updatedInv[existingIdx],
+                  count: (updatedInv[existingIdx].count || 1) + dropQty,
+                };
+              } else {
+                updatedInv.push({
+                  itemId: drop.itemId,
+                  count: dropQty,
+                  quality: '普通',
+                });
+              }
+
+              get().addLog(
+                '戰鬥系統',
+                'Combat System',
+                `獲得戰利品：[${itemName}] x${dropQty}！`,
+                `Obtained loot: [${itemNameEn}] x${dropQty}!`,
+                'event'
+              );
+            }
+          }
+
+          set({ inventory: updatedInv, isBattling: false });
+
           try {
             await fetch(`${API_BASE}/player`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ hp: pCurrentHp }),
+              body: JSON.stringify({ hp: pCurrentHp, inventory: updatedInv }),
             });
           } catch (err) {
-            console.error('[Battle HP Sync Error]', err);
+            console.error('[Battle Victory Sync Error]', err);
           }
           return;
         }
