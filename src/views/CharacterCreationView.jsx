@@ -7,10 +7,42 @@ export const CharacterCreationView = () => {
   const createCharacter = useGameStore((state) => state.createCharacter);
 
   const [charName, setCharName] = useState('');
+  const [selectedMentor, setSelectedMentor] = useState('Martha');
 
   const [strength, setStrength] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [dexerity, setDexerity] = useState(1);
+
+  const MENTOR_OPTIONS = [
+    {
+      id: 'Martha',
+      name: language === 'en' ? 'Martha' : '瑪莎',
+      role: language === 'en' ? 'Grocer' : '雜貨商人',
+      icon: '🛒',
+      desc: language === 'en' ? 'A grocery merchant with a sharp intuition for market trends.' : '對市場走向敏感的雜貨商人。',
+    },
+    {
+      id: 'Garrick',
+      name: language === 'en' ? 'Garrick' : '加利克',
+      role: language === 'en' ? 'Diner Owner' : '小吃店老闆',
+      icon: '👨‍🍳',
+      desc: language === 'en' ? 'A smooth-talking and well-informed diner owner.' : '處世圓滑、消息靈通的小吃店老闆。',
+    },
+    {
+      id: 'Vance',
+      name: language === 'en' ? 'Vance' : '凡斯',
+      role: language === 'en' ? 'Fisherman' : '漁夫',
+      icon: '🎣',
+      desc: language === 'en' ? 'A seasoned fisherman of few words who lets his skills speak for themselves.' : '老練的漁夫，話不多，靠技術說話。',
+    },
+    {
+      id: 'Corinne',
+      name: language === 'en' ? 'Corinne' : '柯妮',
+      role: language === 'en' ? 'Horse Breeder' : '養馬人',
+      icon: '👩‍🌾',
+      desc: language === 'en' ? 'A gentle and empathetic horse breeder.' : '溫柔又善解人意的養馬人。',
+    },
+  ];
 
   const TOTAL_POINTS = 30;
   const currentSum = strength + speed + dexerity;
@@ -61,7 +93,7 @@ export const CharacterCreationView = () => {
       return;
     }
 
-    const success = await createCharacter(charName.trim(), strength, speed, dexerity);
+    const success = await createCharacter(charName.trim(), strength, speed, dexerity, selectedMentor);
     if (!success) {
       setErrorMsg(language === 'en' ? 'Failed to create character. Please try again.' : '建立角色失敗，請重試！');
     }
@@ -79,8 +111,8 @@ export const CharacterCreationView = () => {
           <h2 className="char-title">{language === 'en' ? 'Create Character' : '創立角色'}</h2>
           <p className="char-subtitle">
             {language === 'en'
-              ? 'Enter character name and allocate 30 attribute points (Min 1 per stat).'
-              : '請輸入角色名稱，並分配 30 點初始能力值（每項最低值為 1）。'}
+              ? 'Enter character name, select your mentor, and allocate 30 attribute points.'
+              : '請輸入角色名稱，選擇師傅並分配 30 點初始能力值。'}
           </p>
         </div>
 
@@ -96,6 +128,68 @@ export const CharacterCreationView = () => {
               maxLength={20}
               required
             />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">{language === 'en' ? 'Select Mentor' : '選擇師傅'}</label>
+
+            <div
+              style={{
+                background: 'rgba(59, 130, 246, 0.12)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '0.82rem',
+                color: '#93c5fd',
+                lineHeight: '1.45',
+              }}
+            >
+              {language === 'en'
+                ? 'Your mentor will determine your starting tool and tutorial quests, but you can freely change professions later. In roleplay, you can freely decide your relationship with your mentor (parent/child, siblings, master/apprentice, etc., except spouse).'
+                : '師傅將決定初始工具與新手教學任務，但日後仍可自由轉換職業。在角色扮演中，你可以自由決定與師傅之間的關係（親子、手足、師徒等等，配偶除外）'}
+            </div>
+
+            <div
+              className="mentor-selection-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '8px',
+                marginTop: '6px',
+              }}
+            >
+              {MENTOR_OPTIONS.map((m) => {
+                const isSelected = selectedMentor === m.id;
+                return (
+                  <div
+                    key={m.id}
+                    className={`mentor-card-tile ${isSelected ? 'selected' : ''}`}
+                    onClick={() => setSelectedMentor(m.id)}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      padding: '10px',
+                      background: isSelected ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                      border: isSelected ? '1px solid #60a5fa' : '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.2rem' }}>{m.icon}</span>
+                      <span style={{ fontWeight: 'bold', fontSize: '0.92rem', color: isSelected ? '#93c5fd' : '#ffffff' }}>
+                        {m.name}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: '#cbd5e1', margin: 0, lineHeight: '1.35' }}>
+                      {m.desc}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="points-counter-box">

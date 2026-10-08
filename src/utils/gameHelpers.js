@@ -6,8 +6,10 @@ const NPC_ICON_MAP = {
   Seagull: '🕊️',
   Crab: '🦀',
   Jellyfish: '🪼',
-  Cook: '👨‍🍳',
-  Grocer: '🛒',
+  Garrick: '👨‍🍳',
+  Martha: '🛒',
+  Vance: '🎣',
+  Corinne: '👩‍🌾',
 };
 
 export const getNpcIcon = (npc) => {

@@ -61,11 +61,12 @@ export const LogPanel = () => {
         {filteredLogs.map((log) => {
           const senderText = getLocalizedText(log.sender, log.senderEn, language);
           const logText = getLocalizedText(log.text, log.textEn, language);
+          const isSystemOrEvent = log.type === 'system' || log.type === 'event';
 
           return (
-            <div key={log.id} className={`log-row type-${log.type}`}>
+            <div key={log.id || log._id} className={`log-row type-${log.type}`}>
               <span className="log-time">[{log.time}]</span>
-              <span className="log-sender">{senderText}:</span>
+              {!isSystemOrEvent && <span className="log-sender">{senderText}:</span>}
               <span className="log-text">{logText}</span>
             </div>
           );

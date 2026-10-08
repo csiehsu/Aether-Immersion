@@ -17,7 +17,6 @@ export const GatherPanel = () => {
   const performSell = useGameStore((state) => state.performSell);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
-  const addLog = useGameStore((state) => state.addLog);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 

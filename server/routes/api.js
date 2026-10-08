@@ -135,7 +135,73 @@ const formatPlayerResponse = (playerDoc) => {
     ? p.skills
     : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
   p.money = p.money ?? 0;
+  p.mentor = p.mentor || 'Martha';
   return p;
+};
+
+const MENTOR_SHOP_MAP = {
+  Martha: {
+    shopLocationId: 'AZURE_BAY_VARIETY_SHOP',
+    shopName: '雜貨店',
+    shopNameEn: 'Variety Shop',
+  },
+  Garrick: {
+    shopLocationId: 'AZURE_BAY_DINER',
+    shopName: '小吃店',
+    shopNameEn: 'Diner',
+  },
+  Vance: {
+    shopLocationId: 'AZURE_BAY_SEAFOOD_SHOP',
+    shopName: '海產店',
+    shopNameEn: 'Seafood Shop',
+  },
+  Corinne: {
+    shopLocationId: 'AZURE_BAY_TACK_SHOP',
+    shopName: '馬具店',
+    shopNameEn: 'Tack Shop',
+  },
+};
+
+const ensureCustomRoom = async (playerName, mentorName) => {
+  const shopInfo = MENTOR_SHOP_MAP[mentorName] || MENTOR_SHOP_MAP.Martha;
+  const newRoomId = `${shopInfo.shopLocationId}_${playerName}_ROOM`;
+  const newRoomName = `${shopInfo.shopName}：${playerName}的房間`;
+  const newRoomNameEn = `${shopInfo.shopNameEn}: ${playerName}'s Room`;
+
+  const roomData = {
+    locationId: newRoomId,
+    name: newRoomName,
+    nameEn: newRoomNameEn,
+    description: '小巧精簡的個人房間。',
+    descriptionEn: 'A compact and minimalist personal room.',
+    image: 'https://res.cloudinary.com/duqyw1uhq/image/upload/v1791367142/Room_ffeeyh.png',
+    gatherables: [],
+    connections: [
+      {
+        targetLocationId: shopInfo.shopLocationId,
+        energyCost: 1,
+      },
+    ],
+    npcs: [],
+    hasEvent: false,
+    buildings: [],
+  };
+
+  await Location.findOneAndUpdate(
+    { locationId: newRoomId },
+    roomData,
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+  );
+
+  const shopLoc = await Location.findOne({ locationId: shopInfo.shopLocationId });
+  if (shopLoc) {
+    if (!shopLoc.connections.some((c) => c.targetLocationId === newRoomId)) {
+      shopLoc.connections.push({ targetLocationId: newRoomId, energyCost: 1 });
+      await shopLoc.save();
+    }
+  }
+
+  return { newRoomId, shopLocationId: shopInfo.shopLocationId };
 };
 
 // GET /api/player
@@ -144,10 +210,16 @@ router.get('/player', async (req, res) => {
     if (!isDbConnected()) {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法載入玩家資料！' });
     }
+
     let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
     if (!player) {
+      const defaultName = '冒險者';
+      const defaultMentor = 'Martha';
+      const { newRoomId, shopLocationId } = await ensureCustomRoom(defaultName, defaultMentor);
+
       player = await Player.create({
-        name: '冒險者',
+        name: defaultName,
+        mentor: defaultMentor,
         isCharacterCreated: false,
         stats: { strength: 1, speed: 1, dexerity: 1, maxHp: 100, defense: 0 },
         skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
@@ -156,13 +228,35 @@ router.get('/player', async (req, res) => {
         money: 0,
         energy: 4320,
         maxEnergy: 4320,
-        location: 'AZURE_BAY_PORT',
-        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
+        location: newRoomId,
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', shopLocationId, newRoomId],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
-    } else if (player.knownLocations && !player.knownLocations.includes('AZURE_BAY_ROOM')) {
-      player.knownLocations.push('AZURE_BAY_ROOM');
-      await player.save();
+    } else if (player.isCharacterCreated) {
+      const currentMentor = player.mentor || 'Martha';
+      const { newRoomId, shopLocationId } = await ensureCustomRoom(player.name, currentMentor);
+      let updated = false;
+
+      if (player.knownLocations.includes('AZURE_BAY_ROOM')) {
+        player.knownLocations = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM');
+        updated = true;
+      }
+      if (!player.knownLocations.includes(shopLocationId)) {
+        player.knownLocations.push(shopLocationId);
+        updated = true;
+      }
+      if (!player.knownLocations.includes(newRoomId)) {
+        player.knownLocations.push(newRoomId);
+        updated = true;
+      }
+      if (!player.mentor) {
+        player.mentor = currentMentor;
+        updated = true;
+      }
+      if (updated) {
+        player.markModified('knownLocations');
+        await player.save();
+      }
     }
     return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
@@ -178,13 +272,16 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法建立角色！' });
     }
 
-    const { name, strength, speed, dexerity, str, spd, dex, stats } = req.body;
+    const { name, mentor, strength, speed, dexerity, str, spd, dex, stats } = req.body;
+    const validMentors = ['Martha', 'Garrick', 'Vance', 'Corinne'];
+    const selectedMentor = validMentors.includes(mentor) ? mentor : 'Martha';
+    const trimmedName = (name || '').trim();
 
     const nStr = Number(stats?.strength ?? strength ?? str);
     const nSpd = Number(stats?.speed ?? speed ?? spd);
     const nDex = Number(stats?.dexerity ?? dexerity ?? dex);
 
-    if (!name || !name.trim()) {
+    if (!trimmedName) {
       return res.status(400).json({ success: false, message: '請輸入角色名稱！' });
     }
 
@@ -200,11 +297,14 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(400).json({ success: false, message: '三項能力值總和必須精確等於 30！' });
     }
 
+    const { newRoomId, shopLocationId } = await ensureCustomRoom(trimmedName, selectedMentor);
+
     const maxHp = 100;
     const maxEnergy = 4320;
 
     const characterData = {
-      name: name.trim(),
+      name: trimmedName,
+      mentor: selectedMentor,
       stats: {
         strength: nStr,
         speed: nSpd,
@@ -219,13 +319,25 @@ router.post('/player/create-character', async (req, res) => {
       money: 0,
       energy: maxEnergy,
       maxEnergy,
-      location: 'AZURE_BAY_PORT',
-      knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
+      location: newRoomId,
+      knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', shopLocationId, newRoomId],
     };
 
     let player = await Player.findOne();
     if (player) {
-      Object.assign(player, characterData);
+      player.name = characterData.name;
+      player.mentor = characterData.mentor;
+      player.stats = characterData.stats;
+      player.skills = characterData.skills;
+      player.level = characterData.level;
+      player.isCharacterCreated = characterData.isCharacterCreated;
+      player.hp = characterData.hp;
+      player.money = characterData.money;
+      player.energy = characterData.energy;
+      player.maxEnergy = characterData.maxEnergy;
+      player.location = characterData.location;
+      player.knownLocations = characterData.knownLocations;
+      player.markModified('knownLocations');
       await player.save();
     } else {
       player = await Player.create(characterData);

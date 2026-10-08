@@ -8,7 +8,6 @@ export const CreaturesPanel = () => {
   const creatures = useGameStore((state) => state.creatures || []);
   const locations = useGameStore((state) => state.locations || []);
   const player = useGameStore((state) => state.player || {});
-  const addLog = useGameStore((state) => state.addLog);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
   const language = useGameStore((state) => state.language);
@@ -29,15 +28,7 @@ export const CreaturesPanel = () => {
     (c) => (c.npcId || c.id) === selectedNpcId
   );
 
-  const handleTrade = (cName, cNameEn) => {
-    addLog(
-      '交易系統',
-      'Trade System',
-      `開啟【${cName}】的交易選單。`,
-      `Opened trade menu for [${cNameEn}].`,
-      'dialogue'
-    );
-  };
+  const handleTrade = () => {};
 
   return (
     <CollapsiblePanel title={t.creaturesTitle} className="creatures-panel">

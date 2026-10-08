@@ -59,7 +59,7 @@ export const useGameStore = create((set, get) => ({
 
   isBattling: false,
 
-  createCharacter: async (name, str, spd, dex) => {
+  createCharacter: async (name, str, spd, dex, mentor = 'Martha') => {
     const strength = typeof str === 'object' ? str.strength : str;
     const speed = typeof str === 'object' ? str.speed : spd;
     const dexerity = typeof str === 'object' ? str.dexerity : dex;
@@ -70,6 +70,7 @@ export const useGameStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
+          mentor,
           stats: {
             strength,
             speed,
@@ -95,6 +96,7 @@ export const useGameStore = create((set, get) => ({
             player: {
               ...state.player,
               name: dbP.name,
+              mentor: dbP.mentor || mentor,
               stats,
               skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
               str: stats.strength,
@@ -107,17 +109,13 @@ export const useGameStore = create((set, get) => ({
               money: dbP.money ?? 0,
               energy: dbP.energy,
               maxEnergy: dbP.maxEnergy,
+              location: dbP.location || 'AZURE_BAY_PORT',
+              knownLocations: dbP.knownLocations || [],
             },
             screenMode: 'game',
           }));
 
-          get().addLog(
-            '創角系統',
-            'Character System',
-            `角色【${dbP.name}】建立成功！能力值：力量 ${stats.strength}, 速度 ${stats.speed}, 精巧 ${stats.dexerity}。`,
-            `Character [${dbP.name}] created! Stats: STR ${stats.strength}, SPD ${stats.speed}, DEX ${stats.dexerity}.`,
-            'system'
-          );
+          await get().fetchLocations();
           return true;
         }
       }
@@ -176,8 +174,6 @@ export const useGameStore = create((set, get) => ({
             },
             screenMode: dbP && dbP.isCharacterCreated ? 'game' : 'character_creation',
           }));
-
-          get().addLog('系統驗證', 'Auth System', `Google 帳號 [${gUser.name}] 登入成功！`, `Google account [${gUser.name}] logged in!`, 'system');
           return true;
         }
       }
@@ -198,8 +194,6 @@ export const useGameStore = create((set, get) => ({
       user: { isLoggedIn: false, name: '', email: '', pictureUrl: null },
       screenMode: 'login',
     });
-
-    get().addLog('系統驗證', 'Auth System', '已成功登出 Google 帳號。', 'Logged out of Google account.', 'system');
   },
 
   checkMongoStatus: async () => {
@@ -374,6 +368,7 @@ export const useGameStore = create((set, get) => ({
               maxEnergy: dbP.maxEnergy ?? state.player?.maxEnergy ?? 4320,
               level: dbP.level ?? 1,
               location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
+              mentor: dbP.mentor || state.player?.mentor || 'Martha',
               knownLocations: dbP.knownLocations || state.player?.knownLocations || [],
             },
             user: dbP.isLoggedIn
@@ -430,7 +425,6 @@ export const useGameStore = create((set, get) => ({
     const cost = connection?.energyCost ?? 1;
 
     if (player.energy < cost) {
-      get().addLog('系統警告', 'System Warning', '精力不足，無法進行移動！', 'Not enough energy to move!', 'system');
       return;
     }
 
@@ -467,7 +461,6 @@ export const useGameStore = create((set, get) => ({
     const totalCost = cost * addQty;
 
     if (player.energy < totalCost) {
-      get().addLog('系統警告', 'System Warning', '精力不足，無法進行採集！', 'Not enough energy to gather!', 'system');
       return;
     }
 
@@ -494,9 +487,6 @@ export const useGameStore = create((set, get) => ({
       }
       return { inventory: updatedInv };
     });
-
-    const qtySuffix = addQty > 1 ? ` x${addQty}` : '';
-    get().addLog('採集系統', 'Gather System', `在【${spotName}】成功採集獲得 [${spotName}]${qtySuffix}！(精力 -${totalCost})`, `Gathered [${spotNameEn}]${qtySuffix} at [${spotNameEn}]! (-${totalCost} Energy)`, 'event');
 
     try {
       const res = await fetch(`${API_BASE}/player/gather`, {
@@ -537,13 +527,6 @@ export const useGameStore = create((set, get) => ({
     );
 
     if (!hasTools) {
-      get().addLog(
-        '製作系統',
-        'Craft System',
-        `合成失敗！缺少所需工具。`,
-        `Craft failed! Missing required tools.`,
-        'system'
-      );
       return false;
     }
 
@@ -556,13 +539,6 @@ export const useGameStore = create((set, get) => ({
       const selectedId = selectedMaterials[reqIdx];
 
       if (!selectedId) {
-        get().addLog(
-          '製作系統',
-          'Craft System',
-          `合成失敗！請先選擇材料選項。`,
-          `Craft failed! Please select material options first.`,
-          'system'
-        );
         return false;
       }
 
@@ -571,13 +547,6 @@ export const useGameStore = create((set, get) => ({
       );
 
       if (invIndex < 0) {
-        get().addLog(
-          '製作系統',
-          'Craft System',
-          `合成失敗！找不到所選材料。`,
-          `Craft failed! Selected material not found.`,
-          'system'
-        );
         return false;
       }
 
@@ -586,25 +555,11 @@ export const useGameStore = create((set, get) => ({
       const types = dbI && dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
 
       if (!types.includes(req.type)) {
-        get().addLog(
-          '製作系統',
-          'Craft System',
-          `合成失敗！所選材料類型不符。`,
-          `Craft failed! Selected material type mismatch.`,
-          'system'
-        );
         return false;
       }
 
       const curCount = invItem.count || 1;
       if (curCount < requiredTotalCount) {
-        get().addLog(
-          '製作系統',
-          'Craft System',
-          `合成失敗！所選材料數量不足（需 ≥${requiredTotalCount}）。`,
-          `Craft failed! Selected material count insufficient (req >= ${requiredTotalCount}).`,
-          'system'
-        );
         return false;
       }
 
@@ -706,11 +661,6 @@ export const useGameStore = create((set, get) => ({
 
     set({ inventory: updatedInv });
 
-    const recipeName = recipe.name;
-    const recipeNameEn = recipe.nameEn || recipe.name;
-    const qtySuffix = numCraftQty > 1 ? ` x${numCraftQty}` : '';
-    get().addLog('製作系統', 'Craft System', `成功合成了道具 [${recipeName}]${qtySuffix}！`, `Successfully crafted [${recipeNameEn}]${qtySuffix}!`, 'event');
-
     try {
       await fetch(`${API_BASE}/player`, {
         method: 'PUT',
@@ -770,28 +720,6 @@ export const useGameStore = create((set, get) => ({
       inventory: updatedInv,
     }));
 
-    const itemName = dbItem ? dbItem.name : invItem.itemId;
-    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId;
-
-    let effectStr = '';
-    let effectStrEn = '';
-    if (hpGain !== 0) {
-      effectStr += ` (回復 HP +${hpGain})`;
-      effectStrEn += ` (+${hpGain} HP)`;
-    }
-    if (strGain !== 0) {
-      effectStr += ` (力量 +${strGain})`;
-      effectStrEn += ` (+${strGain} STR)`;
-    }
-
-    get().addLog(
-      '道具系統',
-      'Item System',
-      `使用了 [${itemName}] x${useCount}${effectStr}。`,
-      `Used [${itemNameEn}] x${useCount}${effectStrEn}.`,
-      'event'
-    );
-
     try {
       const res = await fetch(`${API_BASE}/player`, {
         method: 'PUT',
@@ -813,7 +741,7 @@ export const useGameStore = create((set, get) => ({
   },
 
   performBuy: async (npc, itemId, price, qty = 1) => {
-    const { player, inventory, items } = get();
+    const { player, inventory } = get();
     if (!player || !npc || !itemId) return false;
 
     const buyQty = Math.max(1, Number(qty) || 1);
@@ -822,15 +750,8 @@ export const useGameStore = create((set, get) => ({
 
     const currentMoney = player.money ?? 0;
     if (currentMoney < totalCost) {
-      get().addLog('系統警告', 'System Warning', '金錢不足，無法進行購買！', 'Not enough money to buy!', 'system');
       return false;
     }
-
-    const dbItem = items.find((i) => i.itemId === itemId);
-    const itemName = dbItem ? dbItem.name : itemId;
-    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
-    const npcName = npc.name || npc.npcId;
-    const npcNameEn = npc.nameEn || npc.name || npc.npcId;
 
     const newMoney = currentMoney - totalCost;
 
@@ -856,14 +777,6 @@ export const useGameStore = create((set, get) => ({
       },
       inventory: updatedInv,
     }));
-
-    get().addLog(
-      '交易系統',
-      'Trade System',
-      `向【${npcName}】購買了 [${itemName}] x${buyQty}！(金錢 -${totalCost})`,
-      `Bought [${itemNameEn}] x${buyQty} from [${npcNameEn}]! (-${totalCost} Money)`,
-      'event'
-    );
 
     try {
       const res = await fetch(`${API_BASE}/player`, {
@@ -895,7 +808,7 @@ export const useGameStore = create((set, get) => ({
   },
 
   performSell: async (npc, itemId, price, qty = 1) => {
-    const { player, inventory, items } = get();
+    const { player, inventory } = get();
     if (!player || !npc || !itemId) return false;
 
     const sellQty = Math.max(1, Number(qty) || 1);
@@ -904,21 +817,13 @@ export const useGameStore = create((set, get) => ({
 
     const existingIdx = inventory.findIndex((i) => i.itemId === itemId);
     if (existingIdx < 0) {
-      get().addLog('系統警告', 'System Warning', '物品不足，無法進行出售！', 'Not enough items to sell!', 'system');
       return false;
     }
 
     const currentOwned = inventory[existingIdx].count || 1;
     if (currentOwned < sellQty) {
-      get().addLog('系統警告', 'System Warning', '物品數量不足，無法進行出售！', 'Insufficient item count to sell!', 'system');
       return false;
     }
-
-    const dbItem = items.find((i) => i.itemId === itemId);
-    const itemName = dbItem ? dbItem.name : itemId;
-    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
-    const npcName = npc.name || npc.npcId;
-    const npcNameEn = npc.nameEn || npc.name || npc.npcId;
 
     const currentMoney = player.money ?? 0;
     const newMoney = currentMoney + totalGain;
@@ -940,14 +845,6 @@ export const useGameStore = create((set, get) => ({
       },
       inventory: updatedInv,
     }));
-
-    get().addLog(
-      '交易系統',
-      'Trade System',
-      `向【${npcName}】出售了 [${itemName}] x${sellQty}！(金錢 +${totalGain})`,
-      `Sold [${itemNameEn}] x${sellQty} to [${npcNameEn}]! (+${totalGain} Money)`,
-      'event'
-    );
 
     try {
       const res = await fetch(`${API_BASE}/player`, {

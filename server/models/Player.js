@@ -51,9 +51,15 @@ const PlayerSchema = new mongoose.Schema(
     energy: { type: Number, default: 4320 },
     maxEnergy: { type: Number, default: 4320 },
     location: { type: String, default: 'AZURE_BAY_PORT' },
+    mentor: { type: String, default: 'Martha' },
     knownLocations: {
       type: [String],
-      default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_ROOM'],
+      default: [
+        'AZURE_BAY_PORT',
+        'AZURE_BAY_MARKET',
+        'AZURE_BAY_VARIETY_SHOP',
+        'AZURE_BAY_VARIETY_SHOP_冒險者_ROOM',
+      ],
     },
     inventory: [InventoryItemSchema],
   },
