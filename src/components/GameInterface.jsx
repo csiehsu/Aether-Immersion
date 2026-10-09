@@ -7,6 +7,7 @@ import { MovePanel } from './panels/MovePanel';
 import { CraftPanel } from './panels/CraftPanel';
 import { GatherPanel } from './panels/GatherPanel';
 import { InventoryPanel } from './panels/InventoryPanel';
+import { LocationItemsPanel } from './panels/LocationItemsPanel';
 import { LogPanel } from './panels/LogPanel';
 
 export const GameInterface = () => {
@@ -58,6 +59,8 @@ export const GameInterface = () => {
         return <CraftPanel />;
       case 'gather':
         return <GatherPanel />;
+      case 'location_items':
+        return <LocationItemsPanel />;
       case 'inventory':
         return <InventoryPanel />;
       case 'log':
@@ -115,6 +118,7 @@ export const GameInterface = () => {
         </main>
 
         <aside className="desktop-side-column right-column">
+          <div className="sidebar-slot"><LocationItemsPanel /></div>
           <div className="sidebar-slot"><InventoryPanel /></div>
           <div className="sidebar-slot"><LogPanel /></div>
         </aside>

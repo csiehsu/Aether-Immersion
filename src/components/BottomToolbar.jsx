@@ -5,6 +5,7 @@ export const toolbarItems = [
   { id: 'move', label: '移動', icon: '🧭' },
   { id: 'craft', label: '製作', icon: '🔨' },
   { id: 'gather', label: '區域資源', icon: '🌿' },
+  { id: 'location_items', label: '現場物品', icon: '📍' },
   { id: 'inventory', label: '背包', icon: '🎒' },
   { id: 'log', label: '對話紀錄', icon: '📜' },
 ];

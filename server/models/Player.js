@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const InventoryItemSchema = new mongoose.Schema(
   {
+    instanceId: { type: String, default: '' },
     itemId: { type: String, default: '' },
     count: { type: Number, default: 1 },
     durability: { type: Number, default: -1 },
@@ -25,6 +26,30 @@ const PlayerSkillSchema = new mongoose.Schema(
   {
     skillId: { type: String, default: 'NORMAL_ATTACK' },
     level: { type: Number, default: 1 },
+  },
+  { _id: false }
+);
+
+const PlayerQuestProgressSchema = new mongoose.Schema(
+  {
+    objectiveIndex: { type: Number, required: true },
+    currentCount: { type: Number, default: 0 },
+    isCompleted: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+const PlayerQuestSchema = new mongoose.Schema(
+  {
+    questId: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ['IN_PROGRESS', 'READY_TO_SUBMIT', 'COMPLETED', 'FAILED'],
+      default: 'IN_PROGRESS',
+    },
+    progress: [PlayerQuestProgressSchema],
+    acceptedAt: { type: Date, default: Date.now },
+    completedAt: { type: Date },
   },
   { _id: false }
 );
@@ -54,14 +79,12 @@ const PlayerSchema = new mongoose.Schema(
     mentor: { type: String, default: 'Martha' },
     knownLocations: {
       type: [String],
-      default: [
-        'AZURE_BAY_PORT',
-        'AZURE_BAY_MARKET',
-        'AZURE_BAY_VARIETY_SHOP',
-        'AZURE_BAY_VARIETY_SHOP_冒險者_ROOM',
-      ],
+      default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
     },
     inventory: [InventoryItemSchema],
+    unlockedRecipes: [{ type: String }],
+    unlockedClues: [{ type: String }],
+    quests: [PlayerQuestSchema],
   },
   { timestamps: true }
 );

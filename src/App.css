@@ -821,6 +821,32 @@
   font-size: 1.6rem;
   line-height: 1;
   margin-bottom: 4px;
+  position: relative;
+}
+
+.quest-exclamation-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ef4444;
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 0.7rem;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+  z-index: 2;
+  animation: pulse-exclamation 1.5s infinite;
+}
+
+@keyframes pulse-exclamation {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
 }
 
 .gather-item-img,

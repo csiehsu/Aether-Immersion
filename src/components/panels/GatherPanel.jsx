@@ -17,6 +17,8 @@ export const GatherPanel = () => {
   const performSell = useGameStore((state) => state.performSell);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
+  const questsList = useGameStore((state) => state.questsList || []);
+  const submitQuest = useGameStore((state) => state.submitQuest);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
@@ -26,6 +28,47 @@ export const GatherPanel = () => {
   const [buyQtys, setBuyQtys] = useState({});
   const [sellQtys, setSellQtys] = useState({});
   const [tradeTab, setTradeTab] = useState('buy');
+
+  const getActiveQuestForNpc = (cId) => {
+    const pQuests = player?.quests || [];
+    const activePQuests = pQuests.filter((pq) => pq.status === 'IN_PROGRESS');
+    for (const pq of activePQuests) {
+      const qDef = (questsList || []).find((q) => q.questId === pq.questId);
+      if (!qDef) continue;
+      const isSubmitNpc = qDef.submitNpcId === cId;
+      const isTargetNpc = (qDef.objectives || []).some((obj) => obj.targetNpcId === cId);
+      if (isSubmitNpc || isTargetNpc) {
+        return { pQuest: pq, qDef };
+      }
+    }
+    return null;
+  };
+
+  const checkCanSubmitQuest = (qDef, pQuest) => {
+    if (!qDef || !pQuest) return false;
+    const objectives = qDef.objectives || [];
+    for (let idx = 0; idx < objectives.length; idx++) {
+      const obj = objectives[idx];
+      if (obj.type === 'TALK_NPC') {
+        continue;
+      }
+      if (obj.type === 'HAS_ITEM') {
+        const ownedCount = (inventory || [])
+          .filter((i) => i.itemId === obj.targetId)
+          .reduce((sum, item) => sum + (item.count || 1), 0);
+        if (ownedCount < (obj.requiredCount || 1)) {
+          return false;
+        }
+      }
+      if (obj.type === 'VISIT_LOCATION') {
+        const prog = pQuest.progress?.[idx];
+        if (prog && !prog.isCompleted && prog.currentCount < (obj.requiredCount || 1)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
 
   const handleBuyQtyChange = (itemId, val) => {
     setBuyQtys((prev) => ({
@@ -84,6 +127,7 @@ export const GatherPanel = () => {
                   const cName = getLocalizedName(c, language);
                   const icon = getNpcIcon(c);
                   const isSelected = selectedType === 'creature' && selectedId === cId;
+                  const questInfo = getActiveQuestForNpc(cId);
 
                   return (
                     <div
@@ -92,6 +136,7 @@ export const GatherPanel = () => {
                       onClick={() => toggleSelect('creature', cId)}
                     >
                       <div className="creature-tile-avatar">
+                        {questInfo && <span className="quest-exclamation-badge">❗</span>}
                         {c.imageUrl ? (
                           <img src={c.imageUrl} alt={cName} className="creature-img" />
                         ) : (
@@ -259,68 +304,99 @@ export const GatherPanel = () => {
                         </div>
                       );
 
-                      if (hasGoodies && hasPurchase) {
+                      const questInfo = getActiveQuestForNpc(c.npcId || c.id);
+                      const canSubmit = questInfo ? checkCanSubmitQuest(questInfo.qDef, questInfo.pQuest) : false;
+
+                      const renderQuestSection = () => {
+                        if (!questInfo) return null;
                         return (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px' }}>
-                              <button
-                                type="button"
-                                style={{
-                                  flex: 1,
-                                  padding: '6px 12px',
-                                  background: tradeTab === 'buy' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 'bold',
-                                }}
-                                onClick={() => setTradeTab('buy')}
-                              >
-                                {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
-                              </button>
-                              <button
-                                type="button"
-                                style={{
-                                  flex: 1,
-                                  padding: '6px 12px',
-                                  background: tradeTab === 'sell' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 'bold',
-                                }}
-                                onClick={() => setTradeTab('sell')}
-                              >
-                                {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
-                              </button>
+                          <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                            <div style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '4px', fontSize: '0.875rem' }}>
+                              📜 {questInfo.qDef.title}
                             </div>
-                            {tradeTab === 'buy' ? renderBuyList() : renderSellList()}
+                            {canSubmit ? (
+                              <button
+                                type="button"
+                                className="btn-submit-quest"
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 16px',
+                                  background: '#10b981',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 'bold',
+                                  fontSize: '0.9rem',
+                                  marginTop: '4px',
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  submitQuest(questInfo.qDef.questId);
+                                }}
+                              >
+                                {language === 'en' ? 'Complete Quest' : '完成任務'}
+                              </button>
+                            ) : (
+                              <div style={{ fontSize: '0.8rem', color: '#f59e0b', marginTop: '4px' }}>
+                                {language === 'en' ? 'Quest objectives in progress.' : '任務進行中...'}
+                              </div>
+                            )}
                           </div>
                         );
-                      }
-
-                      if (hasGoodies) {
-                        return (
-                          <div style={{ marginTop: '8px' }}>
-                            {renderBuyList()}
-                          </div>
-                        );
-                      }
-
-                      if (hasPurchase) {
-                        return (
-                          <div style={{ marginTop: '8px' }}>
-                            {renderSellList()}
-                          </div>
-                        );
-                      }
+                      };
 
                       return (
-                        <div style={{ padding: '8px', color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center', marginTop: '8px' }}>
-                          {language === 'en' ? 'No items for sale or purchase.' : '此 NPC 暫無販售或收購物品。'}
-                        </div>
+                        <React.Fragment>
+                          {hasGoodies && hasPurchase ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                              <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px' }}>
+                                <button
+                                  type="button"
+                                  style={{
+                                    flex: 1,
+                                    padding: '6px 12px',
+                                    background: tradeTab === 'buy' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                  }}
+                                  onClick={() => setTradeTab('buy')}
+                                >
+                                  {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
+                                </button>
+                                <button
+                                  type="button"
+                                  style={{
+                                    flex: 1,
+                                    padding: '6px 12px',
+                                    background: tradeTab === 'sell' ? '#3b82f6' : 'rgba(255, 255, 255, 0.1)',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                  }}
+                                  onClick={() => setTradeTab('sell')}
+                                >
+                                  {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
+                                </button>
+                              </div>
+                              {tradeTab === 'buy' ? renderBuyList() : renderSellList()}
+                            </div>
+                          ) : hasGoodies ? (
+                            <div style={{ marginTop: '8px' }}>{renderBuyList()}</div>
+                          ) : hasPurchase ? (
+                            <div style={{ marginTop: '8px' }}>{renderSellList()}</div>
+                          ) : !questInfo ? (
+                            <div style={{ padding: '8px', color: '#94a3b8', fontSize: '0.875rem', textAlign: 'center', marginTop: '8px' }}>
+                              {language === 'en' ? 'No items for sale or purchase.' : '此 NPC 暫無販售或收購物品。'}
+                            </div>
+                          ) : null}
+                          {renderQuestSection()}
+                        </React.Fragment>
                       );
                     })() : (
                       <div className="creature-detail-actions" style={{ marginTop: '8px' }}>

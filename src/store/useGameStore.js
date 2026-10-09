@@ -55,6 +55,8 @@ export const useGameStore = create((set, get) => ({
 
   battleSkills: [],
 
+  questsList: [],
+
   logs: [],
 
   isBattling: false,
@@ -92,6 +94,8 @@ export const useGameStore = create((set, get) => ({
             defense: dbStats.defense ?? 0,
           };
 
+          await get().fetchLocations();
+
           set((state) => ({
             player: {
               ...state.player,
@@ -109,13 +113,12 @@ export const useGameStore = create((set, get) => ({
               money: dbP.money ?? 0,
               energy: dbP.energy,
               maxEnergy: dbP.maxEnergy,
-              location: dbP.location || 'AZURE_BAY_PORT',
+              location: dbP.location,
               knownLocations: dbP.knownLocations || [],
             },
             screenMode: 'game',
           }));
 
-          await get().fetchLocations();
           return true;
         }
       }
@@ -314,6 +317,20 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  fetchQuests: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/quests`);
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set({ questsList: result.data });
+        }
+      }
+    } catch (err) {
+      console.error('[Fetch Quests Error]', err);
+    }
+  },
+
   syncFromMongo: async () => {
     try {
       const status = await get().checkMongoStatus();
@@ -328,6 +345,7 @@ export const useGameStore = create((set, get) => ({
       await get().fetchNpcs();
       await get().fetchBuildings();
       await get().fetchBattleSkills();
+      await get().fetchQuests();
 
       const res = await fetch(`${API_BASE}/player`);
       if (!res.ok) {
@@ -370,6 +388,7 @@ export const useGameStore = create((set, get) => ({
               location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
               mentor: dbP.mentor || state.player?.mentor || 'Martha',
               knownLocations: dbP.knownLocations || state.player?.knownLocations || [],
+              quests: dbP.quests || [],
             },
             user: dbP.isLoggedIn
               ? { isLoggedIn: true, name: dbP.name, email: dbP.email, pictureUrl: dbP.pictureUrl }
@@ -482,7 +501,12 @@ export const useGameStore = create((set, get) => ({
       } else {
         updatedInv = [
           ...state.inventory,
-          { itemId, count: addQty, quality: '普通' },
+          {
+            instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            itemId,
+            count: addQty,
+            quality: '普通',
+          },
         ];
       }
       return { inventory: updatedInv };
@@ -646,6 +670,7 @@ export const useGameStore = create((set, get) => ({
         updatedInv[existingMatchIndex] = updatedItem;
       } else {
         const newItem = {
+          instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
           itemId: finalItemId,
           count: addQty,
           quality: '普通',
@@ -875,6 +900,110 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
+  pickUpPlacedItem: async (locationId, instanceId) => {
+    try {
+      const res = await fetch(`${API_BASE}/location/pickup-item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId, instanceId }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set((state) => ({
+            player: {
+              ...state.player,
+              ...result.data,
+            },
+            inventory: result.data.inventory || state.inventory,
+            locations: result.locations || state.locations,
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('[Pickup Item Error]', err);
+    }
+  },
+
+  getNpcDisplayName: (npcId) => {
+    const { creatures, language } = get();
+    if (!npcId) return language === 'en' ? 'NPC' : 'NPC';
+    const npc = (creatures || []).find((c) => (c.npcId || c.id) === npcId);
+    if (npc) {
+      return language === 'en' ? (npc.nameEn || npc.name || npcId) : (npc.name || npcId);
+    }
+    if (npcId === 'Brock') return language === 'en' ? 'Brock' : '布洛克';
+    if (npcId === 'Garrick') return language === 'en' ? 'Garrick' : '加利克';
+    return npcId;
+  },
+
+  acceptQuestFromPlacedItem: async (questId, locationId, instanceId) => {
+    try {
+      const res = await fetch(`${API_BASE}/quest/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questId, locationId, instanceId }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set((state) => ({
+            player: {
+              ...state.player,
+              ...result.data,
+            },
+            inventory: result.data.inventory || state.inventory,
+            locations: result.locations || state.locations,
+          }));
+
+          if (result.quest && result.quest.description) {
+            const npcId = result.quest.triggerNpcId || result.quest.submitNpcId || 'Brock';
+            const senderName = get().getNpcDisplayName(npcId);
+            get().addLog(senderName, senderName, result.quest.description, result.quest.description, 'dialogue');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Accept Quest Error]', err);
+    }
+  },
+
+  submitQuest: async (questId) => {
+    try {
+      const res = await fetch(`${API_BASE}/quest/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questId }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          set((state) => ({
+            player: {
+              ...state.player,
+              ...result.data,
+            },
+            inventory: result.data.inventory || state.inventory,
+            locations: result.locations || state.locations,
+          }));
+
+          if (result.completeText) {
+            const senderName = get().getNpcDisplayName(result.submitNpcId);
+            get().addLog(senderName, senderName, result.completeText, result.completeText, 'dialogue');
+          }
+
+          if (result.autoTriggeredQuest && result.autoTriggeredQuest.description) {
+            const nextNpcId = result.autoTriggeredQuest.triggerNpcId || result.autoTriggeredQuest.submitNpcId;
+            const nextSenderName = get().getNpcDisplayName(nextNpcId);
+            get().addLog(nextSenderName, nextSenderName, result.autoTriggeredQuest.description, result.autoTriggeredQuest.description, 'dialogue');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Submit Quest Error]', err);
+    }
+  },
+
   startBattle: (creature) => {
     const { player, isBattling } = get();
     if (!player || isBattling) return false;
@@ -980,6 +1109,7 @@ export const useGameStore = create((set, get) => ({
                 };
               } else {
                 updatedInv.push({
+                  instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                   itemId: drop.itemId,
                   count: dropQty,
                   quality: '普通',

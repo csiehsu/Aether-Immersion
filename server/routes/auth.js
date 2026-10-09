@@ -87,6 +87,10 @@ router.post('/google', async (req, res) => {
       }
       player.pictureUrl = googleUser.picture;
       player.isLoggedIn = true;
+      if (player.knownLocations && player.knownLocations.length > 0) {
+        player.knownLocations = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('冒險者_ROOM'));
+        player.markModified('knownLocations');
+      }
       await player.save();
     } else {
       player = await Player.create({
@@ -102,6 +106,7 @@ router.post('/google', async (req, res) => {
         energy: 4320,
         maxEnergy: 4320,
         location: 'AZURE_BAY_PORT',
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
       });
     }
     return res.json({ success: true, source: 'mongodb', user: googleUser, player });

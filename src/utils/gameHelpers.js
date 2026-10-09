@@ -10,6 +10,7 @@ const NPC_ICON_MAP = {
   Martha: '🛒',
   Vance: '🎣',
   Corinne: '👩‍🌾',
+  Brock: '⛏️',
 };
 
 export const getNpcIcon = (npc) => {

@@ -5,6 +5,7 @@ const GatherableSchema = new mongoose.Schema(
     itemId: { type: String, required: true },
     cost: { type: Number, default: 1 },
     chance: { type: Number, default: 100 },
+    requiredToolTypes: [{ type: String }],
   },
   { _id: false }
 );
@@ -25,6 +26,15 @@ const LocationBuildingSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const PlacedItemSchema = new mongoose.Schema(
+  {
+    instanceId: { type: String, required: true },
+    itemId: { type: String, required: true },
+    triggerQuestId: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const LocationSchema = new mongoose.Schema(
   {
     locationId: { type: String, required: true, unique: true },
@@ -36,6 +46,7 @@ const LocationSchema = new mongoose.Schema(
     gatherables: [GatherableSchema],
     connections: [ConnectionSchema],
     buildings: [LocationBuildingSchema],
+    placedItems: [PlacedItemSchema],
     npcs: [{ type: String }],
     hasEvent: { type: Boolean, default: false },
   },

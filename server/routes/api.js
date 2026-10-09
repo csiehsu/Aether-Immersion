@@ -8,12 +8,16 @@ import { Recipe } from '../models/Recipe.js';
 import { Npc } from '../models/Npc.js';
 import { Building } from '../models/Building.js';
 import { BattleSkill } from '../models/BattleSkill.js';
+import { Quest } from '../models/Quest.js';
+import { Clue } from '../models/Clue.js';
 import { initialItems } from '../seeds/seedItems.js';
 import { initialLocations } from '../seeds/seedLocations.js';
 import { initialRecipes } from '../seeds/seedRecipes.js';
 import { initialNpcs } from '../seeds/seedNpcs.js';
 import { initialBuildings } from '../seeds/seedBuildings.js';
 import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
+import { initialQuests } from '../seeds/seedQuests.js';
+import { initialClues } from '../seeds/seedClues.js';
 import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
 
 const router = express.Router();
@@ -111,7 +115,9 @@ const sanitizeInventoryItems = (inventory) => {
     if (!raw) continue;
     const itemId = raw.itemId || raw.id || '';
     if (!itemId) continue;
+    const instanceId = raw.instanceId || `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     clean.push({
+      instanceId,
       itemId,
       count: raw.count || 1,
       durability: raw.durability !== undefined ? raw.durability : -1,
@@ -159,6 +165,11 @@ const MENTOR_SHOP_MAP = {
     shopLocationId: 'AZURE_BAY_TACK_SHOP',
     shopName: '馬具店',
     shopNameEn: 'Tack Shop',
+  },
+  Brock: {
+    shopLocationId: 'AZURE_BAY_BROCK_HOME',
+    shopName: '布洛克家',
+    shopNameEn: "Brock's Home",
   },
 };
 
@@ -215,7 +226,6 @@ router.get('/player', async (req, res) => {
     if (!player) {
       const defaultName = '冒險者';
       const defaultMentor = 'Martha';
-      const { newRoomId, shopLocationId } = await ensureCustomRoom(defaultName, defaultMentor);
 
       player = await Player.create({
         name: defaultName,
@@ -228,8 +238,8 @@ router.get('/player', async (req, res) => {
         money: 0,
         energy: 4320,
         maxEnergy: 4320,
-        location: newRoomId,
-        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', shopLocationId, newRoomId],
+        location: 'AZURE_BAY_PORT',
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
     } else if (player.isCharacterCreated) {
@@ -237,8 +247,9 @@ router.get('/player', async (req, res) => {
       const { newRoomId, shopLocationId } = await ensureCustomRoom(player.name, currentMentor);
       let updated = false;
 
-      if (player.knownLocations.includes('AZURE_BAY_ROOM')) {
-        player.knownLocations = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM');
+      const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('冒險者_ROOM'));
+      if (filtered.length !== player.knownLocations.length) {
+        player.knownLocations = filtered;
         updated = true;
       }
       if (!player.knownLocations.includes(shopLocationId)) {
@@ -273,7 +284,7 @@ router.post('/player/create-character', async (req, res) => {
     }
 
     const { name, mentor, strength, speed, dexerity, str, spd, dex, stats } = req.body;
-    const validMentors = ['Martha', 'Garrick', 'Vance', 'Corinne'];
+    const validMentors = ['Martha', 'Garrick', 'Vance', 'Corinne', 'Brock'];
     const selectedMentor = validMentors.includes(mentor) ? mentor : 'Martha';
     const trimmedName = (name || '').trim();
 
@@ -295,6 +306,13 @@ router.post('/player/create-character', async (req, res) => {
 
     if (nStr + nSpd + nDex !== 30) {
       return res.status(400).json({ success: false, message: '三項能力值總和必須精確等於 30！' });
+    }
+
+    try {
+      await Location.deleteMany({ locationId: { $regex: /.*冒險者.*ROOM$/ } });
+      await Location.deleteMany({ locationId: 'AZURE_BAY_ROOM' });
+    } catch (cleanErr) {
+      console.error('[Clean Room Error]', cleanErr);
     }
 
     const { newRoomId, shopLocationId } = await ensureCustomRoom(trimmedName, selectedMentor);
@@ -439,20 +457,339 @@ router.post('/logs', async (req, res) => {
     if (!isDbConnected()) {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
-    const { sender, senderEn, text, textEn, type = 'dialogue' } = req.body;
+    const { sender, senderEn, text, textEn, type } = req.body;
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-
-    const newLog = await GameLog.create({
+    const logDoc = await GameLog.create({
       time: timeStr,
-      sender,
-      senderEn: senderEn || sender,
-      text,
-      textEn: textEn || text,
-      type,
+      sender: sender || '系統',
+      senderEn: senderEn || 'System',
+      text: text || '',
+      textEn: textEn || '',
+      type: type || 'dialogue',
     });
-    return res.json({ success: true, source: 'mongodb', data: newLog });
+    return res.json({ success: true, data: logDoc });
   } catch (err) {
     console.error('[API Error] POST /api/logs:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/quests
+router.get('/quests', async (req, res) => {
+  try {
+    const result = await fetchCollectionData(Quest, initialQuests);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API Error] GET /api/quests:', err);
+    res.status(503).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/clues
+router.get('/clues', async (req, res) => {
+  try {
+    const result = await fetchCollectionData(Clue, initialClues);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API Error] GET /api/clues:', err);
+    res.status(503).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/location/pickup-item
+router.post('/location/pickup-item', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { locationId, instanceId } = req.body;
+    const location = await Location.findOne({ locationId });
+    if (!location) {
+      return res.status(404).json({ success: false, message: '找不到該地點！' });
+    }
+
+    const placedIndex = location.placedItems.findIndex((p) => p.instanceId === instanceId);
+    if (placedIndex < 0) {
+      return res.status(404).json({ success: false, message: '該地點找不到此道具！' });
+    }
+
+    const itemToPick = location.placedItems[placedIndex];
+    location.placedItems.splice(placedIndex, 1);
+    await location.save();
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (player) {
+      player.inventory = sanitizeInventoryItems(player.inventory);
+      const newInstId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      player.inventory.push({
+        instanceId: newInstId,
+        itemId: itemToPick.itemId,
+        count: 1,
+        quality: '普通',
+      });
+      await player.save();
+    }
+
+    const allLocations = await Location.find({});
+    return res.json({ success: true, data: formatPlayerResponse(player), locations: allLocations });
+  } catch (err) {
+    console.error('[API Error] POST /api/location/pickup-item:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/quest/accept
+router.post('/quest/accept', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { questId, instanceId, locationId } = req.body;
+    const quest = await Quest.findOne({ questId });
+    if (!quest) {
+      return res.status(404).json({ success: false, message: '找不到該任務！' });
+    }
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    const existingQuest = player.quests.find((q) => q.questId === questId);
+    if (!existingQuest) {
+      const initialProgress = quest.objectives.map((obj, idx) => ({
+        objectiveIndex: idx,
+        currentCount: 0,
+        isCompleted: false,
+      }));
+
+      player.quests.push({
+        questId,
+        status: 'IN_PROGRESS',
+        progress: initialProgress,
+        acceptedAt: new Date(),
+      });
+
+      const grants = quest.grantsOnAccept || {};
+      if (grants.items && grants.items.length > 0) {
+        player.inventory = sanitizeInventoryItems(player.inventory);
+        for (const gItem of grants.items) {
+          player.inventory.push({
+            instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+            itemId: gItem.itemId,
+            count: gItem.count || 1,
+            quality: gItem.quality || '普通',
+          });
+        }
+      }
+      if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
+        for (const locId of grants.unlockedLocations) {
+          if (!player.knownLocations.includes(locId)) {
+            player.knownLocations.push(locId);
+          }
+        }
+      }
+      if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
+        for (const rId of grants.unlockedRecipes) {
+          if (!player.unlockedRecipes.includes(rId)) {
+            player.unlockedRecipes.push(rId);
+          }
+        }
+      }
+    }
+
+    if (instanceId && locationId) {
+      const location = await Location.findOne({ locationId });
+      if (location) {
+        const placedIndex = location.placedItems.findIndex((p) => p.instanceId === instanceId);
+        if (placedIndex >= 0) {
+          const itemToPick = location.placedItems[placedIndex];
+          location.placedItems.splice(placedIndex, 1);
+          await location.save();
+
+          player.inventory = sanitizeInventoryItems(player.inventory);
+          const newInstId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          player.inventory.push({
+            instanceId: newInstId,
+            itemId: itemToPick.itemId,
+            count: 1,
+            quality: '普通',
+          });
+        }
+      }
+    }
+
+    await player.save();
+    const allLocations = await Location.find({});
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      locations: allLocations,
+      quest: {
+        questId: quest.questId,
+        title: quest.title,
+        description: quest.description,
+        triggerNpcId: quest.triggerNpcId,
+        submitNpcId: quest.submitNpcId,
+      },
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/quest/accept:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/quest/submit
+router.post('/quest/submit', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { questId } = req.body;
+    const quest = await Quest.findOne({ questId });
+    if (!quest) {
+      return res.status(404).json({ success: false, message: '找不到該任務！' });
+    }
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    const pQuest = player.quests.find((q) => q.questId === questId);
+    if (!pQuest || pQuest.status === 'COMPLETED') {
+      return res.status(400).json({ success: false, message: '任務無法進行發放或已完成！' });
+    }
+
+    pQuest.status = 'COMPLETED';
+    pQuest.completedAt = new Date();
+
+    const rewards = quest.rewards || {};
+    if (rewards.money) player.money += rewards.money;
+    if (rewards.items && rewards.items.length > 0) {
+      player.inventory = sanitizeInventoryItems(player.inventory);
+      for (const rItem of rewards.items) {
+        player.inventory.push({
+          instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          itemId: rItem.itemId,
+          count: rItem.count || 1,
+          quality: rItem.quality || '普通',
+        });
+      }
+    }
+    if (rewards.unlockedLocations && rewards.unlockedLocations.length > 0) {
+      for (const locId of rewards.unlockedLocations) {
+        if (!player.knownLocations.includes(locId)) {
+          player.knownLocations.push(locId);
+        }
+      }
+    }
+    if (rewards.unlockedRecipes && rewards.unlockedRecipes.length > 0) {
+      for (const rId of rewards.unlockedRecipes) {
+        if (!player.unlockedRecipes.includes(rId)) {
+          player.unlockedRecipes.push(rId);
+        }
+      }
+    }
+
+    if (quest.autoRemoveTriggerItemOnComplete && quest.triggerItemId) {
+      player.inventory = sanitizeInventoryItems(player.inventory);
+      const invIndex = player.inventory.findIndex((i) => i.itemId === quest.triggerItemId);
+      if (invIndex >= 0) {
+        if (player.inventory[invIndex].count > 1) {
+          player.inventory[invIndex].count -= 1;
+        } else {
+          player.inventory.splice(invIndex, 1);
+        }
+      }
+    }
+
+    let autoTriggeredQuest = null;
+    const nextQuestId = quest.autoTriggerQuestId || quest.autoTrigger;
+    if (nextQuestId) {
+      const nextQuest = await Quest.findOne({ questId: nextQuestId });
+      if (nextQuest) {
+        const existingNext = player.quests.find((q) => q.questId === nextQuestId);
+        if (!existingNext) {
+          const initialProgress = nextQuest.objectives.map((obj, idx) => ({
+            objectiveIndex: idx,
+            currentCount: 0,
+            isCompleted: false,
+          }));
+
+          player.quests.push({
+            questId: nextQuestId,
+            status: 'IN_PROGRESS',
+            progress: initialProgress,
+            acceptedAt: new Date(),
+          });
+
+          const grants = nextQuest.grantsOnAccept || {};
+          if (grants.items && grants.items.length > 0) {
+            player.inventory = sanitizeInventoryItems(player.inventory);
+            for (const gItem of grants.items) {
+              player.inventory.push({
+                instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                itemId: gItem.itemId,
+                count: gItem.count || 1,
+                quality: gItem.quality || '普通',
+              });
+            }
+          }
+          if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
+            for (const locId of grants.unlockedLocations) {
+              if (!player.knownLocations.includes(locId)) {
+                player.knownLocations.push(locId);
+              }
+            }
+          }
+          if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
+            for (const rId of grants.unlockedRecipes) {
+              if (!player.unlockedRecipes.includes(rId)) {
+                player.unlockedRecipes.push(rId);
+              }
+            }
+          }
+        }
+        autoTriggeredQuest = nextQuest;
+      }
+    }
+
+    player.markModified('quests');
+    player.markModified('inventory');
+    player.markModified('knownLocations');
+    player.markModified('unlockedRecipes');
+    await player.save();
+
+    const allLocations = await Location.find({});
+
+    let completeText = quest.completeText || '';
+    if (completeText) {
+      completeText = completeText.replace(/玩家名稱/g, player.name).replace(/\{playerName\}/g, player.name);
+    }
+
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      locations: allLocations,
+      completeText,
+      submitNpcId: quest.submitNpcId,
+      quest: {
+        questId: quest.questId,
+        title: quest.title,
+        description: quest.description,
+        submitNpcId: quest.submitNpcId,
+      },
+      autoTriggeredQuest: autoTriggeredQuest ? {
+        questId: autoTriggeredQuest.questId,
+        title: autoTriggeredQuest.title,
+        description: autoTriggeredQuest.description,
+        triggerNpcId: autoTriggeredQuest.triggerNpcId,
+        submitNpcId: autoTriggeredQuest.submitNpcId,
+      } : null,
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/quest/submit:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

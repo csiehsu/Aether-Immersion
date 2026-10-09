@@ -19,7 +19,7 @@ export const CharacterCreationView = () => {
       name: language === 'en' ? 'Martha' : '瑪莎',
       role: language === 'en' ? 'Grocer' : '雜貨商人',
       icon: '🛒',
-      desc: language === 'en' ? 'A grocery merchant with a sharp intuition for market trends.' : '對市場走向敏感的雜貨商人。',
+      desc: language === 'en' ? 'A resourceful variety shop owner dedicated to taking care of the daily needs of the townspeople.' : '心靈手巧的雜貨店老闆，勤於照顧居民們的日常民生需求。',
     },
     {
       id: 'Garrick',
@@ -33,14 +33,14 @@ export const CharacterCreationView = () => {
       name: language === 'en' ? 'Vance' : '凡斯',
       role: language === 'en' ? 'Fisherman' : '漁夫',
       icon: '🎣',
-      desc: language === 'en' ? 'A seasoned fisherman of few words who lets his skills speak for themselves.' : '老練的漁夫，話不多，靠技術說話。',
+      desc: language === 'en' ? 'A carefree fisherman who always locates schools of fish relying on natural intuition.' : '悠然自得的漁夫，總是能靠天生的直覺找到魚群。',
     },
     {
-      id: 'Corinne',
-      name: language === 'en' ? 'Corinne' : '柯妮',
-      role: language === 'en' ? 'Horse Breeder' : '養馬人',
-      icon: '👩‍🌾',
-      desc: language === 'en' ? 'A gentle and empathetic horse breeder.' : '溫柔又善解人意的養馬人。',
+      id: 'Brock',
+      name: language === 'en' ? 'Brock' : '布洛克',
+      role: language === 'en' ? 'Miner' : '礦工',
+      icon: '⛏️',
+      desc: language === 'en' ? 'A hearty and enthusiastic miner who quickly makes friends with anyone.' : '爽朗又熱心的礦工，總是能迅速和人混熟。',
     },
   ];
 
