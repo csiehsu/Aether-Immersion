@@ -554,6 +554,13 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
 
+    const energyCost = (recipe.energyCost || 0) * numCraftQty;
+    const currentEnergy = player.energy ?? 0;
+    if (currentEnergy < energyCost) {
+      return false;
+    }
+    const newEnergy = Math.max(0, currentEnergy - energyCost);
+
     const reqItems = recipe.requiredItems || [];
     let updatedInv = inventory.map((item) => ({ ...item }));
 
@@ -578,7 +585,10 @@ export const useGameStore = create((set, get) => ({
       const dbI = items.find((i) => i.itemId === invItem.itemId);
       const types = dbI && dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
 
-      if (!types.includes(req.type)) {
+      const matchesItem = req.itemId ? invItem.itemId === req.itemId : false;
+      const matchesType = req.type ? types.includes(req.type) : false;
+
+      if (!matchesItem && !matchesType) {
         return false;
       }
 
@@ -598,22 +608,22 @@ export const useGameStore = create((set, get) => ({
 
     let calculatedDurability = -1;
     const firstSelId = selectedMaterials[0];
-    if (firstSelId) {
-      const selectedMatInv = inventory.find((i) => i.itemId === firstSelId);
-      if (selectedMatInv) {
-        const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId);
-        const matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
-          ? selectedMatInv.durability
-          : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
-
-        if (recipe.durabilityFormula && matDurability > 0) {
-          try {
-            const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);
-            calculatedDurability = computeFn({ durability: matDurability });
-          } catch (err) {
-            console.error('[Durability Formula Error]', err);
-          }
+    if (recipe.durabilityFormula) {
+      let matDurability = -1;
+      if (firstSelId) {
+        const selectedMatInv = inventory.find((i) => i.itemId === firstSelId);
+        if (selectedMatInv) {
+          const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId);
+          matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
+            ? selectedMatInv.durability
+            : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
         }
+      }
+      try {
+        const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);
+        calculatedDurability = computeFn({ durability: matDurability > 0 ? matDurability : 0 });
+      } catch (err) {
+        console.error('[Durability Formula Error]', err);
       }
     }
 
@@ -684,13 +694,61 @@ export const useGameStore = create((set, get) => ({
       }
     }
 
-    set({ inventory: updatedInv });
+    const questsList = get().questsList || [];
+    let updatedQuests = player.quests ? player.quests.map((q) => ({
+      ...q,
+      progress: q.progress ? q.progress.map((p) => ({ ...p })) : [],
+    })) : [];
+
+    let hasQuestUpdate = false;
+    for (const out of outputItems) {
+      const outItemId = out.itemId || recipe.recipeId;
+      const dbOut = items.find(
+        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
+      );
+      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+      const addQty = (out.quantity || 1) * numCraftQty;
+
+      for (const q of updatedQuests) {
+        if (q.status !== 'IN_PROGRESS') continue;
+        const qDef = (questsList || []).find((def) => def.questId === q.questId);
+        if (!qDef) continue;
+        (qDef.objectives || []).forEach((obj, objIdx) => {
+          if (obj.type === 'CRAFT' && obj.targetId === finalItemId) {
+            let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
+            if (!prog) {
+              prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
+              q.progress = q.progress || [];
+              q.progress.push(prog);
+            }
+            prog.currentCount = (prog.currentCount || 0) + addQty;
+            if (prog.currentCount >= (obj.requiredCount || 1)) {
+              prog.isCompleted = true;
+            }
+            hasQuestUpdate = true;
+          }
+        });
+      }
+    }
+
+    set((state) => ({
+      inventory: updatedInv,
+      player: {
+        ...state.player,
+        energy: newEnergy,
+        ...(hasQuestUpdate ? { quests: updatedQuests } : {}),
+      },
+    }));
 
     try {
       await fetch(`${API_BASE}/player`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inventory: updatedInv }),
+        body: JSON.stringify({
+          inventory: updatedInv,
+          energy: newEnergy,
+          ...(hasQuestUpdate ? { quests: updatedQuests } : {}),
+        }),
       });
     } catch (err) {
       console.error('[Craft Sync Error]', err);
@@ -718,6 +776,7 @@ export const useGameStore = create((set, get) => ({
 
     const hpGain = (dbItem?.nutrition?.hp || 0) * useCount;
     const strGain = (dbItem?.nutrition?.strength || 0) * useCount;
+    const dexGain = (dbItem?.nutrition?.dexterity || 0) * useCount;
 
     const currentHp = player.hp ?? 100;
     const maxHp = player.maxHp ?? 100;
@@ -725,6 +784,9 @@ export const useGameStore = create((set, get) => ({
 
     const currentStr = player.str ?? 1;
     const newStr = strGain !== 0 ? currentStr + strGain : currentStr;
+
+    const currentDex = player.dex ?? 1;
+    const newDex = dexGain !== 0 ? currentDex + dexGain : currentDex;
 
     let updatedInv = [...inventory];
     if (availableCount <= useCount) {
@@ -741,6 +803,7 @@ export const useGameStore = create((set, get) => ({
         ...state.player,
         hp: newHp,
         str: newStr,
+        dex: newDex,
       },
       inventory: updatedInv,
     }));
@@ -752,6 +815,7 @@ export const useGameStore = create((set, get) => ({
         body: JSON.stringify({
           hp: newHp,
           str: newStr,
+          dex: newDex,
           inventory: updatedInv,
         }),
       });
@@ -937,7 +1001,7 @@ export const useGameStore = create((set, get) => ({
     return npcId;
   },
 
-  acceptQuestFromPlacedItem: async (questId, locationId, instanceId) => {
+  acceptQuest: async (questId, locationId = '', instanceId = '') => {
     try {
       const res = await fetch(`${API_BASE}/quest/accept`, {
         method: 'POST',
@@ -966,6 +1030,10 @@ export const useGameStore = create((set, get) => ({
     } catch (err) {
       console.error('[Accept Quest Error]', err);
     }
+  },
+
+  acceptQuestFromPlacedItem: async (questId, locationId, instanceId) => {
+    return get().acceptQuest(questId, locationId, instanceId);
   },
 
   submitQuest: async (questId) => {

@@ -54,6 +54,13 @@ const PlayerQuestSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const UnlockedRecipeSchema = new mongoose.Schema(
+  {
+    recipeId: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const PlayerSchema = new mongoose.Schema(
   {
     name: { type: String, default: '冒險者' },
@@ -82,7 +89,7 @@ const PlayerSchema = new mongoose.Schema(
       default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
     },
     inventory: [InventoryItemSchema],
-    unlockedRecipes: [{ type: String }],
+    unlockedRecipes: [UnlockedRecipeSchema],
     unlockedClues: [{ type: String }],
     quests: [PlayerQuestSchema],
   },

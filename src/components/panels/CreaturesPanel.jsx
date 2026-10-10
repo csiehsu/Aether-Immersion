@@ -11,12 +11,43 @@ export const CreaturesPanel = () => {
   const inventory = useGameStore((state) => state.inventory || []);
   const questsList = useGameStore((state) => state.questsList || []);
   const submitQuest = useGameStore((state) => state.submitQuest);
+  const acceptQuest = useGameStore((state) => state.acceptQuest);
   const startBattle = useGameStore((state) => state.startBattle);
   const isBattling = useGameStore((state) => state.isBattling);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
   const [selectedNpcId, setSelectedNpcId] = useState(null);
+
+  const getAvailableQuestForNpc = (cId, cName) => {
+    const pQuests = player?.quests || [];
+    for (const qDef of (questsList || [])) {
+      if (qDef.displayable !== true) continue;
+      if (qDef.triggerType !== 'NPC') continue;
+      const matchesNpc = qDef.triggerNpcId === cId || (cName && qDef.triggerNpcId === cName);
+      if (!matchesNpc) continue;
+
+      const alreadyHandled = pQuests.some(
+        (pq) => pq.questId === qDef.questId && (pq.status === 'IN_PROGRESS' || pq.status === 'COMPLETED')
+      );
+      if (alreadyHandled) continue;
+
+      if (qDef.minLevel && (player?.level || 1) < qDef.minLevel) continue;
+
+      if (Array.isArray(qDef.prerequisites) && qDef.prerequisites.length > 0) {
+        const meetsPrereq = qDef.prerequisites.every((req) => {
+          if (req.type === 'QUEST_COMPLETED') {
+            return pQuests.some((pq) => pq.questId === req.targetId && pq.status === 'COMPLETED');
+          }
+          return true;
+        });
+        if (!meetsPrereq) continue;
+      }
+
+      return qDef;
+    }
+    return null;
+  };
 
   const getActiveQuestForNpc = (cId) => {
     const pQuests = player?.quests || [];
@@ -46,6 +77,16 @@ export const CreaturesPanel = () => {
           .filter((i) => i.itemId === obj.targetId)
           .reduce((sum, item) => sum + (item.count || 1), 0);
         if (ownedCount < (obj.requiredCount || 1)) {
+          return false;
+        }
+      }
+      if (obj.type === 'CRAFT') {
+        const prog = pQuest.progress?.[idx];
+        const progCount = prog?.currentCount || 0;
+        const ownedCount = (inventory || [])
+          .filter((i) => i.itemId === obj.targetId)
+          .reduce((sum, item) => sum + (item.count || 1), 0);
+        if (!prog?.isCompleted && progCount < (obj.requiredCount || 1) && ownedCount < (obj.requiredCount || 1)) {
           return false;
         }
       }
@@ -88,7 +129,9 @@ export const CreaturesPanel = () => {
               const cName = getLocalizedName(c, language);
               const icon = getNpcIcon(c);
               const isSelected = selectedNpcId === cId;
-              const questInfo = getActiveQuestForNpc(cId);
+              const activeQuestInfo = getActiveQuestForNpc(cId);
+              const availableQuest = getAvailableQuestForNpc(cId, c.name);
+              const hasQuestBadge = Boolean(activeQuestInfo || availableQuest);
 
               return (
                 <div
@@ -97,7 +140,7 @@ export const CreaturesPanel = () => {
                   onClick={() => setSelectedNpcId(isSelected ? null : cId)}
                 >
                   <div className="creature-tile-avatar">
-                    {questInfo && <span className="quest-exclamation-badge">❗</span>}
+                    {hasQuestBadge && <span className="quest-exclamation-badge">❗</span>}
                     {c.imageUrl ? (
                       <img src={c.imageUrl} alt={cName} className="creature-img" />
                     ) : (
@@ -122,6 +165,7 @@ export const CreaturesPanel = () => {
             const cHp = c.stats?.maxHP ?? c.hp;
             const isHuman = rawType === 'HUMAN';
             const questInfo = getActiveQuestForNpc(cId);
+            const availableQuest = getAvailableQuestForNpc(cId, c.name);
             const canSubmit = questInfo ? checkCanSubmitQuest(questInfo.qDef, questInfo.pQuest) : false;
 
             return (
@@ -134,7 +178,43 @@ export const CreaturesPanel = () => {
                   {cHp ? <span className="creature-hp">{t.creatureHp}: {cHp}</span> : null}
                 </div>
 
-                {questInfo && (
+                {availableQuest && (
+                  <div style={{ marginTop: '8px', padding: '10px', background: 'rgba(59, 130, 246, 0.12)', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.35)' }}>
+                    <div style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>📜</span>
+                      <span>{language === 'en' ? (availableQuest.titleEn || availableQuest.title) : availableQuest.title}</span>
+                      <span style={{ fontSize: '0.75rem', background: '#3b82f6', color: '#fff', padding: '1px 6px', borderRadius: '4px', marginLeft: 'auto' }}>
+                        {language === 'en' ? 'New Quest' : '可承接任務'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#e2e8f0', marginBottom: '10px', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                      {language === 'en' ? (availableQuest.descriptionEn || availableQuest.description) : availableQuest.description}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-accept-quest"
+                      style={{
+                        width: '100%',
+                        padding: '8px 16px',
+                        background: '#3b82f6',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        fontSize: '0.9rem',
+                      }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await acceptQuest(availableQuest.questId);
+                      }}
+                    >
+                      {language === 'en' ? 'Accept Quest' : '承接任務'}
+                    </button>
+                  </div>
+                )}
+
+                {questInfo && (questInfo.qDef.displayable === true || canSubmit) && (
                   <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
                     <div style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '4px', fontSize: '0.875rem' }}>
                       📜 {questInfo.qDef.title}

@@ -75,7 +75,13 @@ export const InventoryPanel = () => {
               : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
 
             const hasNutrition = Boolean(
-              dbItem?.nutrition && (dbItem.nutrition.hp !== 0 || dbItem.nutrition.strength !== 0)
+              dbItem?.nutrition && (
+                dbItem.nutrition.hp !== 0 ||
+                dbItem.nutrition.strength !== 0 ||
+                dbItem.nutrition.dexterity !== 0 ||
+                dbItem.nutrition.speed !== 0 ||
+                dbItem.nutrition.water !== 0
+              )
             );
 
             return (

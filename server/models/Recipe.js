@@ -18,6 +18,7 @@ const RecipeSchema = new mongoose.Schema(
     requiredItems: [ItemRequirementSchema],
     requiredToolTypes: [{ type: String }],
     durabilityFormula: { type: String, default: '' },
+    energyCost: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

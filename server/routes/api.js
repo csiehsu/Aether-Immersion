@@ -127,6 +127,25 @@ const sanitizeInventoryItems = (inventory) => {
   return clean;
 };
 
+const sanitizeUnlockedRecipes = (raw) => {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  const sanitized = [];
+  for (const item of list) {
+    if (!item) continue;
+    let rId = '';
+    if (typeof item === 'string') {
+      rId = item.trim();
+    } else if (typeof item === 'object') {
+      rId = (item.recipeId || item.id || '').toString().trim();
+    }
+    if (rId && !sanitized.some((r) => r.recipeId === rId)) {
+      sanitized.push({ recipeId: rId });
+    }
+  }
+  return sanitized;
+};
+
 const formatPlayerResponse = (playerDoc) => {
   const p = playerDoc.toObject ? playerDoc.toObject() : { ...playerDoc };
   const rawStats = p.stats || {};
@@ -142,6 +161,7 @@ const formatPlayerResponse = (playerDoc) => {
     : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
   p.money = p.money ?? 0;
   p.mentor = p.mentor || 'Martha';
+  p.unlockedRecipes = sanitizeUnlockedRecipes(p.unlockedRecipes);
   return p;
 };
 
@@ -377,6 +397,9 @@ router.put('/player', async (req, res) => {
     if (updateData.inventory) {
       updateData.inventory = sanitizeInventoryItems(updateData.inventory);
     }
+    if (updateData.unlockedRecipes) {
+      updateData.unlockedRecipes = sanitizeUnlockedRecipes(updateData.unlockedRecipes);
+    }
     let player = await Player.findOne();
     if (player) {
       if (updateData.stats) {
@@ -387,6 +410,15 @@ router.put('/player', async (req, res) => {
         delete updateData.stats;
       }
       Object.assign(player, updateData);
+      if (updateData.quests) {
+        player.markModified('quests');
+      }
+      if (updateData.inventory) {
+        player.markModified('inventory');
+      }
+      if (updateData.unlockedRecipes) {
+        player.markModified('unlockedRecipes');
+      }
       await player.save();
     }
     return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
@@ -590,9 +622,11 @@ router.post('/quest/accept', async (req, res) => {
         }
       }
       if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
-        for (const rId of grants.unlockedRecipes) {
-          if (!player.unlockedRecipes.includes(rId)) {
-            player.unlockedRecipes.push(rId);
+        const toAdd = sanitizeUnlockedRecipes(grants.unlockedRecipes);
+        player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
+        for (const item of toAdd) {
+          if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
+            player.unlockedRecipes.push(item);
           }
         }
       }
@@ -619,6 +653,10 @@ router.post('/quest/accept', async (req, res) => {
       }
     }
 
+    player.markModified('quests');
+    player.markModified('inventory');
+    player.markModified('knownLocations');
+    player.markModified('unlockedRecipes');
     await player.save();
     const allLocations = await Location.find({});
     return res.json({
@@ -685,9 +723,11 @@ router.post('/quest/submit', async (req, res) => {
       }
     }
     if (rewards.unlockedRecipes && rewards.unlockedRecipes.length > 0) {
-      for (const rId of rewards.unlockedRecipes) {
-        if (!player.unlockedRecipes.includes(rId)) {
-          player.unlockedRecipes.push(rId);
+      const toAdd = sanitizeUnlockedRecipes(rewards.unlockedRecipes);
+      player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
+      for (const item of toAdd) {
+        if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
+          player.unlockedRecipes.push(item);
         }
       }
     }
@@ -744,9 +784,11 @@ router.post('/quest/submit', async (req, res) => {
             }
           }
           if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
-            for (const rId of grants.unlockedRecipes) {
-              if (!player.unlockedRecipes.includes(rId)) {
-                player.unlockedRecipes.push(rId);
+            const toAdd = sanitizeUnlockedRecipes(grants.unlockedRecipes);
+            player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
+            for (const item of toAdd) {
+              if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
+                player.unlockedRecipes.push(item);
               }
             }
           }

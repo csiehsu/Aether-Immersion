@@ -18,7 +18,7 @@ const ObjectiveSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ['SUBMIT_ITEM', 'DELIVER_ITEM', 'TALK_NPC', 'KILL_MONSTER', 'VISIT_LOCATION', 'HAS_ITEM'],
+      enum: ['SUBMIT_ITEM', 'DELIVER_ITEM', 'TALK_NPC', 'KILL_MONSTER', 'VISIT_LOCATION', 'HAS_ITEM', 'CRAFT'],
     },
     targetId: { type: String, default: '' },
     targetNpcId: { type: String, default: '' },
@@ -36,13 +36,20 @@ const RewardItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const UnlockedRecipeSchema = new mongoose.Schema(
+  {
+    recipeId: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const RewardsSchema = new mongoose.Schema(
   {
     money: { type: Number, default: 0 },
     exp: { type: Number, default: 0 },
     items: [RewardItemSchema],
     unlockedLocations: [{ type: String }],
-    unlockedRecipes: [{ type: String }],
+    unlockedRecipes: [UnlockedRecipeSchema],
   },
   { _id: false }
 );
@@ -51,7 +58,7 @@ const GrantsOnAcceptSchema = new mongoose.Schema(
   {
     items: [RewardItemSchema],
     unlockedLocations: [{ type: String }],
-    unlockedRecipes: [{ type: String }],
+    unlockedRecipes: [UnlockedRecipeSchema],
   },
   { _id: false }
 );
@@ -68,7 +75,7 @@ const QuestSchema = new mongoose.Schema(
     autoTrigger: { type: String, default: '' },
     triggerType: {
       type: String,
-      enum: ['NPC', 'LOCATION', 'LOCATION_ITEM'],
+      enum: ['NPC', 'LOCATION', 'LOCATION_ITEM', 'auto', 'AUTO'],
       default: 'NPC',
     },
     triggerNpcId: { type: String, default: '' },
@@ -76,6 +83,7 @@ const QuestSchema = new mongoose.Schema(
     triggerItemId: { type: String, default: '' },
     submitNpcId: { type: String, default: '' },
     autoRemoveTriggerItemOnComplete: { type: Boolean, default: true },
+    displayable: { type: Boolean, default: false },
     prerequisites: [PrerequisiteSchema],
     minLevel: { type: Number, default: 1 },
     isRepeatable: { type: Boolean, default: false },

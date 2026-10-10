@@ -12,6 +12,7 @@ const NutritionSchema = new mongoose.Schema(
   {
     strength: { type: Number, default: 0 },
     speed: { type: Number, default: 0 },
+    dexterity: { type: Number, default: 0 },
     hp: { type: Number, default: 0 },
     water: { type: Number, default: 0 },
   },
@@ -29,7 +30,7 @@ const ItemSchema = new mongoose.Schema(
     type: [{ type: String }],
     durability: { type: Number, default: -1 },
     weight: { type: Number, default: 1 },
-    smell: { type: SmellSchema, default: () => ({}) },
+    smell: [SmellSchema],
     nutrition: { type: NutritionSchema, default: () => ({}) },
   },
   { timestamps: true }

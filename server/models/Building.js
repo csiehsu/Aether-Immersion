@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 const BuildingSchema = new mongoose.Schema(
   {
     buildingId: { type: String, required: true, unique: true },
+    name: { type: String, default: '' },
+    nameEn: { type: String, default: '' },
     type: { type: String, required: true },
     permanent: { type: Boolean, default: false },
   },

@@ -42,6 +42,13 @@ export const CraftPanel = () => {
     );
   };
 
+  const unlockedRecipes = player?.unlockedRecipes || [];
+  const visibleRecipes = recipes.filter((r) => {
+    const id = r.recipeId || r.id;
+    if (id === 'recipe001' || id === 'recipe002') return true;
+    return unlockedRecipes.some((ur) => (typeof ur === 'string' ? ur === id : ur?.recipeId === id));
+  });
+
   const checkMaterialsAvailable = (rec) => {
     if (!rec.requiredItems || rec.requiredItems.length === 0) {
       return true;
@@ -49,14 +56,16 @@ export const CraftPanel = () => {
     return rec.requiredItems.every((req) => {
       return inventory.some((inv) => {
         const dbI = items.find((i) => i.itemId === inv.itemId);
-        if (!dbI || !dbI.type) return false;
-        const types = Array.isArray(dbI.type) ? dbI.type : [dbI.type];
-        return types.includes(req.type) && (inv.count || 1) >= req.quantity;
+        if (!dbI) return false;
+        const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+        const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+        const matchesType = req.type ? types.includes(req.type) : false;
+        return (matchesItem || matchesType) && (inv.count || 1) >= req.quantity;
       });
     });
   };
 
-  const selectedRecipe = recipes.find(
+  const selectedRecipe = visibleRecipes.find(
     (r) => (r.recipeId || r.id || r.name) === selectedRecipeId
   );
 
@@ -83,14 +92,14 @@ export const CraftPanel = () => {
 
   return (
     <CollapsiblePanel title={t.craftTitle} className="craft-panel">
-      {recipes.length === 0 ? (
+      {visibleRecipes.length === 0 ? (
         <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
           {language === 'en' ? 'No recipes available.' : '暫無合成配方。'}
         </div>
       ) : (
         <div className="recipes-panel-wrapper">
           <div className="recipes-horizontal-grid">
-            {recipes.map((rec, idx) => {
+            {visibleRecipes.map((rec, idx) => {
               const recId = rec.recipeId || rec.id || rec.name || idx;
               const recName = getLocalizedName(rec, language);
               const isSelected = selectedRecipeId === recId;
@@ -133,7 +142,9 @@ export const CraftPanel = () => {
               return (inv.count || 1) >= req.quantity * craftQty;
             });
 
-            const isReadyToCraft = hasTools && hasSelectedAllMaterials;
+            const totalEnergyCost = (rec.energyCost || 0) * craftQty;
+            const hasEnergy = (player?.energy ?? 0) >= totalEnergyCost;
+            const isReadyToCraft = hasTools && hasSelectedAllMaterials && hasEnergy;
 
             return (
               <div className="recipe-detail-window">
@@ -148,15 +159,19 @@ export const CraftPanel = () => {
                     const reqTotal = req.quantity * craftQty;
                     const eligibleItems = inventory.filter((inv) => {
                       const dbI = items.find((i) => i.itemId === inv.itemId);
-                      if (!dbI || !dbI.type) return false;
-                      const types = Array.isArray(dbI.type) ? dbI.type : [dbI.type];
-                      return types.includes(req.type) && (inv.count || 1) >= reqTotal;
+                      if (!dbI) return false;
+                      const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+                      const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+                      const matchesType = req.type ? types.includes(req.type) : false;
+                      return (matchesItem || matchesType) && (inv.count || 1) >= reqTotal;
                     });
+                    const targetItem = req.itemId ? items.find((it) => it.itemId === req.itemId) : null;
+                    const reqLabel = targetItem ? getLocalizedName(targetItem, language) : (req.type || req.itemId);
 
                     return (
                       <div className="recipe-detail-row vertical" key={reqIdx} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                         <span className="recipe-detail-label">
-                          {availableMatLabelText} ({req.type} x{reqTotal})：
+                          {availableMatLabelText} ({reqLabel} x{reqTotal})：
                         </span>
                         <div className="material-options-wrapper">
                           {eligibleItems.length > 0 ? (
@@ -186,8 +201,8 @@ export const CraftPanel = () => {
                           ) : (
                             <span className="no-material-notice">
                               {language === 'en'
-                                ? `No single item matching ${req.type} (req >= ${reqTotal})`
-                                : `無符合數量 (≥${reqTotal}) 的 ${req.type} 材料`}
+                                ? `No single item matching ${reqLabel} (req >= ${reqTotal})`
+                                : `無符合數量 (≥${reqTotal}) 的 ${reqLabel} 材料`}
                             </span>
                           )}
                         </div>
@@ -199,6 +214,13 @@ export const CraftPanel = () => {
                     <span className="recipe-detail-label">{toolLabelText}</span>
                     <span className="recipe-detail-val">{reqToolsStr}</span>
                   </div>
+
+                  {rec.energyCost ? (
+                    <div className="recipe-detail-row">
+                      <span className="recipe-detail-label">{language === 'en' ? 'Energy Cost:' : '精力消耗：'}</span>
+                      <span className="recipe-detail-val">{totalEnergyCost}</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="recipe-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
