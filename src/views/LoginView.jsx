@@ -1,8 +1,12 @@
-import React from 'react';
 import portBg from '../assets/images/background/Port.png';
 import { useGameStore, translations } from '../store/useGameStore';
 import { GoogleLoginButton } from '../components/GoogleLoginButton';
 
+/**
+ * 遊戲登入入口視圖元件。
+ * 顯示遊戲名稱、背景視覺、資料庫狀態徽章、語系切換器與 Google 登入按鈕。
+ * @returns {JSX.Element}
+ */
 export const LoginView = () => {
   const language = useGameStore((state) => state.language);
   const setLanguage = useGameStore((state) => state.setLanguage);

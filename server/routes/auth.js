@@ -6,7 +6,11 @@ import { isDbConnected } from '../utils/dbHelper.js';
 const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Helper to decode JWT fallback if client ID is placeholder
+/**
+ * 解析 Google Credential JWT Payload（當開發環境 Client ID 為佔位符時的 Fallback 解析機制）。
+ * @param {string} token - Google ID Token JWT 字串。
+ * @returns {Object|null} 解析成功回傳 Payload 物件，解析失敗則回傳 null。
+ */
 const parseJwt = (token) => {
   try {
     const base64Url = token.split('.')[1];

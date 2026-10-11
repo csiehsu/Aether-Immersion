@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 
+/**
+ * 當前場景地面放置物品 (Placed Items) 面板元件。
+ * 顯示地面遺留物品，並提供拾取入背包或觸發任務接取功能。
+ * @returns {JSX.Element}
+ */
 export const LocationItemsPanel = () => {
   const locations = useGameStore((state) => state.locations || []);
   const player = useGameStore((state) => state.player || {});
@@ -20,6 +25,10 @@ export const LocationItemsPanel = () => {
 
   const placedItems = currentLocation?.placedItems || [];
 
+  /**
+   * 選取或取消選取地面上的放置物品。
+   * @param {string} instanceId - 物品實體識別碼。
+   */
   const handleSelectItem = (instanceId) => {
     if (selectedInstanceId === instanceId) {
       setSelectedInstanceId(null);

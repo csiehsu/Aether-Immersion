@@ -9,7 +9,6 @@ import { Npc } from '../models/Npc.js';
 import { Building } from '../models/Building.js';
 import { BattleSkill } from '../models/BattleSkill.js';
 import { Quest } from '../models/Quest.js';
-import { Clue } from '../models/Clue.js';
 import { initialItems } from '../seeds/seedItems.js';
 import { initialLocations } from '../seeds/seedLocations.js';
 import { initialRecipes } from '../seeds/seedRecipes.js';
@@ -17,8 +16,7 @@ import { initialNpcs } from '../seeds/seedNpcs.js';
 import { initialBuildings } from '../seeds/seedBuildings.js';
 import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
 import { initialQuests } from '../seeds/seedQuests.js';
-import { initialClues } from '../seeds/seedClues.js';
-import { isDbConnected, fetchCollectionData } from '../utils/dbHelper.js';
+import { isDbConnected, fetchCollectionData, generateInstanceId } from '../utils/dbHelper.js';
 
 const router = express.Router();
 
@@ -41,72 +39,34 @@ router.get('/health', (req, res) => {
   });
 });
 
-// GET /api/items
-router.get('/items', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Item, initialItems);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/items:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
+// Unified Collection Routes (Deduplicated GET endpoints)
+const collectionRoutes = [
+  { path: '/items', model: Item, initialData: initialItems },
+  { path: '/locations', model: Location, initialData: initialLocations },
+  { path: '/recipes', model: Recipe, initialData: initialRecipes },
+  { path: '/npcs', model: Npc, initialData: initialNpcs },
+  { path: '/buildings', model: Building, initialData: initialBuildings },
+  { path: '/battle-skills', model: BattleSkill, initialData: initialBattleSkills },
+  { path: '/quests', model: Quest, initialData: initialQuests },
+];
+
+collectionRoutes.forEach(({ path, model, initialData }) => {
+  router.get(path, async (req, res) => {
+    try {
+      const result = await fetchCollectionData(model, initialData);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      console.error(`[API Error] GET ${path}:`, err);
+      res.status(503).json({ success: false, error: err.message });
+    }
+  });
 });
 
-// GET /api/locations
-router.get('/locations', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Location, initialLocations);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/locations:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/recipes
-router.get('/recipes', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Recipe, initialRecipes);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/recipes:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/npcs
-router.get('/npcs', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Npc, initialNpcs);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/npcs:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/buildings
-router.get('/buildings', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Building, initialBuildings);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/buildings:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/battle-skills
-router.get('/battle-skills', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(BattleSkill, initialBattleSkills);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/battle-skills:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
+/**
+ * 清理並標準化玩家背包道具結構，確保具備 instanceId、itemId、count 等必填欄位。
+ * @param {Array<Object>} inventory - 原始道具陣列。
+ * @returns {Array<Object>} 標準化後的道具陣列。
+ */
 const sanitizeInventoryItems = (inventory) => {
   if (!Array.isArray(inventory)) return [];
   const clean = [];
@@ -115,7 +75,7 @@ const sanitizeInventoryItems = (inventory) => {
     if (!raw) continue;
     const itemId = raw.itemId || raw.id || '';
     if (!itemId) continue;
-    const instanceId = raw.instanceId || `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const instanceId = raw.instanceId || generateInstanceId();
     clean.push({
       instanceId,
       itemId,
@@ -127,6 +87,11 @@ const sanitizeInventoryItems = (inventory) => {
   return clean;
 };
 
+/**
+ * 清理並標準化已解鎖配方清單，過濾空值並去除重複的配方 ID。
+ * @param {Array<string|Object>|string|Object} raw - 原始配方陣列或單一配方物件/ID。
+ * @returns {Array<{ recipeId: string }>} 去除重複後的配方物件陣列。
+ */
 const sanitizeUnlockedRecipes = (raw) => {
   if (!raw) return [];
   const list = Array.isArray(raw) ? raw : [raw];
@@ -146,16 +111,92 @@ const sanitizeUnlockedRecipes = (raw) => {
   return sanitized;
 };
 
+/**
+ * 統一發放道具、解鎖地點與解鎖配方至玩家資料。
+ * @param {Object} player - 玩家 Mongoose 文件物件。
+ * @param {Object} [grants={}] - 發放獎勵內容物件。
+ * @param {Array<{ itemId: string, count?: number, quality?: string }>} [grants.items] - 要發放的道具陣列。
+ * @param {Array<string>} [grants.unlockedLocations] - 要解鎖的地點 ID 陣列。
+ * @param {Array<string|{ recipeId: string }>} [grants.unlockedRecipes] - 要解鎖的配方陣列。
+ * @returns {void}
+ */
+const applyPlayerGrants = (player, grants = {}) => {
+  if (!player || !grants) return;
+  if (grants.items && grants.items.length > 0) {
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    for (const gItem of grants.items) {
+      player.inventory.push({
+        instanceId: generateInstanceId(),
+        itemId: gItem.itemId,
+        count: gItem.count || 1,
+        quality: gItem.quality || '普通',
+      });
+    }
+  }
+  if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
+    for (const locId of grants.unlockedLocations) {
+      if (!player.knownLocations.includes(locId)) {
+        player.knownLocations.push(locId);
+      }
+    }
+  }
+  if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
+    const toAdd = sanitizeUnlockedRecipes(grants.unlockedRecipes);
+    player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
+    for (const item of toAdd) {
+      if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
+        player.unlockedRecipes.push(item);
+      }
+    }
+  }
+};
+
+/**
+ * 將指定場景中的地面放置道具 (Placed Item) 拾取並轉移至玩家背包中。
+ * @param {Object} location - 地點 Mongoose 文件物件。
+ * @param {string} instanceId - 放置道具的唯一實體識別碼。
+ * @param {Object} player - 玩家 Mongoose 文件物件。
+ * @returns {Object|null} 拾取成功回傳該放置道具資料，找不到則回傳 null。
+ */
+const transferPlacedItemToPlayer = (location, instanceId, player) => {
+  if (!location || !instanceId || !player) return null;
+  const placedIndex = location.placedItems.findIndex((p) => p.instanceId === instanceId);
+  if (placedIndex < 0) return null;
+
+  const itemToPick = location.placedItems[placedIndex];
+  location.placedItems.splice(placedIndex, 1);
+
+  player.inventory = sanitizeInventoryItems(player.inventory);
+  player.inventory.push({
+    instanceId: generateInstanceId(),
+    itemId: itemToPick.itemId,
+    count: 1,
+    quality: '普通',
+  });
+  return itemToPick;
+};
+
+/**
+ * 格式化回傳至前端的玩家資料結構，補齊能力值欄位（包含 water、food）與技能預設值。
+ * @param {Object} playerDoc - 玩家 Mongoose 文件或純資料物件。
+ * @returns {Object} 格式化後的純玩家資料物件。
+ */
 const formatPlayerResponse = (playerDoc) => {
   const p = playerDoc.toObject ? playerDoc.toObject() : { ...playerDoc };
   const rawStats = p.stats || {};
+  const dexVal = rawStats.dexterity ?? p.dex ?? 1;
   p.stats = {
     strength: rawStats.strength ?? p.str ?? 1,
     speed: rawStats.speed ?? p.spd ?? 1,
-    dexerity: rawStats.dexerity ?? p.dex ?? 1,
+    dexterity: dexVal,
     maxHp: rawStats.maxHp ?? p.maxHp ?? 100,
     defense: rawStats.defense ?? 0,
+    water: rawStats.water ?? 100,
+    food: rawStats.food ?? 100,
   };
+  p.str = p.stats.strength;
+  p.spd = p.stats.speed;
+  p.dex = dexVal;
   p.skills = Array.isArray(p.skills) && p.skills.length > 0
     ? p.skills
     : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
@@ -193,6 +234,12 @@ const MENTOR_SHOP_MAP = {
   },
 };
 
+/**
+ * 確保玩家個人的導師自訂房間已建立，若不存在則動態生成並與導師商店建立雙向路徑連接。
+ * @param {string} playerName - 玩家角色名稱。
+ * @param {string} mentorName - 選擇的導師名稱（'Martha' | 'Garrick' | 'Vance' | 'Corinne' | 'Brock'）。
+ * @returns {Promise<{ newRoomId: string, shopLocationId: string }>} 包含新房間 ID 與關聯商店地點 ID 的物件。
+ */
 const ensureCustomRoom = async (playerName, mentorName) => {
   const shopInfo = MENTOR_SHOP_MAP[mentorName] || MENTOR_SHOP_MAP.Martha;
   const newRoomId = `${shopInfo.shopLocationId}_${playerName}_ROOM`;
@@ -251,7 +298,7 @@ router.get('/player', async (req, res) => {
         name: defaultName,
         mentor: defaultMentor,
         isCharacterCreated: false,
-        stats: { strength: 1, speed: 1, dexerity: 1, maxHp: 100, defense: 0 },
+        stats: { strength: 1, speed: 1, dexterity: 1, maxHp: 100, defense: 0, water: 100, food: 100 },
         skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
         level: 1,
         hp: 100,
@@ -303,14 +350,14 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法建立角色！' });
     }
 
-    const { name, mentor, strength, speed, dexerity, str, spd, dex, stats } = req.body;
+    const { name, mentor, strength, speed, dexterity, str, spd, dex, stats } = req.body;
     const validMentors = ['Martha', 'Garrick', 'Vance', 'Corinne', 'Brock'];
     const selectedMentor = validMentors.includes(mentor) ? mentor : 'Martha';
     const trimmedName = (name || '').trim();
 
     const nStr = Number(stats?.strength ?? strength ?? str);
     const nSpd = Number(stats?.speed ?? speed ?? spd);
-    const nDex = Number(stats?.dexerity ?? dexerity ?? dex);
+    const nDex = Number(stats?.dexterity ?? dexterity ?? dex);
 
     if (!trimmedName) {
       return res.status(400).json({ success: false, message: '請輸入角色名稱！' });
@@ -346,9 +393,11 @@ router.post('/player/create-character', async (req, res) => {
       stats: {
         strength: nStr,
         speed: nSpd,
-        dexerity: nDex,
+        dexterity: nDex,
         maxHp,
         defense: 0,
+        water: 100,
+        food: 100,
       },
       skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
       level: 1,
@@ -407,6 +456,7 @@ router.put('/player', async (req, res) => {
           ...player.stats?.toObject(),
           ...updateData.stats,
         };
+        player.markModified('stats');
         delete updateData.stats;
       }
       Object.assign(player, updateData);
@@ -506,28 +556,6 @@ router.post('/logs', async (req, res) => {
   }
 });
 
-// GET /api/quests
-router.get('/quests', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Quest, initialQuests);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/quests:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/clues
-router.get('/clues', async (req, res) => {
-  try {
-    const result = await fetchCollectionData(Clue, initialClues);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[API Error] GET /api/clues:', err);
-    res.status(503).json({ success: false, error: err.message });
-  }
-});
-
 // POST /api/location/pickup-item
 router.post('/location/pickup-item', async (req, res) => {
   try {
@@ -540,27 +568,18 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到該地點！' });
     }
 
-    const placedIndex = location.placedItems.findIndex((p) => p.instanceId === instanceId);
-    if (placedIndex < 0) {
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    const itemToPick = transferPlacedItemToPlayer(location, instanceId, player);
+    if (!itemToPick) {
       return res.status(404).json({ success: false, message: '該地點找不到此道具！' });
     }
 
-    const itemToPick = location.placedItems[placedIndex];
-    location.placedItems.splice(placedIndex, 1);
     await location.save();
-
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
-    if (player) {
-      player.inventory = sanitizeInventoryItems(player.inventory);
-      const newInstId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      player.inventory.push({
-        instanceId: newInstId,
-        itemId: itemToPick.itemId,
-        count: 1,
-        quality: '普通',
-      });
-      await player.save();
-    }
+    await player.save();
 
     const allLocations = await Location.find({});
     return res.json({ success: true, data: formatPlayerResponse(player), locations: allLocations });
@@ -602,53 +621,15 @@ router.post('/quest/accept', async (req, res) => {
         acceptedAt: new Date(),
       });
 
-      const grants = quest.grantsOnAccept || {};
-      if (grants.items && grants.items.length > 0) {
-        player.inventory = sanitizeInventoryItems(player.inventory);
-        for (const gItem of grants.items) {
-          player.inventory.push({
-            instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            itemId: gItem.itemId,
-            count: gItem.count || 1,
-            quality: gItem.quality || '普通',
-          });
-        }
-      }
-      if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
-        for (const locId of grants.unlockedLocations) {
-          if (!player.knownLocations.includes(locId)) {
-            player.knownLocations.push(locId);
-          }
-        }
-      }
-      if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
-        const toAdd = sanitizeUnlockedRecipes(grants.unlockedRecipes);
-        player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
-        for (const item of toAdd) {
-          if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
-            player.unlockedRecipes.push(item);
-          }
-        }
-      }
+      applyPlayerGrants(player, quest.grantsOnAccept);
     }
 
     if (instanceId && locationId) {
       const location = await Location.findOne({ locationId });
       if (location) {
-        const placedIndex = location.placedItems.findIndex((p) => p.instanceId === instanceId);
-        if (placedIndex >= 0) {
-          const itemToPick = location.placedItems[placedIndex];
-          location.placedItems.splice(placedIndex, 1);
+        const itemToPick = transferPlacedItemToPlayer(location, instanceId, player);
+        if (itemToPick) {
           await location.save();
-
-          player.inventory = sanitizeInventoryItems(player.inventory);
-          const newInstId = `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-          player.inventory.push({
-            instanceId: newInstId,
-            itemId: itemToPick.itemId,
-            count: 1,
-            quality: '普通',
-          });
         }
       }
     }
@@ -704,33 +685,7 @@ router.post('/quest/submit', async (req, res) => {
 
     const rewards = quest.rewards || {};
     if (rewards.money) player.money += rewards.money;
-    if (rewards.items && rewards.items.length > 0) {
-      player.inventory = sanitizeInventoryItems(player.inventory);
-      for (const rItem of rewards.items) {
-        player.inventory.push({
-          instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          itemId: rItem.itemId,
-          count: rItem.count || 1,
-          quality: rItem.quality || '普通',
-        });
-      }
-    }
-    if (rewards.unlockedLocations && rewards.unlockedLocations.length > 0) {
-      for (const locId of rewards.unlockedLocations) {
-        if (!player.knownLocations.includes(locId)) {
-          player.knownLocations.push(locId);
-        }
-      }
-    }
-    if (rewards.unlockedRecipes && rewards.unlockedRecipes.length > 0) {
-      const toAdd = sanitizeUnlockedRecipes(rewards.unlockedRecipes);
-      player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
-      for (const item of toAdd) {
-        if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
-          player.unlockedRecipes.push(item);
-        }
-      }
-    }
+    applyPlayerGrants(player, rewards);
 
     if (quest.autoRemoveTriggerItemOnComplete && quest.triggerItemId) {
       player.inventory = sanitizeInventoryItems(player.inventory);
@@ -764,34 +719,7 @@ router.post('/quest/submit', async (req, res) => {
             acceptedAt: new Date(),
           });
 
-          const grants = nextQuest.grantsOnAccept || {};
-          if (grants.items && grants.items.length > 0) {
-            player.inventory = sanitizeInventoryItems(player.inventory);
-            for (const gItem of grants.items) {
-              player.inventory.push({
-                instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                itemId: gItem.itemId,
-                count: gItem.count || 1,
-                quality: gItem.quality || '普通',
-              });
-            }
-          }
-          if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
-            for (const locId of grants.unlockedLocations) {
-              if (!player.knownLocations.includes(locId)) {
-                player.knownLocations.push(locId);
-              }
-            }
-          }
-          if (grants.unlockedRecipes && grants.unlockedRecipes.length > 0) {
-            const toAdd = sanitizeUnlockedRecipes(grants.unlockedRecipes);
-            player.unlockedRecipes = sanitizeUnlockedRecipes(player.unlockedRecipes);
-            for (const item of toAdd) {
-              if (!player.unlockedRecipes.some((r) => r.recipeId === item.recipeId)) {
-                player.unlockedRecipes.push(item);
-              }
-            }
-          }
+          applyPlayerGrants(player, nextQuest.grantsOnAccept);
         }
         autoTriggeredQuest = nextQuest;
       }

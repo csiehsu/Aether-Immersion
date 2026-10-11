@@ -1,7 +1,6 @@
-import React from 'react';
 import { useGameStore } from '../store/useGameStore';
 
-export const toolbarItems = [
+const toolbarItems = [
   { id: 'move', label: '移動', icon: '🧭' },
   { id: 'craft', label: '製作', icon: '🔨' },
   { id: 'gather', label: '區域資源', icon: '🌿' },
@@ -10,9 +9,20 @@ export const toolbarItems = [
   { id: 'log', label: '對話紀錄', icon: '📜' },
 ];
 
+/**
+ * 行動版底部導覽工具列元件。
+ * @param {Object} props - 元件屬性。
+ * @param {(itemId: string) => void} props.onItemClick - 點擊功能項目時的回呼函式。
+ * @param {boolean} props.isOverlayOpen - 浮層面板目前是否開啟。
+ * @returns {JSX.Element}
+ */
 export const BottomToolbar = ({ onItemClick, isOverlayOpen }) => {
   const activeTab = useGameStore((state) => state.activeTab);
 
+  /**
+   * 處理工具列按鈕點擊事件。
+   * @param {string} itemId - 項目識別碼。
+   */
   const handleClick = (itemId) => {
     if (onItemClick) {
       onItemClick(itemId);

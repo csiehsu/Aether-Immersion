@@ -1,7 +1,11 @@
-import React from 'react';
 import { GoogleLogin } from '@react-oauth/google';
 import { useGameStore, translations } from '../store/useGameStore';
 
+/**
+ * Google 帳號快速登入/頭像狀態列元件。
+ * 支援真實 Google OAuth 驗證與本機無金鑰環境下的 Demo 模擬登入。
+ * @returns {JSX.Element}
+ */
 export const GoogleLoginButton = () => {
   const language = useGameStore((state) => state.language);
   const user = useGameStore((state) => state.user);
@@ -9,16 +13,26 @@ export const GoogleLoginButton = () => {
   const logout = useGameStore((state) => state.logout);
   const t = translations[language] || translations['zh-TW'];
 
+  /**
+   * Google 授權成功回呼。
+   * @param {Object} credentialResponse - Google OAuth 回傳憑證物件。
+   */
   const handleGoogleSuccess = async (credentialResponse) => {
     if (credentialResponse?.credential) {
       await loginWithGoogle(credentialResponse.credential);
     }
   };
 
+  /**
+   * Google 授權失敗或使用者取消時的錯誤處理。
+   */
   const handleGoogleError = () => {
     console.warn('[Google Sign-In] Sign-in failed or was closed by user.');
   };
 
+  /**
+   * 本機開發無 Google Client ID 時的示範登入處理。
+   */
   const handleDemoLogin = async () => {
     // Quick Demo Sign-In simulation if testing locally without Google Cloud console setup
     await loginWithGoogle('demo_credential_token');

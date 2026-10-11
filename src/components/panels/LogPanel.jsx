@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedText } from '../../utils/language';
 
+/**
+ * 遊戲訊息與對話紀錄面板元件。
+ * 支援依類型篩選（全部、對話、系統、事件）與自訂玩家對話文字發送功能。
+ * @returns {JSX.Element}
+ */
 export const LogPanel = () => {
   const logs = useGameStore((state) => state.logs);
   const addLog = useGameStore((state) => state.addLog);
@@ -17,6 +22,10 @@ export const LogPanel = () => {
     return log.type === filter;
   });
 
+  /**
+   * 處理發送玩家自訂對話訊息。
+   * @param {React.FormEvent<HTMLFormElement>} e - 表單提交事件。
+   */
   const handleSendDialogue = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;

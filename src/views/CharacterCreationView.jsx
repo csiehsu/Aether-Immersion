@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import portBg from '../assets/images/background/Port.png';
-import { useGameStore, translations } from '../store/useGameStore';
+import { useGameStore } from '../store/useGameStore';
 
+/**
+ * 角色創立視圖元件。
+ * 負責新玩家的角色命名、引路導師選擇（Martha、Garrick、Vance、Brock）、初始能力值（力量、速度、精巧共 30 點）分配驗證與提交。
+ * @returns {JSX.Element}
+ */
 export const CharacterCreationView = () => {
   const language = useGameStore((state) => state.language);
   const createCharacter = useGameStore((state) => state.createCharacter);
@@ -11,7 +16,7 @@ export const CharacterCreationView = () => {
 
   const [strength, setStrength] = useState(1);
   const [speed, setSpeed] = useState(1);
-  const [dexerity, setDexerity] = useState(1);
+  const [dexterity, setDexterity] = useState(1);
 
   const MENTOR_OPTIONS = [
     {
@@ -45,11 +50,16 @@ export const CharacterCreationView = () => {
   ];
 
   const TOTAL_POINTS = 30;
-  const currentSum = strength + speed + dexerity;
+  const currentSum = strength + speed + dexterity;
   const remainingPoints = TOTAL_POINTS - currentSum;
 
   const [errorMsg, setErrorMsg] = useState('');
 
+  /**
+   * 調整單項能力數值分配。
+   * @param {'strength' | 'speed' | 'dexterity'} stat - 能力值名稱。
+   * @param {number} delta - 增減量 (+1 或 -1)。
+   */
   const handleStatChange = (stat, delta) => {
     setErrorMsg('');
     if (stat === 'strength') {
@@ -62,14 +72,18 @@ export const CharacterCreationView = () => {
       if (next < 1) return;
       if (delta > 0 && remainingPoints <= 0) return;
       setSpeed(next);
-    } else if (stat === 'dexerity') {
-      const next = dexerity + delta;
+    } else if (stat === 'dexterity') {
+      const next = dexterity + delta;
       if (next < 1) return;
       if (delta > 0 && remainingPoints <= 0) return;
-      setDexerity(next);
+      setDexterity(next);
     }
   };
 
+  /**
+   * 提交建立角色表單，發送建立請求至後端。
+   * @param {React.FormEvent<HTMLFormElement>} e - 表單提交事件。
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -79,7 +93,7 @@ export const CharacterCreationView = () => {
       return;
     }
 
-    if (strength < 1 || speed < 1 || dexerity < 1) {
+    if (strength < 1 || speed < 1 || dexterity < 1) {
       setErrorMsg(language === 'en' ? 'Minimum value for each attribute is 1!' : '每項能力值最低必須為 1！');
       return;
     }
@@ -93,7 +107,7 @@ export const CharacterCreationView = () => {
       return;
     }
 
-    const success = await createCharacter(charName.trim(), strength, speed, dexerity, selectedMentor);
+    const success = await createCharacter(charName.trim(), strength, speed, dexterity, selectedMentor);
     if (!success) {
       setErrorMsg(language === 'en' ? 'Failed to create character. Please try again.' : '建立角色失敗，請重試！');
     }
@@ -255,11 +269,11 @@ export const CharacterCreationView = () => {
                 </div>
               </div>
               <div className="stepper-wrap">
-                <button type="button" className="btn-step" onClick={() => handleStatChange('dexerity', -1)} disabled={dexerity <= 1}>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('dexterity', -1)} disabled={dexterity <= 1}>
                   -
                 </button>
-                <span className="stat-value">{dexerity}</span>
-                <button type="button" className="btn-step" onClick={() => handleStatChange('dexerity', 1)} disabled={remainingPoints <= 0}>
+                <span className="stat-value">{dexterity}</span>
+                <button type="button" className="btn-step" onClick={() => handleStatChange('dexterity', 1)} disabled={remainingPoints <= 0}>
                   +
                 </button>
               </div>
@@ -271,7 +285,7 @@ export const CharacterCreationView = () => {
           <button
             type="submit"
             className="btn-create-submit"
-            disabled={remainingPoints !== 0 || !charName.trim() || strength < 1 || speed < 1 || dexerity < 1}
+            disabled={remainingPoints !== 0 || !charName.trim() || strength < 1 || speed < 1 || dexterity < 1}
           >
             {language === 'en' ? 'Start' : '開始'}
           </button>

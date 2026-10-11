@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useGameStore, translations } from '../store/useGameStore';
 import { GoogleLoginButton } from './GoogleLoginButton';
 
+/**
+ * 頂部抬頭顯示器 (Top HUD) 元件。
+ * 顯示玩家頭像、詳細能力下拉視窗、設定選單、精力條與當前持有金錢。
+ * @returns {JSX.Element}
+ */
 export const TopHUD = () => {
   const player = useGameStore((state) => state.player);
   const user = useGameStore((state) => state.user);
@@ -82,12 +87,22 @@ export const TopHUD = () => {
                   <div className="stat-card dex">
                     <span className="stat-icon">🎯</span>
                     <span className="stat-label">{t.dexLabel || '精巧'}</span>
-                    <span className="stat-value">{player?.stats?.dexerity ?? player?.dex ?? 1}</span>
+                    <span className="stat-value">{player?.stats?.dexterity ?? player?.dex ?? 1}</span>
                   </div>
                   <div className="stat-card def">
                     <span className="stat-icon">🛡️</span>
                     <span className="stat-label">{t.defLabel || '防禦'}</span>
                     <span className="stat-value">{player?.stats?.defense ?? 0}</span>
+                  </div>
+                  <div className="stat-card water">
+                    <span className="stat-icon">💧</span>
+                    <span className="stat-label">{t.waterLabel || '水分'}</span>
+                    <span className="stat-value">{player?.stats?.water ?? 100}</span>
+                  </div>
+                  <div className="stat-card food">
+                    <span className="stat-icon">🍖</span>
+                    <span className="stat-label">{t.foodLabel || '飽食'}</span>
+                    <span className="stat-value">{player?.stats?.food ?? 100}</span>
                   </div>
                 </div>
               </div>

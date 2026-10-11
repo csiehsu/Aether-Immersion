@@ -1,6 +1,10 @@
-import React from 'react';
 import { useGameStore } from '../store/useGameStore';
 
+/**
+ * 伺服器/資料庫連線中斷提示視圖元件。
+ * 當後端離線或資料庫未就緒時顯示，並提供重新連線按鈕。
+ * @returns {JSX.Element}
+ */
 export const DisconnectedView = () => {
   const syncFromMongo = useGameStore((state) => state.syncFromMongo);
   const language = useGameStore((state) => state.language);

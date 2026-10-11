@@ -1,9 +1,40 @@
 import { create } from 'zustand';
 import { translations } from '../constants/translations';
+import {
+  normalizePlayerStats,
+  addItemsToInventory,
+  calculateCombatTurn,
+} from '../utils/gameHelpers';
 
 export { translations };
 
 const API_BASE = 'http://localhost:5000/api';
+
+/**
+ * 從後端 API 載入特定集合資料並寫入 Zustand Store。
+ * @param {string} endpoint - API 端點路徑（例如 '/items'）。
+ * @param {string} stateKey - Store 中對應的 state 屬性名稱。
+ * @param {Function} set - Zustand set 狀態更新函式。
+ * @returns {Promise<Array<Object>|null>} 成功回傳資料陣列，失敗或離線回傳 null。
+ */
+const fetchCollection = async (endpoint, stateKey, set) => {
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`);
+    if (res.ok) {
+      const result = await res.json();
+      if (result.success && result.data) {
+        set({ [stateKey]: result.data });
+        return result.data;
+      }
+    } else {
+      set({ mongoStatus: 'offline', isDisconnected: true });
+    }
+  } catch (err) {
+    console.error(`[Fetch ${stateKey} Error]`, err);
+    set({ mongoStatus: 'offline', isDisconnected: true });
+  }
+  return null;
+};
 
 export const useGameStore = create((set, get) => ({
   // Screen Mode ('login' | 'character_creation' | 'game')
@@ -11,6 +42,10 @@ export const useGameStore = create((set, get) => ({
 
   // View Mode ('auto' | 'desktop' | 'mobile')
   viewMode: 'auto',
+  /**
+   * 設定版面顯示模式。
+   * @param {'auto' | 'desktop' | 'mobile'} mode - 顯示模式。
+   */
   setViewMode: (mode) => set({ viewMode: mode }),
 
   // MongoDB Connection Status ('connecting' | 'connected' | 'offline')
@@ -27,6 +62,10 @@ export const useGameStore = create((set, get) => ({
 
   // Language setting ('zh-TW' | 'en')
   language: 'zh-TW',
+  /**
+   * 設定介面語言語系。
+   * @param {'zh-TW' | 'en'} lang - 語系代碼。
+   */
   setLanguage: (lang) => set({ language: lang }),
 
   // Player Stats (Loaded live from MongoDB Atlas)
@@ -34,6 +73,10 @@ export const useGameStore = create((set, get) => ({
 
   // Active Tab for Mobile/Portrait view
   activeTab: 'move',
+  /**
+   * 設定行動版/直式螢幕下的當前分頁標籤。
+   * @param {string} tab - 分頁識別名稱。
+   */
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   // MongoDB Items Data (Strictly empty, loaded live from MongoDB Atlas)
@@ -61,10 +104,19 @@ export const useGameStore = create((set, get) => ({
 
   isBattling: false,
 
+  /**
+   * 建立玩家角色並初始化三維能力值與導師房間。
+   * @param {string} name - 角色名稱。
+   * @param {number|Object} str - 力量數值或包含三維能力的物件。
+   * @param {number} [spd] - 速度數值。
+   * @param {number} [dex] - 靈巧數值。
+   * @param {string} [mentor='Martha'] - 選擇的引路導師名稱。
+   * @returns {Promise<boolean>} 建立成功回傳 true，失敗回傳 false。
+   */
   createCharacter: async (name, str, spd, dex, mentor = 'Martha') => {
     const strength = typeof str === 'object' ? str.strength : str;
     const speed = typeof str === 'object' ? str.speed : spd;
-    const dexerity = typeof str === 'object' ? str.dexerity : dex;
+    const dexVal = typeof str === 'object' ? str.dexterity : (dex ?? 1);
 
     try {
       const res = await fetch(`${API_BASE}/player/create-character`, {
@@ -76,7 +128,9 @@ export const useGameStore = create((set, get) => ({
           stats: {
             strength,
             speed,
-            dexerity,
+            dexterity: dexVal,
+            water: 100,
+            food: 100,
           },
         }),
       });
@@ -85,14 +139,14 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           const dbP = result.data;
-          const dbStats = dbP.stats || {};
-          const stats = {
-            strength: dbStats.strength ?? dbP.str ?? str ?? 1,
-            speed: dbStats.speed ?? dbP.spd ?? spd ?? 1,
-            dexerity: dbStats.dexerity ?? dbP.dex ?? dex ?? 1,
-            maxHp: dbStats.maxHp ?? dbP.maxHp ?? 100,
-            defense: dbStats.defense ?? 0,
-          };
+          const stats = normalizePlayerStats(dbP.stats, {
+            strength,
+            speed,
+            dexterity: dexVal,
+            maxHp: dbP.maxHp ?? 100,
+            water: 100,
+            food: 100,
+          });
 
           await get().fetchLocations();
 
@@ -105,7 +159,7 @@ export const useGameStore = create((set, get) => ({
               skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
               str: stats.strength,
               spd: stats.speed,
-              dex: stats.dexerity,
+              dex: stats.dexterity,
               maxHp: stats.maxHp,
               level: 1,
               isCharacterCreated: true,
@@ -129,6 +183,11 @@ export const useGameStore = create((set, get) => ({
     return false;
   },
 
+  /**
+   * 使用 Google OAuth Credential Token 進行登入驗證並同步玩家資料。
+   * @param {string} credential - Google OAuth Credential JWT 字串。
+   * @returns {Promise<boolean>} 登入成功回傳 true，失敗回傳 false。
+   */
   loginWithGoogle: async (credential) => {
     try {
       const res = await fetch(`${API_BASE}/auth/google`, {
@@ -142,14 +201,14 @@ export const useGameStore = create((set, get) => ({
         if (result.success && result.user) {
           const gUser = result.user;
           const dbP = result.player;
-          const dbStats = dbP?.stats || {};
-          const stats = {
-            strength: dbStats.strength ?? dbP?.str ?? 1,
-            speed: dbStats.speed ?? dbP?.spd ?? 1,
-            dexerity: dbStats.dexerity ?? dbP?.dex ?? 1,
-            maxHp: dbStats.maxHp ?? dbP?.maxHp ?? 100,
-            defense: dbStats.defense ?? 0,
-          };
+          const stats = normalizePlayerStats(dbP?.stats, {
+            strength: dbP?.str,
+            speed: dbP?.spd,
+            dexterity: dbP?.dex,
+            maxHp: dbP?.maxHp,
+            water: 100,
+            food: 100,
+          });
 
           set((state) => ({
             user: {
@@ -166,7 +225,7 @@ export const useGameStore = create((set, get) => ({
               skills: dbP?.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
               str: stats.strength,
               spd: stats.speed,
-              dex: stats.dexerity,
+              dex: stats.dexterity,
               maxHp: stats.maxHp,
               level: dbP?.level ?? 1,
               hp: dbP?.hp ?? 100,
@@ -187,10 +246,15 @@ export const useGameStore = create((set, get) => ({
     return false;
   },
 
+  /**
+   * 登出當前帳號並重設登入狀態至登入畫面。
+   * @returns {Promise<void>}
+   */
   logout: async () => {
     try {
       await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
     } catch {
+      // Ignore network errors when logging out offline
     }
 
     set({
@@ -199,6 +263,10 @@ export const useGameStore = create((set, get) => ({
     });
   },
 
+  /**
+   * 檢查後端與 MongoDB 資料庫的健康狀態。
+   * @returns {Promise<'connected' | 'offline'>} 資料庫連線狀態。
+   */
   checkMongoStatus: async () => {
     try {
       const res = await fetch(`${API_BASE}/health`);
@@ -215,122 +283,25 @@ export const useGameStore = create((set, get) => ({
     return 'offline';
   },
 
-  fetchItems: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/items`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ items: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch Items Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
+  /** 載入全域道具集合清單 */
+  fetchItems: () => fetchCollection('/items', 'items', set),
+  /** 載入全域地點集合清單 */
+  fetchLocations: () => fetchCollection('/locations', 'locations', set),
+  /** 載入全域合成配方集合清單 */
+  fetchRecipes: () => fetchCollection('/recipes', 'recipes', set),
+  /** 載入全域 NPC/生物集合清單 */
+  fetchNpcs: () => fetchCollection('/npcs', 'creatures', set),
+  /** 載入全域建築設施集合清單 */
+  fetchBuildings: () => fetchCollection('/buildings', 'buildings', set),
+  /** 載入全域戰鬥技能集合清單 */
+  fetchBattleSkills: () => fetchCollection('/battle-skills', 'battleSkills', set),
+  /** 載入全域任務集合清單 */
+  fetchQuests: () => fetchCollection('/quests', 'questsList', set),
 
-  fetchLocations: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/locations`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ locations: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch Locations Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
-
-  fetchRecipes: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/recipes`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ recipes: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch Recipes Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
-
-  fetchNpcs: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/npcs`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ creatures: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch NPCs Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
-
-  fetchBuildings: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/buildings`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ buildings: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch Buildings Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
-
-  fetchBattleSkills: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/battle-skills`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ battleSkills: result.data });
-        }
-      } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      }
-    } catch (err) {
-      console.error('[Fetch Battle Skills Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
-    }
-  },
-
-  fetchQuests: async () => {
-    try {
-      const res = await fetch(`${API_BASE}/quests`);
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && result.data) {
-          set({ questsList: result.data });
-        }
-      }
-    } catch (err) {
-      console.error('[Fetch Quests Error]', err);
-    }
-  },
-
+  /**
+   * 與後端 MongoDB 同步所有遊戲資料（道具、地點、配方、NPC、技能、任務、玩家資料與日誌）。
+   * @returns {Promise<void>}
+   */
   syncFromMongo: async () => {
     try {
       const status = await get().checkMongoStatus();
@@ -339,13 +310,15 @@ export const useGameStore = create((set, get) => ({
         return;
       }
 
-      await get().fetchItems();
-      await get().fetchLocations();
-      await get().fetchRecipes();
-      await get().fetchNpcs();
-      await get().fetchBuildings();
-      await get().fetchBattleSkills();
-      await get().fetchQuests();
+      await Promise.all([
+        get().fetchItems(),
+        get().fetchLocations(),
+        get().fetchRecipes(),
+        get().fetchNpcs(),
+        get().fetchBuildings(),
+        get().fetchBattleSkills(),
+        get().fetchQuests(),
+      ]);
 
       const res = await fetch(`${API_BASE}/player`);
       if (!res.ok) {
@@ -355,14 +328,7 @@ export const useGameStore = create((set, get) => ({
       const result = await res.json();
       if (result.success && result.data) {
         const dbP = result.data;
-        const dbStats = dbP.stats || {};
-        const stats = {
-          strength: dbStats.strength ?? dbP.str ?? 1,
-          speed: dbStats.speed ?? dbP.spd ?? 1,
-          dexerity: dbStats.dexerity ?? dbP.dex ?? 1,
-          maxHp: dbStats.maxHp ?? dbP.maxHp ?? 100,
-          defense: dbStats.defense ?? 0,
-        };
+        const stats = normalizePlayerStats(dbP.stats, dbP);
 
         set((state) => {
           const isCreated = dbP.isCharacterCreated || false;
@@ -378,7 +344,7 @@ export const useGameStore = create((set, get) => ({
               skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
               str: stats.strength,
               spd: stats.speed,
-              dex: stats.dexerity,
+              dex: stats.dexterity,
               maxHp: stats.maxHp,
               hp: dbP.hp ?? state.player?.hp ?? stats.maxHp ?? 100,
               money: dbP.money ?? state.player?.money ?? 0,
@@ -412,7 +378,15 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
-  // Actions
+  /**
+   * 新增一筆對話或系統訊息紀錄，並寫入後端 MongoDB。
+   * @param {string} sender - 發送者中文名稱。
+   * @param {string} [senderEn] - 發送者英文名稱。
+   * @param {string} text - 中文訊息內容。
+   * @param {string} [textEn] - 英文訊息內容。
+   * @param {'dialogue' | 'system' | 'combat'} [type='dialogue'] - 紀錄類型。
+   * @returns {Promise<void>}
+   */
   addLog: async (sender, senderEn, text, textEn, type = 'dialogue') => {
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const newEntry = { id: `${Date.now()}-${Math.random()}`, time: timeStr, sender, senderEn, text, textEn, type };
@@ -435,6 +409,11 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 切換玩家目前所在場景地點，並扣除相應的精力消耗。
+   * @param {string} targetLocId - 目標地點識別碼。
+   * @returns {Promise<void>}
+   */
   changeLocation: async (targetLocId) => {
     const { locations, player } = get();
     if (!player) return;
@@ -474,8 +453,15 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 執行場景資源採集，扣除總精力消耗並將採集道具加入背包。
+   * @param {string} itemId - 採集獲得之道具識別碼。
+   * @param {number} cost - 單次採集精力消耗。
+   * @param {number} [qty=1] - 採集次數/數量。
+   * @returns {Promise<void>}
+   */
   performGather: async (itemId, cost, qty = 1) => {
-    const { player, items } = get();
+    const { player } = get();
     const addQty = Math.max(1, Number(qty) || 1);
     const totalCost = cost * addQty;
 
@@ -483,34 +469,10 @@ export const useGameStore = create((set, get) => ({
       return;
     }
 
-    const dbItem = items.find((i) => i.itemId === itemId);
-    const spotName = dbItem ? dbItem.name : itemId;
-    const spotNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : itemId;
-
     set((state) => ({
       player: { ...state.player, energy: state.player.energy - totalCost },
+      inventory: addItemsToInventory(state.inventory, itemId, addQty),
     }));
-
-    set((state) => {
-      const existing = state.inventory.find((i) => i.itemId === itemId);
-      let updatedInv;
-      if (existing) {
-        updatedInv = state.inventory.map((i) =>
-          i.itemId === itemId ? { ...i, count: (i.count || 1) + addQty } : i
-        );
-      } else {
-        updatedInv = [
-          ...state.inventory,
-          {
-            instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-            itemId,
-            count: addQty,
-            quality: '普通',
-          },
-        ];
-      }
-      return { inventory: updatedInv };
-    });
 
     try {
       const res = await fetch(`${API_BASE}/player/gather`, {
@@ -526,6 +488,13 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 執行物品合成/製作：檢查設施需求、扣除材料與精力、產生產物並推進 CRAFT 類型任務進度。
+   * @param {Object} recipe - 合成配方定義物件。
+   * @param {Object} [selectedMaterials={}] - 玩家選擇投入的材料字典。
+   * @param {number} [craftQty=1] - 批量製作數量。
+   * @returns {Promise<boolean>} 合成成功回傳 true，材料不足或條件不符回傳 false。
+   */
   performCraft: async (recipe, selectedMaterials = {}, craftQty = 1) => {
     const { player, inventory, items, locations, buildings } = get();
     if (!player || !recipe) return false;
@@ -757,7 +726,13 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
-  useItem: async (inventoryItemId, qty = 1) => {
+  /**
+   * 使用/消耗背包中的道具：累加道具營養值 (nutrition) 至玩家各項能力值（包含 water 與 food），並扣除道具數量。
+   * @param {string} inventoryItemId - 背包中欲使用的道具識別碼。
+   * @param {number} [qty=1] - 使用數量。
+   * @returns {Promise<boolean>} 使用成功回傳 true，未找到道具或失敗回傳 false。
+   */
+  consumeItem: async (inventoryItemId, qty = 1) => {
     const { player, inventory, items } = get();
     if (!player || !inventoryItemId) return false;
 
@@ -774,19 +749,39 @@ export const useGameStore = create((set, get) => ({
     const availableCount = invItem.count || 1;
     const useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
 
-    const hpGain = (dbItem?.nutrition?.hp || 0) * useCount;
-    const strGain = (dbItem?.nutrition?.strength || 0) * useCount;
-    const dexGain = (dbItem?.nutrition?.dexterity || 0) * useCount;
+    const nutrition = dbItem?.nutrition || {};
+    const hpGain = (nutrition.hp || 0) * useCount;
+    const strGain = (nutrition.strength || 0) * useCount;
+    const spdGain = (nutrition.speed || 0) * useCount;
+    const dexGain = (nutrition.dexterity || 0) * useCount;
+    const defGain = (nutrition.defense || 0) * useCount;
+    const maxHpGain = (nutrition.maxHp || 0) * useCount;
+    const waterGain = (nutrition.water || 0) * useCount;
+    const foodGain = (nutrition.food || 0) * useCount;
 
+    // Retrieve baseline current stats from player (stats are baseline, never overwritten by item nutrition)
+    const currentStats = player.stats || {};
+    const currentStr = currentStats.strength ?? player.str ?? 1;
+    const currentSpd = currentStats.speed ?? player.spd ?? 1;
+    const currentDex = currentStats.dexterity ?? player.dex ?? 1;
+    const currentDef = currentStats.defense ?? 0;
+    const currentMaxHp = currentStats.maxHp ?? player.maxHp ?? 100;
+    const currentWater = currentStats.water ?? 100;
+    const currentFood = currentStats.food ?? 100;
     const currentHp = player.hp ?? 100;
-    const maxHp = player.maxHp ?? 100;
-    const newHp = hpGain !== 0 ? Math.min(maxHp, currentHp + hpGain) : currentHp;
 
-    const currentStr = player.str ?? 1;
-    const newStr = strGain !== 0 ? currentStr + strGain : currentStr;
+    // Add nutrition values onto player stats (accumulating rather than replacing)
+    const newStr = Math.round((currentStr + strGain) * 100) / 100;
+    const newSpd = Math.round((currentSpd + spdGain) * 100) / 100;
+    const newDex = Math.round((currentDex + dexGain) * 100) / 100;
+    const newDef = Math.round((currentDef + defGain) * 100) / 100;
+    const newMaxHp = Math.round((currentMaxHp + maxHpGain) * 100) / 100;
+    const newWater = Math.round((currentWater + waterGain) * 100) / 100;
+    const newFood = Math.round((currentFood + foodGain) * 100) / 100;
 
-    const currentDex = player.dex ?? 1;
-    const newDex = dexGain !== 0 ? currentDex + dexGain : currentDex;
+    const newHp = hpGain !== 0
+      ? Math.max(0, Math.min(newMaxHp, currentHp + hpGain))
+      : Math.min(newMaxHp, currentHp);
 
     let updatedInv = [...inventory];
     if (availableCount <= useCount) {
@@ -798,15 +793,77 @@ export const useGameStore = create((set, get) => ({
       };
     }
 
+    const newStats = {
+      ...currentStats,
+      strength: newStr,
+      speed: newSpd,
+      dexterity: newDex,
+      defense: newDef,
+      maxHp: newMaxHp,
+      water: newWater,
+      food: newFood,
+    };
+
     set((state) => ({
       player: {
         ...state.player,
         hp: newHp,
         str: newStr,
+        spd: newSpd,
         dex: newDex,
+        stats: newStats,
       },
       inventory: updatedInv,
     }));
+
+    const itemName = dbItem ? dbItem.name : invItem.itemId;
+    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId;
+
+    const effects = [];
+    const effectsEn = [];
+    if (hpGain !== 0) {
+      effects.push(`HP ${hpGain > 0 ? `+${hpGain}` : hpGain}`);
+      effectsEn.push(`${hpGain > 0 ? `+${hpGain}` : hpGain} HP`);
+    }
+    if (strGain !== 0) {
+      effects.push(`力量 +${strGain}`);
+      effectsEn.push(`+${strGain} STR`);
+    }
+    if (spdGain !== 0) {
+      effects.push(`速度 +${spdGain}`);
+      effectsEn.push(`+${spdGain} SPD`);
+    }
+    if (dexGain !== 0) {
+      effects.push(`精巧 +${dexGain}`);
+      effectsEn.push(`+${dexGain} DEX`);
+    }
+    if (defGain !== 0) {
+      effects.push(`防禦 +${defGain}`);
+      effectsEn.push(`+${defGain} DEF`);
+    }
+    if (maxHpGain !== 0) {
+      effects.push(`最大HP +${maxHpGain}`);
+      effectsEn.push(`+${maxHpGain} MaxHP`);
+    }
+    if (waterGain !== 0) {
+      effects.push(`水分 ${waterGain > 0 ? `+${waterGain}` : waterGain}`);
+      effectsEn.push(`${waterGain > 0 ? `+${waterGain}` : waterGain} Water`);
+    }
+    if (foodGain !== 0) {
+      effects.push(`飽食 ${foodGain > 0 ? `+${foodGain}` : foodGain}`);
+      effectsEn.push(`${foodGain > 0 ? `+${foodGain}` : foodGain} Food`);
+    }
+
+    const effectStr = effects.length > 0 ? ` (${effects.join(', ')})` : '';
+    const effectStrEn = effectsEn.length > 0 ? ` (${effectsEn.join(', ')})` : '';
+
+    get().addLog(
+      '道具系統',
+      'Item System',
+      `使用了 [${itemName}] x${useCount}${effectStr}。`,
+      `Used [${itemNameEn}] x${useCount}${effectStrEn}.`,
+      'event'
+    );
 
     try {
       const res = await fetch(`${API_BASE}/player`, {
@@ -815,12 +872,32 @@ export const useGameStore = create((set, get) => ({
         body: JSON.stringify({
           hp: newHp,
           str: newStr,
+          spd: newSpd,
           dex: newDex,
+          stats: newStats,
           inventory: updatedInv,
         }),
       });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
+      } else {
+        const result = await res.json();
+        if (result.success && result.data) {
+          const dbP = result.data;
+          const syncedStats = normalizePlayerStats(dbP.stats, dbP);
+          set((state) => ({
+            player: {
+              ...state.player,
+              stats: syncedStats,
+              str: syncedStats.strength,
+              spd: syncedStats.speed,
+              dex: syncedStats.dexterity,
+              maxHp: syncedStats.maxHp,
+              hp: dbP.hp ?? state.player.hp,
+              energy: dbP.energy ?? state.player.energy,
+            },
+          }));
+        }
       }
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });
@@ -829,6 +906,14 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
+  /**
+   * 向指定 NPC 購買商品：扣除金錢並新增道具至背包。
+   * @param {Object} npc - 交易 NPC 物件。
+   * @param {string} itemId - 購買道具識別碼。
+   * @param {number} price - 單價。
+   * @param {number} [qty=1] - 購買數量。
+   * @returns {Promise<boolean>} 購買成功回傳 true，金錢不足或無效參數回傳 false。
+   */
   performBuy: async (npc, itemId, price, qty = 1) => {
     const { player, inventory } = get();
     if (!player || !npc || !itemId) return false;
@@ -843,21 +928,7 @@ export const useGameStore = create((set, get) => ({
     }
 
     const newMoney = currentMoney - totalCost;
-
-    let updatedInv = [...inventory];
-    const existingIdx = updatedInv.findIndex((i) => i.itemId === itemId);
-    if (existingIdx >= 0) {
-      updatedInv[existingIdx] = {
-        ...updatedInv[existingIdx],
-        count: (updatedInv[existingIdx].count || 1) + buyQty,
-      };
-    } else {
-      updatedInv.push({
-        itemId,
-        count: buyQty,
-        quality: '普通',
-      });
-    }
+    const updatedInv = addItemsToInventory(inventory, itemId, buyQty);
 
     set((state) => ({
       player: {
@@ -896,6 +967,14 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
+  /**
+   * 向指定 NPC 出售背包中的道具：扣除背包道具並增加金錢。
+   * @param {Object} npc - 交易 NPC 物件。
+   * @param {string} itemId - 出售道具識別碼。
+   * @param {number} price - 收購單價。
+   * @param {number} [qty=1] - 出售數量。
+   * @returns {Promise<boolean>} 出售成功回傳 true，持有數量不足回傳 false。
+   */
   performSell: async (npc, itemId, price, qty = 1) => {
     const { player, inventory } = get();
     if (!player || !npc || !itemId) return false;
@@ -964,6 +1043,12 @@ export const useGameStore = create((set, get) => ({
     return true;
   },
 
+  /**
+   * 拾取場景中的地面放置道具 (Placed Item) 並同步更新背包與地點狀態。
+   * @param {string} locationId - 地點識別碼。
+   * @param {string} instanceId - 放置道具實體識別碼。
+   * @returns {Promise<void>}
+   */
   pickUpPlacedItem: async (locationId, instanceId) => {
     try {
       const res = await fetch(`${API_BASE}/location/pickup-item`, {
@@ -989,6 +1074,11 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 取得 NPC 的在地化顯示名稱。
+   * @param {string} npcId - NPC 識別碼。
+   * @returns {string} 在地化 NPC 名稱。
+   */
   getNpcDisplayName: (npcId) => {
     const { creatures, language } = get();
     if (!npcId) return language === 'en' ? 'NPC' : 'NPC';
@@ -1001,6 +1091,13 @@ export const useGameStore = create((set, get) => ({
     return npcId;
   },
 
+  /**
+   * 接取任務：建立任務進度、發放接取獎勵（如道具、解鎖地點/配方）並記錄對話日誌。
+   * @param {string} questId - 任務識別碼。
+   * @param {string} [locationId=''] - 觸發任務的地點識別碼（若由放置道具觸發）。
+   * @param {string} [instanceId=''] - 觸發任務的放置道具實體識別碼。
+   * @returns {Promise<void>}
+   */
   acceptQuest: async (questId, locationId = '', instanceId = '') => {
     try {
       const res = await fetch(`${API_BASE}/quest/accept`, {
@@ -1032,10 +1129,22 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 透過撿起場景中的放置道具接取關聯任務。
+   * @param {string} questId - 任務識別碼。
+   * @param {string} locationId - 地點識別碼。
+   * @param {string} instanceId - 放置道具實體識別碼。
+   * @returns {Promise<void>}
+   */
   acceptQuestFromPlacedItem: async (questId, locationId, instanceId) => {
     return get().acceptQuest(questId, locationId, instanceId);
   },
 
+  /**
+   * 提交並完成任務：發放金錢與道具獎勵、解鎖後續地點與配方，並處理連鎖自動接取任務。
+   * @param {string} questId - 任務識別碼。
+   * @returns {Promise<void>}
+   */
   submitQuest: async (questId) => {
     try {
       const res = await fetch(`${API_BASE}/quest/submit`, {
@@ -1072,6 +1181,11 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+  /**
+   * 與野外生物發起即時回合制戰鬥，依照敏捷速度決定先手順序並結算戰利品。
+   * @param {Object} creature - 敵方生物/NPC 資料物件。
+   * @returns {boolean} 成功進入戰鬥回傳 true，無法發起戰鬥（如體力耗盡或戰鬥中）回傳 false。
+   */
   startBattle: (creature) => {
     const { player, isBattling } = get();
     if (!player || isBattling) return false;
@@ -1085,12 +1199,8 @@ export const useGameStore = create((set, get) => ({
     const enemyNameEn = creature.nameEn || creature.name || 'Creature';
 
     const pSpeed = player.stats?.speed ?? player.spd ?? 1;
-    const pStr = player.stats?.strength ?? player.str ?? 1;
-    const pDef = player.stats?.defense ?? 0;
 
     const eSpeed = creature.stats?.speed ?? 1;
-    const eStr = creature.stats?.strength ?? creature.stats?.str ?? 5;
-    const eDef = creature.stats?.defense ?? 0;
     const eMaxHp = creature.stats?.maxHP ?? creature.hp ?? 50;
 
     let pCurrentHp = player.hp;
@@ -1124,9 +1234,7 @@ export const useGameStore = create((set, get) => ({
       }
 
       if (currentTurn === 'player') {
-        const hitRate = Math.min(1, Math.max(0.1, (pSpeed - eSpeed) / eSpeed * 0.5 + 0.5));
-        const isHit = Math.random() <= hitRate;
-        const damage = isHit ? Math.max(1, pStr - eDef) : 0;
+        const { isHit, damage } = calculateCombatTurn(player, creature);
 
         if (isHit) {
           eCurrentHp = Math.max(0, eCurrentHp - damage);
@@ -1169,20 +1277,7 @@ export const useGameStore = create((set, get) => ({
               const itemName = dbItem ? dbItem.name : drop.itemId;
               const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : drop.itemId;
 
-              const existingIdx = updatedInv.findIndex((i) => i.itemId === drop.itemId);
-              if (existingIdx >= 0) {
-                updatedInv[existingIdx] = {
-                  ...updatedInv[existingIdx],
-                  count: (updatedInv[existingIdx].count || 1) + dropQty,
-                };
-              } else {
-                updatedInv.push({
-                  instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                  itemId: drop.itemId,
-                  count: dropQty,
-                  quality: '普通',
-                });
-              }
+              updatedInv = addItemsToInventory(updatedInv, drop.itemId, dropQty);
 
               get().addLog(
                 '戰鬥系統',
@@ -1210,9 +1305,7 @@ export const useGameStore = create((set, get) => ({
 
         currentTurn = 'enemy';
       } else {
-        const hitRate = Math.min(1, Math.max(0.1, (eSpeed - pSpeed) / pSpeed * 0.5 + 0.5));
-        const isHit = Math.random() <= hitRate;
-        const damage = isHit ? Math.max(1, eStr - pDef) : 0;
+        const { isHit, damage } = calculateCombatTurn(creature, player);
 
         if (isHit) {
           pCurrentHp = Math.max(0, pCurrentHp - damage);

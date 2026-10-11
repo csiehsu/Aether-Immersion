@@ -21,7 +21,10 @@ app.get('/', (req, res) => {
   res.send('⚓ Aether Immersion Backend API is running!');
 });
 
-// Start Server & Connect Database
+/**
+ * 啟動 Express 伺服器並嘗試連線至 MongoDB 資料庫。
+ * @returns {Promise<void>}
+ */
 const startServer = async () => {
   await connectDB();
   app.listen(PORT, () => {

@@ -1,9 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { getNpcIcon } from '../../utils/gameHelpers';
+import {
+  getAvailableQuestForNpc,
+  getActiveQuestForNpc,
+  checkCanSubmitQuest,
+} from '../../utils/questHelpers';
 
+/**
+ * 生物與 NPC 面板元件（提供檢視、任務交接與戰鬥發起功能）。
+ * @returns {JSX.Element}
+ */
 export const CreaturesPanel = () => {
   const creatures = useGameStore((state) => state.creatures || []);
   const locations = useGameStore((state) => state.locations || []);
@@ -19,86 +28,28 @@ export const CreaturesPanel = () => {
 
   const [selectedNpcId, setSelectedNpcId] = useState(null);
 
-  const getAvailableQuestForNpc = (cId, cName) => {
-    const pQuests = player?.quests || [];
-    for (const qDef of (questsList || [])) {
-      if (qDef.displayable !== true) continue;
-      if (qDef.triggerType !== 'NPC') continue;
-      const matchesNpc = qDef.triggerNpcId === cId || (cName && qDef.triggerNpcId === cName);
-      if (!matchesNpc) continue;
+  /**
+   * 檢查指定 NPC 是否有可承接任務。
+   * @param {string} cId - NPC 識別碼。
+   * @param {string} cName - NPC 名稱。
+   * @returns {Object|null}
+   */
+  const checkAvailableQuest = (cId, cName) => getAvailableQuestForNpc(questsList, player, cId, cName);
 
-      const alreadyHandled = pQuests.some(
-        (pq) => pq.questId === qDef.questId && (pq.status === 'IN_PROGRESS' || pq.status === 'COMPLETED')
-      );
-      if (alreadyHandled) continue;
+  /**
+   * 檢查指定 NPC 是否有關聯的進行中任務。
+   * @param {string} cId - NPC 識別碼。
+   * @returns {{ pQuest: Object, qDef: Object }|null}
+   */
+  const checkActiveQuest = (cId) => getActiveQuestForNpc(questsList, player, cId);
 
-      if (qDef.minLevel && (player?.level || 1) < qDef.minLevel) continue;
-
-      if (Array.isArray(qDef.prerequisites) && qDef.prerequisites.length > 0) {
-        const meetsPrereq = qDef.prerequisites.every((req) => {
-          if (req.type === 'QUEST_COMPLETED') {
-            return pQuests.some((pq) => pq.questId === req.targetId && pq.status === 'COMPLETED');
-          }
-          return true;
-        });
-        if (!meetsPrereq) continue;
-      }
-
-      return qDef;
-    }
-    return null;
-  };
-
-  const getActiveQuestForNpc = (cId) => {
-    const pQuests = player?.quests || [];
-    const activePQuests = pQuests.filter((pq) => pq.status === 'IN_PROGRESS');
-    for (const pq of activePQuests) {
-      const qDef = (questsList || []).find((q) => q.questId === pq.questId);
-      if (!qDef) continue;
-      const isSubmitNpc = qDef.submitNpcId === cId;
-      const isTargetNpc = (qDef.objectives || []).some((obj) => obj.targetNpcId === cId);
-      if (isSubmitNpc || isTargetNpc) {
-        return { pQuest: pq, qDef };
-      }
-    }
-    return null;
-  };
-
-  const checkCanSubmitQuest = (qDef, pQuest) => {
-    if (!qDef || !pQuest) return false;
-    const objectives = qDef.objectives || [];
-    for (let idx = 0; idx < objectives.length; idx++) {
-      const obj = objectives[idx];
-      if (obj.type === 'TALK_NPC') {
-        continue;
-      }
-      if (obj.type === 'HAS_ITEM') {
-        const ownedCount = (inventory || [])
-          .filter((i) => i.itemId === obj.targetId)
-          .reduce((sum, item) => sum + (item.count || 1), 0);
-        if (ownedCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-      if (obj.type === 'CRAFT') {
-        const prog = pQuest.progress?.[idx];
-        const progCount = prog?.currentCount || 0;
-        const ownedCount = (inventory || [])
-          .filter((i) => i.itemId === obj.targetId)
-          .reduce((sum, item) => sum + (item.count || 1), 0);
-        if (!prog?.isCompleted && progCount < (obj.requiredCount || 1) && ownedCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-      if (obj.type === 'VISIT_LOCATION') {
-        const prog = pQuest.progress?.[idx];
-        if (prog && !prog.isCompleted && prog.currentCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
+  /**
+   * 檢查任務是否已達成提交條件。
+   * @param {Object} qDef - 任務定義物件。
+   * @param {Object} pQuest - 玩家任務進度物件。
+   * @returns {boolean}
+   */
+  const checkSubmittable = (qDef, pQuest) => checkCanSubmitQuest(qDef, pQuest, inventory);
 
   const currentLocation = locations.find(
     (loc) => loc.locationId === player?.location
@@ -113,6 +64,9 @@ export const CreaturesPanel = () => {
     (c) => (c.npcId || c.id) === selectedNpcId
   );
 
+  /**
+   * 處理 NPC 交易互動。
+   */
   const handleTrade = () => {};
 
   return (
@@ -129,8 +83,8 @@ export const CreaturesPanel = () => {
               const cName = getLocalizedName(c, language);
               const icon = getNpcIcon(c);
               const isSelected = selectedNpcId === cId;
-              const activeQuestInfo = getActiveQuestForNpc(cId);
-              const availableQuest = getAvailableQuestForNpc(cId, c.name);
+              const activeQuestInfo = checkActiveQuest(cId);
+              const availableQuest = checkAvailableQuest(cId, c.name);
               const hasQuestBadge = Boolean(activeQuestInfo || availableQuest);
 
               return (
@@ -156,7 +110,6 @@ export const CreaturesPanel = () => {
           {selectedCreature && (() => {
             const c = selectedCreature;
             const cId = c.npcId || c.id;
-            const cName = getLocalizedName(c, language);
             const cDesc = getLocalizedDesc(c, language);
             const rawType = c.typeEn || c.type || 'MONSTER';
             const cType = language === 'en'
@@ -164,9 +117,9 @@ export const CreaturesPanel = () => {
               : (rawType === 'MONSTER' ? '怪物' : rawType === 'HUMAN' ? '人類' : rawType);
             const cHp = c.stats?.maxHP ?? c.hp;
             const isHuman = rawType === 'HUMAN';
-            const questInfo = getActiveQuestForNpc(cId);
-            const availableQuest = getAvailableQuestForNpc(cId, c.name);
-            const canSubmit = questInfo ? checkCanSubmitQuest(questInfo.qDef, questInfo.pQuest) : false;
+            const questInfo = checkActiveQuest(cId);
+            const availableQuest = checkAvailableQuest(cId, c.name);
+            const canSubmit = questInfo ? checkSubmittable(questInfo.qDef, questInfo.pQuest) : false;
 
             return (
               <div className="creature-detail-window">

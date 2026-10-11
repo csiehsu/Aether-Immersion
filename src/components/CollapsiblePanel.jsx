@@ -1,5 +1,15 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
+/**
+ * 可折疊展開的通用面板容器元件。
+ * @param {Object} props - 元件屬性。
+ * @param {string|React.ReactNode} props.title - 面板標題內容。
+ * @param {React.ReactNode} props.children - 面板展開時顯示的子內容。
+ * @param {string} [props.className=''] - 額外 CSS 類別名。
+ * @param {boolean} [props.defaultOpen=true] - 初始是否預設展開。
+ * @param {React.ReactNode} [props.headerExtra=null] - 標頭右側額外擴充元素（如按鈕、標籤等）。
+ * @returns {JSX.Element}
+ */
 export const CollapsiblePanel = ({
   title,
   children,

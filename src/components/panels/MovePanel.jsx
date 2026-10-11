@@ -1,8 +1,12 @@
-import React from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 
+/**
+ * 地點移動面板元件。
+ * 顯示玩家已知且與當前地點相鄰的目標地點，並提供移動切換功能。
+ * @returns {JSX.Element}
+ */
 export const MovePanel = () => {
   const locations = useGameStore((state) => state.locations || []);
   const player = useGameStore((state) => state.player);

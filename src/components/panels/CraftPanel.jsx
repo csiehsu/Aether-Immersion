@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
 import { QuantitySelector } from '../common/QuantitySelector';
 
+/**
+ * 物品製作/合成面板元件。
+ * 檢查當前地點設施與背包工具、驗證材料充足度、支援批量製作數量調節與即時合成執行。
+ * @returns {JSX.Element}
+ */
 export const CraftPanel = () => {
   const recipes = useGameStore((state) => state.recipes || []);
   const inventory = useGameStore((state) => state.inventory || []);
@@ -21,6 +26,11 @@ export const CraftPanel = () => {
 
   const currentLocation = locations.find((l) => l.locationId === player?.location);
 
+  /**
+   * 檢查目前場景建築或背包中是否具備配方所需的工具設施。
+   * @param {Object} rec - 配方物件。
+   * @returns {boolean} 工具或設施具備回傳 true，否則回傳 false。
+   */
   const checkToolsAvailable = (rec) => {
     if (!rec.requiredToolTypes || rec.requiredToolTypes.length === 0) {
       return true;
@@ -49,6 +59,11 @@ export const CraftPanel = () => {
     return unlockedRecipes.some((ur) => (typeof ur === 'string' ? ur === id : ur?.recipeId === id));
   });
 
+  /**
+   * 檢查背包中是否具備配方所需的基本材料種類與數量。
+   * @param {Object} rec - 配方物件。
+   * @returns {boolean} 材料充足回傳 true，否則回傳 false。
+   */
   const checkMaterialsAvailable = (rec) => {
     if (!rec.requiredItems || rec.requiredItems.length === 0) {
       return true;
@@ -69,6 +84,10 @@ export const CraftPanel = () => {
     (r) => (r.recipeId || r.id || r.name) === selectedRecipeId
   );
 
+  /**
+   * 選取或取消選取指定合成配方。
+   * @param {string} recId - 配方識別碼。
+   */
   const handleSelectRecipe = (recId) => {
     if (selectedRecipeId === recId) {
       setSelectedRecipeId(null);
@@ -81,6 +100,12 @@ export const CraftPanel = () => {
     }
   };
 
+  /**
+   * 執行觸發合成製作。
+   * @param {Object} rec - 配方物件。
+   * @param {React.MouseEvent} e - 點擊事件物件。
+   * @param {boolean} isReady - 當前是否滿足製作條件。
+   */
   const handleStartCraft = async (rec, e, isReady) => {
     e.stopPropagation();
     if (!isReady) return;

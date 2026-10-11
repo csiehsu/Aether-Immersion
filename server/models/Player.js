@@ -15,9 +15,11 @@ const StatsSchema = new mongoose.Schema(
   {
     strength: { type: Number, default: 1 },
     speed: { type: Number, default: 1 },
-    dexerity: { type: Number, default: 1 },
+    dexterity: { type: Number, default: 1 },
     maxHp: { type: Number, default: 100 },
     defense: { type: Number, default: 0 },
+    water: { type: Number, default: 100 },
+    food: { type: Number, default: 100 },
   },
   { _id: false }
 );
@@ -71,7 +73,7 @@ const PlayerSchema = new mongoose.Schema(
     isCharacterCreated: { type: Boolean, default: false },
     stats: {
       type: StatsSchema,
-      default: () => ({ strength: 1, speed: 1, dexerity: 1, maxHp: 100, defense: 0 }),
+      default: () => ({ strength: 1, speed: 1, dexterity: 1, maxHp: 100, defense: 0, water: 100, food: 100 }),
     },
     skills: {
       type: [PlayerSkillSchema],
@@ -90,7 +92,6 @@ const PlayerSchema = new mongoose.Schema(
     },
     inventory: [InventoryItemSchema],
     unlockedRecipes: [UnlockedRecipeSchema],
-    unlockedClues: [{ type: String }],
     quests: [PlayerQuestSchema],
   },
   { timestamps: true }

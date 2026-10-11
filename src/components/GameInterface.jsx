@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { getLocalizedName, getLocalizedDesc } from '../utils/language';
 import { TopHUD } from './TopHUD';
@@ -10,6 +10,11 @@ import { InventoryPanel } from './panels/InventoryPanel';
 import { LocationItemsPanel } from './panels/LocationItemsPanel';
 import { LogPanel } from './panels/LogPanel';
 
+/**
+ * 遊戲主要操作介面元件。
+ * 負責協調整體三欄佈局（桌面版）或單一全螢幕視口加底欄浮層（行動版），並處理地點資訊切換與資料同步。
+ * @returns {JSX.Element}
+ */
 export const GameInterface = () => {
   const activeTab = useGameStore((state) => state.activeTab);
   const setActiveTab = useGameStore((state) => state.setActiveTab);
@@ -42,6 +47,10 @@ export const GameInterface = () => {
 
   const currentBg = currentLocation?.image || '';
 
+  /**
+   * 處理行動版底部工具列項目點擊切換。
+   * @param {string} itemId - 點選的功能項目 ID。
+   */
   const handleToolbarItemClick = (itemId) => {
     if (activeTab === itemId) {
       setMobileOverlayOpen(!mobileOverlayOpen);
@@ -51,6 +60,10 @@ export const GameInterface = () => {
     }
   };
 
+  /**
+   * 渲染行動版當前活動分頁對應的功能面板。
+   * @returns {JSX.Element}
+   */
   const renderActiveMobilePanel = () => {
     switch (activeTab) {
       case 'move':

@@ -1,10 +1,20 @@
-import React, { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { getNpcIcon } from '../../utils/gameHelpers';
+import {
+  getAvailableQuestForNpc,
+  getActiveQuestForNpc,
+  checkCanSubmitQuest,
+} from '../../utils/questHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
+/**
+ * 區域資源面板元件。
+ * 整合場景生物與 NPC 互動（交易買賣、承接/提交任務、戰鬥切換）、採集點（批量採集）、以及建築設施檢視。
+ * @returns {JSX.Element}
+ */
 export const GatherPanel = () => {
   const locations = useGameStore((state) => state.locations || []);
   const creatures = useGameStore((state) => state.creatures || []);
@@ -30,87 +40,34 @@ export const GatherPanel = () => {
   const [sellQtys, setSellQtys] = useState({});
   const [tradeTab, setTradeTab] = useState('buy');
 
-  const getAvailableQuestForNpc = (cId, cName) => {
-    const pQuests = player?.quests || [];
-    for (const qDef of (questsList || [])) {
-      if (qDef.displayable !== true) continue;
-      if (qDef.triggerType !== 'NPC') continue;
-      const matchesNpc = qDef.triggerNpcId === cId || (cName && qDef.triggerNpcId === cName);
-      if (!matchesNpc) continue;
+  /**
+   * 檢查指定 NPC 是否有可承接任務。
+   * @param {string} cId - NPC 識別碼。
+   * @param {string} cName - NPC 名稱。
+   * @returns {Object|null} 可接任務物件或 null。
+   */
+  const checkAvailableQuest = (cId, cName) => getAvailableQuestForNpc(questsList, player, cId, cName);
 
-      const alreadyHandled = pQuests.some(
-        (pq) => pq.questId === qDef.questId && (pq.status === 'IN_PROGRESS' || pq.status === 'COMPLETED')
-      );
-      if (alreadyHandled) continue;
+  /**
+   * 檢查指定 NPC 是否有關聯的進行中任務。
+   * @param {string} cId - NPC 識別碼。
+   * @returns {{ pQuest: Object, qDef: Object }|null}
+   */
+  const checkActiveQuest = (cId) => getActiveQuestForNpc(questsList, player, cId);
 
-      if (qDef.minLevel && (player?.level || 1) < qDef.minLevel) continue;
+  /**
+   * 檢查當前任務是否已滿足提交完成條件。
+   * @param {Object} qDef - 任務定義物件。
+   * @param {Object} pQuest - 玩家任務進度物件。
+   * @returns {boolean}
+   */
+  const checkSubmittable = (qDef, pQuest) => checkCanSubmitQuest(qDef, pQuest, inventory);
 
-      if (Array.isArray(qDef.prerequisites) && qDef.prerequisites.length > 0) {
-        const meetsPrereq = qDef.prerequisites.every((req) => {
-          if (req.type === 'QUEST_COMPLETED') {
-            return pQuests.some((pq) => pq.questId === req.targetId && pq.status === 'COMPLETED');
-          }
-          return true;
-        });
-        if (!meetsPrereq) continue;
-      }
-
-      return qDef;
-    }
-    return null;
-  };
-
-  const getActiveQuestForNpc = (cId) => {
-    const pQuests = player?.quests || [];
-    const activePQuests = pQuests.filter((pq) => pq.status === 'IN_PROGRESS');
-    for (const pq of activePQuests) {
-      const qDef = (questsList || []).find((q) => q.questId === pq.questId);
-      if (!qDef) continue;
-      const isSubmitNpc = qDef.submitNpcId === cId;
-      const isTargetNpc = (qDef.objectives || []).some((obj) => obj.targetNpcId === cId);
-      if (isSubmitNpc || isTargetNpc) {
-        return { pQuest: pq, qDef };
-      }
-    }
-    return null;
-  };
-
-  const checkCanSubmitQuest = (qDef, pQuest) => {
-    if (!qDef || !pQuest) return false;
-    const objectives = qDef.objectives || [];
-    for (let idx = 0; idx < objectives.length; idx++) {
-      const obj = objectives[idx];
-      if (obj.type === 'TALK_NPC') {
-        continue;
-      }
-      if (obj.type === 'HAS_ITEM') {
-        const ownedCount = (inventory || [])
-          .filter((i) => i.itemId === obj.targetId)
-          .reduce((sum, item) => sum + (item.count || 1), 0);
-        if (ownedCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-      if (obj.type === 'CRAFT') {
-        const prog = pQuest.progress?.[idx];
-        const progCount = prog?.currentCount || 0;
-        const ownedCount = (inventory || [])
-          .filter((i) => i.itemId === obj.targetId)
-          .reduce((sum, item) => sum + (item.count || 1), 0);
-        if (!prog?.isCompleted && progCount < (obj.requiredCount || 1) && ownedCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-      if (obj.type === 'VISIT_LOCATION') {
-        const prog = pQuest.progress?.[idx];
-        if (prog && !prog.isCompleted && prog.currentCount < (obj.requiredCount || 1)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  };
-
+  /**
+   * 調整 NPC 購買道具的數量。
+   * @param {string} itemId - 道具識別碼。
+   * @param {number|string} val - 數量數值。
+   */
   const handleBuyQtyChange = (itemId, val) => {
     setBuyQtys((prev) => ({
       ...prev,
@@ -118,6 +75,11 @@ export const GatherPanel = () => {
     }));
   };
 
+  /**
+   * 調整 NPC 出售道具的數量。
+   * @param {string} itemId - 道具識別碼。
+   * @param {number|string} val - 數量數值。
+   */
   const handleSellQtyChange = (itemId, val) => {
     setSellQtys((prev) => ({
       ...prev,
@@ -137,6 +99,11 @@ export const GatherPanel = () => {
   const gatherables = currentLocation?.gatherables || [];
   const locationBuildings = currentLocation?.buildings || [];
 
+  /**
+   * 切換選取的實體類別與 ID（生物、採集點、建築）。
+   * @param {'creature' | 'gather' | 'building'} type - 實體類型。
+   * @param {string|number} id - 實體識別碼。
+   */
   const toggleSelect = (type, id) => {
     if (selectedType === type && selectedId === id) {
       setSelectedType(null);
@@ -161,15 +128,15 @@ export const GatherPanel = () => {
       ) : (
         <div className="gather-panel-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {visibleCreatures.length > 0 && (
-            <React.Fragment>
+            <Fragment>
               <div className="creatures-horizontal-grid">
                 {visibleCreatures.map((c, idx) => {
                   const cId = c.npcId || c.id || idx;
                   const cName = getLocalizedName(c, language);
                   const icon = getNpcIcon(c);
                   const isSelected = selectedType === 'creature' && selectedId === cId;
-                  const activeQuestInfo = getActiveQuestForNpc(cId);
-                  const availableQuest = getAvailableQuestForNpc(cId, c.name);
+                  const activeQuestInfo = checkActiveQuest(cId);
+                  const availableQuest = checkAvailableQuest(cId, c.name);
                   const hasQuestBadge = Boolean(activeQuestInfo || availableQuest);
 
                   return (
@@ -195,7 +162,6 @@ export const GatherPanel = () => {
               {selectedType === 'creature' && (() => {
                 const c = visibleCreatures.find((item, idx) => (item.npcId || item.id || idx) === selectedId);
                 if (!c) return null;
-                const cName = getLocalizedName(c, language);
                 const cDesc = getLocalizedDesc(c, language);
                 const rawType = c.typeEn || c.type || 'MONSTER';
                 const isHuman = rawType === 'HUMAN';
@@ -347,9 +313,9 @@ export const GatherPanel = () => {
                         </div>
                       );
 
-                      const questInfo = getActiveQuestForNpc(c.npcId || c.id);
-                      const availableQuest = getAvailableQuestForNpc(c.npcId || c.id, c.name);
-                      const canSubmit = questInfo ? checkCanSubmitQuest(questInfo.qDef, questInfo.pQuest) : false;
+                      const questInfo = checkActiveQuest(c.npcId || c.id);
+                      const availableQuest = checkAvailableQuest(c.npcId || c.id, c.name);
+                      const canSubmit = questInfo ? checkSubmittable(questInfo.qDef, questInfo.pQuest) : false;
 
                       const shouldShowActive = questInfo && (questInfo.qDef.displayable === true || canSubmit);
                       const shouldShowAvailable = availableQuest && availableQuest.displayable === true;
@@ -358,7 +324,7 @@ export const GatherPanel = () => {
                       const renderQuestSection = () => {
                         if (!hasQuestToShow) return null;
                         return (
-                          <React.Fragment>
+                          <Fragment>
                             {shouldShowAvailable && (
                               <div style={{ marginTop: '8px', padding: '10px', background: 'rgba(59, 130, 246, 0.12)', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.35)' }}>
                                 <div style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -430,12 +396,12 @@ export const GatherPanel = () => {
                                 )}
                               </div>
                             )}
-                          </React.Fragment>
+                          </Fragment>
                         );
                       };
 
                       return (
-                        <React.Fragment>
+                        <Fragment>
                           {hasGoodies && hasPurchase ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
                               <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px' }}>
@@ -484,7 +450,7 @@ export const GatherPanel = () => {
                             </div>
                           ) : null}
                           {renderQuestSection()}
-                        </React.Fragment>
+                        </Fragment>
                       );
                     })() : (
                       <div className="creature-detail-actions" style={{ marginTop: '8px' }}>
@@ -506,11 +472,11 @@ export const GatherPanel = () => {
                   </div>
                 );
               })()}
-            </React.Fragment>
+            </Fragment>
           )}
 
           {gatherables.length > 0 && (
-            <React.Fragment>
+            <Fragment>
               <div className="gather-horizontal-grid">
                 {gatherables.map((spot, idx) => {
                   const spotId = spot.itemId || idx;
@@ -540,9 +506,6 @@ export const GatherPanel = () => {
               {selectedType === 'gather' && (() => {
                 const spot = gatherables.find((item, idx) => (item.itemId || idx) === selectedId);
                 if (!spot) return null;
-                const dbItem = items.find((i) => i.itemId === spot.itemId);
-                const spotName = dbItem ? getLocalizedName(dbItem, language) : spot.itemId;
-                const spotYield = spotName;
                 const unitCost = spot.cost ?? 1;
                 const totalCost = unitCost * gatherQty;
 
@@ -572,11 +535,11 @@ export const GatherPanel = () => {
                   </div>
                 );
               })()}
-            </React.Fragment>
+            </Fragment>
           )}
 
           {locationBuildings.length > 0 && (
-            <React.Fragment>
+            <Fragment>
               <div className="buildings-horizontal-grid">
                 {locationBuildings.map((b, idx) => {
                   const bId = b.buildingId || idx;
@@ -625,7 +588,7 @@ export const GatherPanel = () => {
                   </div>
                 );
               })()}
-            </React.Fragment>
+            </Fragment>
           )}
         </div>
       )}
