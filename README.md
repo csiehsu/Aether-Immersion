@@ -83,12 +83,13 @@ AetherImmersion/
 | `src/App.jsx` | 頂層畫面路由器。 | 初始化執行 `syncFromMongo()`；依據 `isDisconnected` 與 `screenMode` 切換顯示 `DisconnectedView`、`LoginView`、`CharacterCreationView` 或 `GameInterface`。 |
 | `src/store/useGameStore.js` | Zustand 全域狀態管理中心。 | 封裝所有 API 呼叫，管理玩家資料、背包、場景、配方、生物、技能、任務與日誌，並提供 `consumeItem`、`performCraft`、`performBuy`、`performSell`、`startBattle` 等核心動作。 |
 | `src/constants/translations.js` | 雙語字典庫。 | 定義繁體中文 (`zh-TW`) 與英文 (`en`) 的 UI 標籤、能力值名稱、按鈕與系統提示。 |
+| `src/constants/gameConstants.js` | 全域核心規則與數值常數。 | 前後端共同調用的單一真相來源 (SSOT)，包含水分與飽食上限 (`MAX_WATER`/`MAX_FOOD` 120)、基礎生命與精力、精力恢復與消耗週期、狀態判定固定門檻 (`80`/`60`/`30`) 與折算倍率。 |
 
 ### 通用工具模組 (Utils)
 | 檔案路徑 | 主要函式 | 說明與職責 |
 | :--- | :--- | :--- |
 | `src/utils/language.js` | `getLocalizedName(item, lang)`<br>`getLocalizedDesc(item, lang)`<br>`getLocalizedText(zh, en, lang)` | 依據當前語系代碼動態解析並回傳物件的在地化名稱或文字。 |
-| `src/utils/gameHelpers.js` | `getNpcIcon(npc)`<br>`getItemIcon(item, default)`<br>`generateInstanceId(prefix)`<br>`normalizePlayerStats(stats, fallback)`<br>`addItemsToInventory(inv, id, count, opts)`<br>`calculateCombatTurn(atk, def)` | 處理 NPC/道具 Emoji、生成全域唯一實體識別碼、標準化能力值（補齊 `water`、`food` 預設 100）、背包堆疊邏輯，以及戰鬥回合命中與傷害計算。 |
+| `src/utils/gameHelpers.js` | `getNpcIcon(npc)`<br>`getItemIcon(item, default)`<br>`generateInstanceId(prefix)`<br>`normalizePlayerStats(stats, fallback)`<br>`addItemsToInventory(inv, id, count, opts)`<br>`calculateCombatTurn(atk, def)` | 處理 NPC/道具 Emoji、生成全域唯一實體識別碼、標準化能力值（補齊 `water`、`food` 預設與上限 120）、背包堆疊邏輯，以及戰鬥回合命中與傷害計算。 |
 | `src/utils/questHelpers.js` | `getAvailableQuestForNpc(list, player, cId, cName)`<br>`getActiveQuestForNpc(list, player, cId)`<br>`checkCanSubmitQuest(qDef, pQuest, inv)` | 驗證前置條件與等級以篩選 NPC 可接任務、檢查 NPC 是否為任務交付對象，以及驗證 `TALK_NPC`、`HAS_ITEM`、`CRAFT`、`VISIT_LOCATION` 等目標是否達成。 |
 
 ### 畫面視圖 (Views)
@@ -179,8 +180,8 @@ AetherImmersion/
   - **生命值 (hp / maxHp)**：玩家目前體力與生命上限。
   - **防禦力 (defense)**：減免戰鬥時所受傷害。
   - **精力值 (energy / maxEnergy)**：預設最大值為 4320，移動地點與採集資源時消耗。
-  - **水分 (water)**：生存核心指標，初始預設值為 100。
-  - **飽食度 (food)**：生存核心指標，初始預設值為 100。
+  - **水分 (water)**：生存核心指標，上限與初始預設值為 120。
+  - **飽食度 (food)**：生存核心指標，上限與初始預設值為 120。
 
 ### 2. 道具消耗與營養機制 (Consumable Nutrition System)
 - 全專案統一使用 `consumeItem` 函式，取消舊版別名與相容性設計。

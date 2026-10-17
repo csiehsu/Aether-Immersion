@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
+import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
+import { isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -55,7 +57,6 @@ export const CraftPanel = () => {
   const unlockedRecipes = player?.unlockedRecipes || [];
   const visibleRecipes = recipes.filter((r) => {
     const id = r.recipeId || r.id;
-    if (id === 'recipe001' || id === 'recipe002') return true;
     return unlockedRecipes.some((ur) => (typeof ur === 'string' ? ur === id : ur?.recipeId === id));
   });
 
@@ -155,7 +156,7 @@ export const CraftPanel = () => {
             const availableMatLabelText = t.availableMaterials || (language === 'en' ? 'Available Materials:' : '可用材料：');
 
             const reqToolsStr = rec.requiredToolTypes && rec.requiredToolTypes.length > 0
-              ? rec.requiredToolTypes.join(', ')
+              ? rec.requiredToolTypes.map((type) => (TOOL_TYPE_LABELS[language] && TOOL_TYPE_LABELS[language][type]) || type).join(', ')
               : (language === 'en' ? 'None' : '無');
 
             const reqItemsList = rec.requiredItems || [];
@@ -167,9 +168,11 @@ export const CraftPanel = () => {
               return (inv.count || 1) >= req.quantity * craftQty;
             });
 
-            const totalEnergyCost = (rec.energyCost || 0) * craftQty;
+            const baseEnergyCost = (rec.energyCost || 0) * craftQty;
+            const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
             const hasEnergy = (player?.energy ?? 0) >= totalEnergyCost;
-            const isReadyToCraft = hasTools && hasSelectedAllMaterials && hasEnergy;
+            const isComatose = isPlayerComatose(player);
+            const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
 
             return (
               <div className="recipe-detail-window">
@@ -243,7 +246,15 @@ export const CraftPanel = () => {
                   {rec.energyCost ? (
                     <div className="recipe-detail-row">
                       <span className="recipe-detail-label">{language === 'en' ? 'Energy Cost:' : '精力消耗：'}</span>
-                      <span className="recipe-detail-val">{totalEnergyCost}</span>
+                      <span className="recipe-detail-val">
+                        {totalEnergyCost}
+                        {totalEnergyCost < baseEnergyCost && (
+                          <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '6px' }}>(-10%)</span>
+                        )}
+                        {totalEnergyCost > baseEnergyCost && (
+                          <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '6px' }}>(+20%)</span>
+                        )}
+                      </span>
                     </div>
                   ) : null}
                 </div>
@@ -254,9 +265,10 @@ export const CraftPanel = () => {
                     type="button"
                     className="btn-craft"
                     disabled={!isReadyToCraft}
+                    title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : undefined}
                     onClick={(e) => handleStartCraft(rec, e, isReadyToCraft)}
                   >
-                    {t.startCraft}
+                    {isComatose ? (t.comatose || '昏迷中') : t.startCraft}
                   </button>
                 </div>
               </div>

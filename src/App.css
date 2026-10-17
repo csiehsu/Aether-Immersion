@@ -235,6 +235,50 @@
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.8);
 }
 
+/* Top HUD Status Badge (Text-box only, no icon) */
+.hud-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+  cursor: default;
+  user-select: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.hud-status-badge.status-well_fed {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.6);
+  color: #34d399;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
+}
+
+.hud-status-badge.status-light_fed {
+  background: rgba(6, 182, 212, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.6);
+  color: #22d3ee;
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.25);
+}
+
+.hud-status-badge.status-famished_dehydrated {
+  background: rgba(249, 115, 22, 0.15);
+  border: 1px solid rgba(249, 115, 22, 0.6);
+  color: #fb923c;
+  box-shadow: 0 0 8px rgba(249, 115, 22, 0.25);
+}
+
+.hud-status-badge.mini {
+  padding: 1px 6px;
+  font-size: 0.7rem;
+  border-radius: 4px;
+}
+
 .settings-dropdown-menu {
   position: absolute;
   top: calc(100% + 10px);
@@ -540,6 +584,14 @@
   height: 100%;
   z-index: 1;
   overflow: hidden;
+}
+
+.static-background-layer.comatose-black {
+  background: #000000 !important;
+}
+
+.static-background-layer.comatose-black .port-static-img {
+  display: none !important;
 }
 
 .port-static-img {
@@ -948,7 +1000,9 @@
   color: #94a3b8;
 }
 
-.btn-craft:disabled {
+.btn-craft:disabled,
+.btn-gather:disabled,
+.btn-move:disabled:not(.btn-active) {
   background: #334155 !important;
   color: #64748b !important;
   cursor: not-allowed !important;

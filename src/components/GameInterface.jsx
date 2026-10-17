@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGameStore } from '../store/useGameStore';
+import { isPlayerComatose } from '../utils/gameHelpers';
 import { getLocalizedName, getLocalizedDesc } from '../utils/language';
 import { TopHUD } from './TopHUD';
 import { BottomToolbar } from './BottomToolbar';
@@ -45,6 +46,7 @@ export const GameInterface = () => {
   const currentLocationName = getLocalizedName(currentLocation, language);
   const currentLocationDesc = getLocalizedDesc(currentLocation, language);
 
+  const isComatose = isPlayerComatose(player);
   const currentBg = currentLocation?.image || '';
 
   /**
@@ -96,8 +98,10 @@ export const GameInterface = () => {
           <div className="port-viewport-frame">
             <TopHUD />
 
-            <div className="static-background-layer">
-              <img src={currentBg} alt={currentLocationName} className="port-static-img" />
+            <div className={`static-background-layer ${isComatose ? 'comatose-black' : ''}`}>
+              {!isComatose && currentBg ? (
+                <img src={currentBg} alt={currentLocationName} className="port-static-img" />
+              ) : null}
             </div>
 
             <div className="mobile-location-wrapper">

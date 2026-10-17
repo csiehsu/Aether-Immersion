@@ -2,6 +2,7 @@ import express from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import { Player } from '../models/Player.js';
 import { isDbConnected } from '../utils/dbHelper.js';
+import { settleEnergyRecovery } from '../utils/energyHelper.js';
 
 const router = express.Router();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -84,6 +85,7 @@ router.post('/google', async (req, res) => {
     }
 
     if (player) {
+      settleEnergyRecovery(player);
       player.googleId = googleUser.sub;
       player.email = googleUser.email;
       if (!player.isCharacterCreated) {
@@ -109,6 +111,7 @@ router.post('/google', async (req, res) => {
         maxHp: 100,
         energy: 4320,
         maxEnergy: 4320,
+        lastEnergyRecoveredAt: new Date(),
         location: 'AZURE_BAY_PORT',
         knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
       });

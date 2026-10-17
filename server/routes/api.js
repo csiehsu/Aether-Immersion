@@ -17,6 +17,20 @@ import { initialBuildings } from '../seeds/seedBuildings.js';
 import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
 import { initialQuests } from '../seeds/seedQuests.js';
 import { isDbConnected, fetchCollectionData, generateInstanceId } from '../utils/dbHelper.js';
+import {
+  settleEnergyRecovery,
+  applyEnergyConsumption,
+  isPlayerComatose,
+  calculateEffectiveEnergyCost,
+  getStatusEffects,
+} from '../utils/energyHelper.js';
+import {
+  MAX_WATER,
+  MAX_FOOD,
+  MAX_HP,
+  MAX_ENERGY,
+  DEFAULT_INITIAL_STATS,
+} from '../../src/constants/gameConstants.js';
 
 const router = express.Router();
 
@@ -189,10 +203,10 @@ const formatPlayerResponse = (playerDoc) => {
     strength: rawStats.strength ?? p.str ?? 1,
     speed: rawStats.speed ?? p.spd ?? 1,
     dexterity: dexVal,
-    maxHp: rawStats.maxHp ?? p.maxHp ?? 100,
+    maxHp: rawStats.maxHp ?? p.maxHp ?? MAX_HP,
     defense: rawStats.defense ?? 0,
-    water: rawStats.water ?? 100,
-    food: rawStats.food ?? 100,
+    water: rawStats.water ?? MAX_WATER,
+    food: rawStats.food ?? MAX_FOOD,
   };
   p.str = p.stats.strength;
   p.spd = p.stats.speed;
@@ -203,6 +217,12 @@ const formatPlayerResponse = (playerDoc) => {
   p.money = p.money ?? 0;
   p.mentor = p.mentor || 'Martha';
   p.unlockedRecipes = sanitizeUnlockedRecipes(p.unlockedRecipes);
+  p.lastEnergyRecoveredAt = p.lastEnergyRecoveredAt
+    ? new Date(p.lastEnergyRecoveredAt).toISOString()
+    : new Date().toISOString();
+  p.energySpentAccumulator = Number(p.energySpentAccumulator) || 0;
+  p.hpRegenAccumulator = Number(p.hpRegenAccumulator) || 0;
+  p.statusEffects = getStatusEffects(p);
   return p;
 };
 
@@ -298,39 +318,45 @@ router.get('/player', async (req, res) => {
         name: defaultName,
         mentor: defaultMentor,
         isCharacterCreated: false,
-        stats: { strength: 1, speed: 1, dexterity: 1, maxHp: 100, defense: 0, water: 100, food: 100 },
+        stats: { ...DEFAULT_INITIAL_STATS },
         skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
         level: 1,
-        hp: 100,
+        hp: MAX_HP,
         money: 0,
-        energy: 4320,
-        maxEnergy: 4320,
+        energy: MAX_ENERGY,
+        maxEnergy: MAX_ENERGY,
+        lastEnergyRecoveredAt: new Date(),
         location: 'AZURE_BAY_PORT',
         knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
-    } else if (player.isCharacterCreated) {
-      const currentMentor = player.mentor || 'Martha';
-      const { newRoomId, shopLocationId } = await ensureCustomRoom(player.name, currentMentor);
-      let updated = false;
+    } else {
+      const energyUpdated = settleEnergyRecovery(player);
+      let updated = energyUpdated;
 
-      const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('冒險者_ROOM'));
-      if (filtered.length !== player.knownLocations.length) {
-        player.knownLocations = filtered;
-        updated = true;
+      if (player.isCharacterCreated) {
+        const currentMentor = player.mentor || 'Martha';
+        const { newRoomId, shopLocationId } = await ensureCustomRoom(player.name, currentMentor);
+
+        const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('冒險者_ROOM'));
+        if (filtered.length !== player.knownLocations.length) {
+          player.knownLocations = filtered;
+          updated = true;
+        }
+        if (!player.knownLocations.includes(shopLocationId)) {
+          player.knownLocations.push(shopLocationId);
+          updated = true;
+        }
+        if (!player.knownLocations.includes(newRoomId)) {
+          player.knownLocations.push(newRoomId);
+          updated = true;
+        }
+        if (!player.mentor) {
+          player.mentor = currentMentor;
+          updated = true;
+        }
       }
-      if (!player.knownLocations.includes(shopLocationId)) {
-        player.knownLocations.push(shopLocationId);
-        updated = true;
-      }
-      if (!player.knownLocations.includes(newRoomId)) {
-        player.knownLocations.push(newRoomId);
-        updated = true;
-      }
-      if (!player.mentor) {
-        player.mentor = currentMentor;
-        updated = true;
-      }
+
       if (updated) {
         player.markModified('knownLocations');
         await player.save();
@@ -384,8 +410,8 @@ router.post('/player/create-character', async (req, res) => {
 
     const { newRoomId, shopLocationId } = await ensureCustomRoom(trimmedName, selectedMentor);
 
-    const maxHp = 100;
-    const maxEnergy = 4320;
+    const maxHp = MAX_HP;
+    const maxEnergy = MAX_ENERGY;
 
     const characterData = {
       name: trimmedName,
@@ -396,8 +422,8 @@ router.post('/player/create-character', async (req, res) => {
         dexterity: nDex,
         maxHp,
         defense: 0,
-        water: 100,
-        food: 100,
+        water: MAX_WATER,
+        food: MAX_FOOD,
       },
       skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
       level: 1,
@@ -406,6 +432,8 @@ router.post('/player/create-character', async (req, res) => {
       money: 0,
       energy: maxEnergy,
       maxEnergy,
+      lastEnergyRecoveredAt: new Date(),
+      energySpentAccumulator: 0,
       location: newRoomId,
       knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', shopLocationId, newRoomId],
     };
@@ -422,6 +450,8 @@ router.post('/player/create-character', async (req, res) => {
       player.money = characterData.money;
       player.energy = characterData.energy;
       player.maxEnergy = characterData.maxEnergy;
+      player.lastEnergyRecoveredAt = characterData.lastEnergyRecoveredAt;
+      player.energySpentAccumulator = 0;
       player.location = characterData.location;
       player.knownLocations = characterData.knownLocations;
       player.markModified('knownLocations');
@@ -451,7 +481,26 @@ router.put('/player', async (req, res) => {
     }
     let player = await Player.findOne();
     if (player) {
+      settleEnergyRecovery(player);
+
+      if (typeof updateData.energy === 'number') {
+        const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
+        const wasFull = (player.energy ?? 0) >= maxEnergy;
+        if (wasFull && updateData.energy < maxEnergy && !updateData.lastEnergyRecoveredAt) {
+          player.lastEnergyRecoveredAt = new Date();
+        }
+      }
+      if (updateData.lastEnergyRecoveredAt) {
+        player.lastEnergyRecoveredAt = new Date(updateData.lastEnergyRecoveredAt);
+        delete updateData.lastEnergyRecoveredAt;
+      }
       if (updateData.stats) {
+        if (typeof updateData.stats.water === 'number') {
+          updateData.stats.water = Math.max(0, Math.min(MAX_WATER, updateData.stats.water));
+        }
+        if (typeof updateData.stats.food === 'number') {
+          updateData.stats.food = Math.max(0, Math.min(MAX_FOOD, updateData.stats.food));
+        }
         player.stats = {
           ...player.stats?.toObject(),
           ...updateData.stats,
@@ -485,20 +534,107 @@ router.post('/player/gather', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法進行採集！' });
     }
 
-    const { cost = 5, itemId, qty = 1 } = req.body;
+    const { itemId, qty = 1 } = req.body;
     const addQty = Math.max(1, Number(qty) || 1);
 
-    let player = await Player.findOne();
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家角色！' });
     }
 
-    if (player.energy < cost) {
+    settleEnergyRecovery(player);
+
+    if (isPlayerComatose(player)) {
+      return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
+    }
+
+    let locationDoc = await Location.findOne({ locationId: player.location });
+    if (!locationDoc) {
+      locationDoc = initialLocations.find((l) => l.locationId === player.location);
+    }
+    const spot = (locationDoc?.gatherables || []).find((g) => g.itemId === itemId);
+    if (!spot) {
+      return res.status(400).json({ success: false, message: '當前地點無法採集該資源！' });
+    }
+
+    const unitCost = spot.cost ?? 1;
+    const baseTotalCost = unitCost * addQty;
+    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+    if (player.energy < totalCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
-    player.energy = Math.max(0, player.energy - cost);
     player.inventory = sanitizeInventoryItems(player.inventory);
+    const requiredToolTypes = spot.requiredToolTypes || [];
+
+    if (requiredToolTypes.length > 0) {
+      const invItemIds = player.inventory.map((i) => i.itemId);
+      let dbItems = await Item.find({ itemId: { $in: invItemIds } });
+      if (!dbItems || dbItems.length === 0) {
+        dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
+      }
+
+      const getItemTypes = (targetItemId) => {
+        const found = dbItems.find((d) => d.itemId === targetItemId) || initialItems.find((d) => d.itemId === targetItemId);
+        if (!found || !found.type) return [];
+        return Array.isArray(found.type) ? found.type : [found.type];
+      };
+
+      const locBuildingList = locationDoc?.buildings || [];
+      const locBuildingIds = locBuildingList.map((b) => b.buildingId);
+      let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
+      const locBuildingTypes = locBuildingList.map((b) => {
+        const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
+        return found?.type || b.buildingId;
+      });
+
+      const nonConsumableReqs = requiredToolTypes.filter((t) => t !== 'BAIT');
+      for (const reqTool of nonConsumableReqs) {
+        const hasInBuildings = locBuildingTypes.includes(reqTool);
+        const hasInInventory = player.inventory.some((inv) => {
+          const types = getItemTypes(inv.itemId);
+          return types.includes(reqTool) && (inv.count || 1) > 0;
+        });
+        if (!hasInBuildings && !hasInInventory) {
+          return res.status(400).json({ success: false, message: '缺少採集所需工具！' });
+        }
+      }
+
+      if (requiredToolTypes.includes('BAIT')) {
+        const requiredBaitQty = 1 * addQty;
+        const baitEntries = player.inventory.filter((inv) => getItemTypes(inv.itemId).includes('BAIT'));
+        const totalBaitCount = baitEntries.reduce((sum, inv) => sum + (inv.count || 1), 0);
+
+        if (totalBaitCount < requiredBaitQty) {
+          return res.status(400).json({ success: false, message: '肉餌數量不足！' });
+        }
+
+        let remainingToDeduct = requiredBaitQty;
+        for (const inv of player.inventory) {
+          if (remainingToDeduct <= 0) break;
+          if (getItemTypes(inv.itemId).includes('BAIT')) {
+            const curCount = inv.count || 1;
+            if (curCount <= remainingToDeduct) {
+              inv.count = 0;
+              remainingToDeduct -= curCount;
+            } else {
+              inv.count = curCount - remainingToDeduct;
+              remainingToDeduct = 0;
+            }
+          }
+        }
+        player.inventory = player.inventory.filter((i) => (i.count || 0) > 0);
+      }
+    }
+
+    const maxEnergy = player.maxEnergy ?? 4320;
+    const wasFull = player.energy >= maxEnergy;
+    player.energy = Math.max(0, player.energy - totalCost);
+    if (wasFull && player.energy < maxEnergy) {
+      player.lastEnergyRecoveredAt = new Date();
+    }
+    applyEnergyConsumption(player, totalCost);
+    player.markModified('stats');
 
     const existingItem = player.inventory.find((i) => i.itemId === itemId);
     if (existingItem) {
@@ -512,9 +648,333 @@ router.post('/player/gather', async (req, res) => {
     }
 
     await player.save();
-    return res.json({ success: true, source: 'mongodb', data: player });
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
     console.error('[API Error] POST /api/player/gather:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/travel
+router.post('/player/travel', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法移動！' });
+    }
+
+    const { targetLocationId } = req.body;
+    if (!targetLocationId) {
+      return res.status(400).json({ success: false, message: '請指定目標地點！' });
+    }
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家角色！' });
+    }
+
+    settleEnergyRecovery(player);
+
+    if (isPlayerComatose(player)) {
+      return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
+    }
+
+    let locationDoc = await Location.findOne({ locationId: player.location });
+    if (!locationDoc) {
+      locationDoc = initialLocations.find((l) => l.locationId === player.location);
+    }
+
+    const connection = (locationDoc?.connections || []).find((c) => c.targetLocationId === targetLocationId);
+    if (!connection) {
+      return res.status(400).json({ success: false, message: '當前地點無法直接前往該目標地點！' });
+    }
+
+    const baseEnergyCost = connection.energyCost ?? 1;
+    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    if (player.energy < energyCost) {
+      return res.status(400).json({ success: false, message: '精力不足！' });
+    }
+
+    const maxEnergy = player.maxEnergy ?? 4320;
+    const wasFull = player.energy >= maxEnergy;
+    player.energy = Math.max(0, player.energy - energyCost);
+    if (wasFull && player.energy < maxEnergy) {
+      player.lastEnergyRecoveredAt = new Date();
+    }
+    applyEnergyConsumption(player, energyCost);
+    player.markModified('stats');
+
+    player.location = targetLocationId;
+    const known = Array.isArray(player.knownLocations) ? [...player.knownLocations] : [];
+    if (!known.includes(targetLocationId)) {
+      known.push(targetLocationId);
+      player.knownLocations = known;
+      player.markModified('knownLocations');
+    }
+
+    await player.save();
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/travel:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/craft
+router.post('/player/craft', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線，無法進行合成！' });
+    }
+
+    const { recipeId, craftQty = 1, selectedMaterials = {} } = req.body;
+    if (!recipeId) {
+      return res.status(400).json({ success: false, message: '請指定合成配方！' });
+    }
+
+    const numCraftQty = Math.max(1, Number(craftQty) || 1);
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家角色！' });
+    }
+
+    settleEnergyRecovery(player);
+
+    if (isPlayerComatose(player)) {
+      return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
+    }
+
+    let recipe = await Recipe.findOne({ recipeId });
+    if (!recipe) {
+      recipe = initialRecipes.find((r) => r.recipeId === recipeId);
+    }
+    if (!recipe) {
+      return res.status(400).json({ success: false, message: '找不到指定配方！' });
+    }
+
+    const playerUnlocked = player.unlockedRecipes || [];
+    const isUnlocked = playerUnlocked.some((ur) => {
+      return typeof ur === 'string' ? ur === recipe.recipeId : ur?.recipeId === recipe.recipeId;
+    });
+    if (!isUnlocked) {
+      return res.status(400).json({ success: false, message: '該配方尚未解鎖！' });
+    }
+
+    let locationDoc = await Location.findOne({ locationId: player.location });
+    if (!locationDoc) {
+      locationDoc = initialLocations.find((l) => l.locationId === player.location);
+    }
+    const locBuildingList = locationDoc?.buildings || [];
+    const locBuildingIds = locBuildingList.map((b) => b.buildingId);
+    let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
+    const locBuildingTypes = locBuildingList.map((b) => {
+      const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
+      return found?.type || b.buildingId;
+    });
+
+    const cleanInventory = sanitizeInventoryItems(player.inventory);
+    const invItemIds = cleanInventory.map((i) => i.itemId);
+    let dbItems = await Item.find({ itemId: { $in: invItemIds } });
+    if (!dbItems || dbItems.length === 0) {
+      dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
+    }
+    const getItemTypes = (targetItemId) => {
+      const found = dbItems.find((d) => d.itemId === targetItemId) || initialItems.find((d) => d.itemId === targetItemId);
+      if (!found || !found.type) return [];
+      return Array.isArray(found.type) ? found.type : [found.type];
+    };
+
+    const invToolTypes = cleanInventory.flatMap((inv) => getItemTypes(inv.itemId));
+    const reqTools = recipe.requiredToolTypes || [];
+    const hasTools = reqTools.every((t) => locBuildingTypes.includes(t) || invToolTypes.includes(t));
+    if (!hasTools) {
+      return res.status(400).json({ success: false, message: '缺少合成所需工具！' });
+    }
+
+    const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
+    const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    if ((player.energy ?? 0) < totalEnergyCost) {
+      return res.status(400).json({ success: false, message: '精力不足！' });
+    }
+
+    const reqItems = recipe.requiredItems || [];
+    let updatedInv = sanitizeInventoryItems(player.inventory);
+
+    for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
+      const req = reqItems[reqIdx];
+      const requiredTotalCount = req.quantity * numCraftQty;
+      const selectedId = selectedMaterials[reqIdx];
+      if (!selectedId) {
+        return res.status(400).json({ success: false, message: '未選擇所需材料！' });
+      }
+
+      const invIndex = updatedInv.findIndex((i) => i.itemId === selectedId && (i.count || 1) >= requiredTotalCount);
+      if (invIndex < 0) {
+        return res.status(400).json({ success: false, message: '材料不足或未持有指定材料！' });
+      }
+
+      const invItem = updatedInv[invIndex];
+      const types = getItemTypes(invItem.itemId);
+      const matchesItem = req.itemId ? invItem.itemId === req.itemId : false;
+      const matchesType = req.type ? types.includes(req.type) : false;
+      if (!matchesItem && !matchesType) {
+        return res.status(400).json({ success: false, message: '所選材料不符合配方需求！' });
+      }
+
+      const curCount = invItem.count || 1;
+      if (curCount === requiredTotalCount) {
+        updatedInv[invIndex] = { ...invItem, count: 0 };
+      } else {
+        updatedInv[invIndex] = { ...invItem, count: curCount - requiredTotalCount };
+      }
+    }
+    updatedInv = updatedInv.filter((i) => (i.count || 0) > 0);
+
+    let calculatedDurability = -1;
+    const firstSelId = selectedMaterials[0];
+    if (recipe.durabilityFormula) {
+      let matDurability = -1;
+      if (firstSelId) {
+        const selectedMatInv = updatedInv.find((i) => i.itemId === firstSelId) || player.inventory.find((i) => i.itemId === firstSelId);
+        if (selectedMatInv) {
+          const matDbItem = dbItems.find((i) => i.itemId === selectedMatInv.itemId) || initialItems.find((i) => i.itemId === selectedMatInv.itemId);
+          matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
+            ? selectedMatInv.durability
+            : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
+        }
+      }
+      try {
+        const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);
+        calculatedDurability = computeFn({ durability: matDurability > 0 ? matDurability : 0 });
+      } catch (err) {
+        console.error('[Durability Formula Error]', err);
+      }
+    }
+
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) {
+      allDbItems = initialItems;
+    }
+
+    const outputItems = recipe.outputItems || [];
+    for (const out of outputItems) {
+      const outItemId = out.itemId || recipe.recipeId;
+      const dbOut = allDbItems.find(
+        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
+      );
+      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+      const addQty = (out.quantity || 1) * numCraftQty;
+
+      const existingMatchIndex = updatedInv.findIndex((inv) => {
+        if (inv.itemId !== finalItemId) return false;
+        const oldDurability = inv.durability !== undefined && inv.durability > 0 ? inv.durability : -1;
+        const newDurability = calculatedDurability > 0 ? calculatedDurability : -1;
+        if (oldDurability <= 0 && newDurability <= 0) return true;
+        if (oldDurability > 0 && newDurability > 0) {
+          const minAllowed = oldDurability * 0.9;
+          const maxAllowed = oldDurability * 1.1;
+          return newDurability >= minAllowed && newDurability <= maxAllowed;
+        }
+        return false;
+      });
+
+      if (existingMatchIndex >= 0) {
+        const existingItem = updatedInv[existingMatchIndex];
+        const oldCount = existingItem.count || 1;
+        const newTotalCount = oldCount + addQty;
+        const oldDurability = existingItem.durability !== undefined && existingItem.durability > 0 ? existingItem.durability : -1;
+
+        const updatedItem = {
+          ...existingItem,
+          count: newTotalCount,
+        };
+
+        if (oldDurability > 0 && calculatedDurability > 0) {
+          const weightedDurability = Math.round(
+            (oldDurability * oldCount + calculatedDurability * addQty) / newTotalCount
+          );
+          updatedItem.durability = weightedDurability;
+        } else if (calculatedDurability > 0) {
+          updatedItem.durability = calculatedDurability;
+        }
+
+        updatedInv[existingMatchIndex] = updatedItem;
+      } else {
+        const newItem = {
+          instanceId: generateInstanceId(),
+          itemId: finalItemId,
+          count: addQty,
+          quality: '普通',
+        };
+        if (calculatedDurability > 0) {
+          newItem.durability = calculatedDurability;
+        }
+        updatedInv.push(newItem);
+      }
+    }
+
+    let dbQuests = await Quest.find();
+    if (!dbQuests || dbQuests.length === 0) {
+      dbQuests = initialQuests;
+    }
+    let updatedQuests = player.quests ? player.quests.map((q) => {
+      const qObj = q.toObject ? q.toObject() : { ...q };
+      return {
+        ...qObj,
+        progress: qObj.progress ? qObj.progress.map((p) => ({ ...p })) : [],
+      };
+    }) : [];
+
+    let hasQuestUpdate = false;
+    for (const out of outputItems) {
+      const outItemId = out.itemId || recipe.recipeId;
+      const dbOut = allDbItems.find(
+        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
+      );
+      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+      const addQty = (out.quantity || 1) * numCraftQty;
+
+      for (const q of updatedQuests) {
+        if (q.status !== 'IN_PROGRESS') continue;
+        const qDef = (dbQuests || []).find((def) => def.questId === q.questId);
+        if (!qDef) continue;
+        (qDef.objectives || []).forEach((obj, objIdx) => {
+          if (obj.type === 'CRAFT' && obj.targetId === finalItemId) {
+            let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
+            if (!prog) {
+              prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
+              q.progress = q.progress || [];
+              q.progress.push(prog);
+            }
+            prog.currentCount = (prog.currentCount || 0) + addQty;
+            if (prog.currentCount >= (obj.requiredCount || 1)) {
+              prog.isCompleted = true;
+            }
+            hasQuestUpdate = true;
+          }
+        });
+      }
+    }
+
+    const maxEnergy = player.maxEnergy ?? 4320;
+    const wasFull = player.energy >= maxEnergy;
+    player.energy = Math.max(0, player.energy - totalEnergyCost);
+    if (wasFull && player.energy < maxEnergy) {
+      player.lastEnergyRecoveredAt = new Date();
+    }
+    applyEnergyConsumption(player, totalEnergyCost);
+    player.markModified('stats');
+    player.inventory = sanitizeInventoryItems(updatedInv);
+    player.markModified('inventory');
+    if (hasQuestUpdate) {
+      player.quests = updatedQuests;
+      player.markModified('quests');
+    }
+
+    await player.save();
+    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/craft:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

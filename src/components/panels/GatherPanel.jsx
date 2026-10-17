@@ -1,8 +1,9 @@
 import { useState, Fragment } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
+import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
-import { getNpcIcon } from '../../utils/gameHelpers';
+import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
   getActiveQuestForNpc,
@@ -507,21 +508,126 @@ export const GatherPanel = () => {
                 const spot = gatherables.find((item, idx) => (item.itemId || idx) === selectedId);
                 if (!spot) return null;
                 const unitCost = spot.cost ?? 1;
-                const totalCost = unitCost * gatherQty;
+                const baseTotalCost = unitCost * gatherQty;
+                const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+                const reqTools = spot.requiredToolTypes || [];
+
+                const getItemTypes = (targetItemId) => {
+                  const dbI = items.find((i) => i.itemId === targetItemId);
+                  if (!dbI || !dbI.type) return [];
+                  return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
+                };
+
+                const locBuildingList = currentLocation?.buildings || [];
+                const locBuildingTypes = locBuildingList.map((b) => {
+                  const dbB = buildings.find((item) => item.buildingId === b.buildingId);
+                  return dbB ? dbB.type : b.buildingId;
+                });
+
+                const invToolTypes = inventory.flatMap((inv) => {
+                  if ((inv.count || 1) <= 0) return [];
+                  return getItemTypes(inv.itemId);
+                });
+
+                const hasBaitRequirement = reqTools.includes('BAIT');
+                const baitEntries = inventory.filter((inv) => getItemTypes(inv.itemId).includes('BAIT'));
+                const totalBaitCount = baitEntries.reduce((sum, inv) => sum + (inv.count || 1), 0);
+                const requiredBaitTotal = hasBaitRequirement ? 1 * gatherQty : 0;
+                const hasEnoughBait = hasBaitRequirement ? totalBaitCount >= requiredBaitTotal : true;
+
+                const nonConsumableReqs = reqTools.filter((t) => t !== 'BAIT');
+                const hasNonConsumableTools = nonConsumableReqs.every(
+                  (t) => locBuildingTypes.includes(t) || invToolTypes.includes(t)
+                );
+
+                const currentEnergy = player?.energy ?? 0;
+                const hasEnergy = currentEnergy >= totalCost;
+                const isComatose = isPlayerComatose(player);
+                const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy;
+
+                const buttonText = isComatose
+                  ? (t.comatoseCannotAct || '昏迷中，無法行動')
+                  : !hasNonConsumableTools
+                  ? (t.missingTools || '缺少需求工具')
+                  : !hasEnoughBait
+                  ? (t.notEnoughBait || '肉餌不足')
+                  : !hasEnergy
+                  ? (t.notEnoughEnergy || '精力不足')
+                  : t.gatherBtn;
 
                 return (
                   <div className="gather-detail-window">
                     <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                      <span className="gather-cost">{t.costEnergy}: -{totalCost}</span>
-                      <QuantitySelector value={gatherQty} onChange={setGatherQty} min={1} />
+                      <span className="gather-cost">
+                        {t.costEnergy}: -{totalCost}
+                        {totalCost < baseTotalCost && (
+                          <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
+                        )}
+                        {totalCost > baseTotalCost && (
+                          <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
+                        )}
+                      </span>
+                      <QuantitySelector
+                        value={gatherQty}
+                        onChange={setGatherQty}
+                        min={1}
+                        max={hasBaitRequirement ? Math.max(1, totalBaitCount) : Infinity}
+                      />
                     </div>
+
+                    {reqTools.length > 0 && (
+                      <div className="gather-tools-requirement" style={{ margin: '8px 0', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ color: '#94a3b8', fontWeight: 'bold' }}>{t.reqTools}：</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {reqTools.map((toolType) => {
+                            const typeName = (TOOL_TYPE_LABELS[language] && TOOL_TYPE_LABELS[language][toolType]) || toolType;
+                            if (toolType === 'BAIT') {
+                              const isBaitMet = totalBaitCount >= requiredBaitTotal;
+                              return (
+                                <span
+                                  key={toolType}
+                                  style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    background: isBaitMet ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                    color: isBaitMet ? '#4ade80' : '#f87171',
+                                    border: `1px solid ${isBaitMet ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                                  }}
+                                >
+                                  {typeName} ×{gatherQty} ({isBaitMet ? `${t.toolAvailable || '持有'}: ${totalBaitCount}` : `${t.notEnoughBait || '不足'}: ${totalBaitCount}/${requiredBaitTotal}`})
+                                </span>
+                              );
+                            } else {
+                              const hasThisTool = locBuildingTypes.includes(toolType) || invToolTypes.includes(toolType);
+                              return (
+                                <span
+                                  key={toolType}
+                                  style={{
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    background: hasThisTool ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                    color: hasThisTool ? '#4ade80' : '#f87171',
+                                    border: `1px solid ${hasThisTool ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                                  }}
+                                >
+                                  {typeName} ({hasThisTool ? (t.toolAvailable || '已具備') : (t.toolMissing || '缺少')})
+                                </span>
+                              );
+                            }
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="gather-detail-actions">
                       <button
                         type="button"
                         className="btn-gather"
+                        disabled={!canGather}
+                        title={buttonText}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (!canGather) return;
                           performGather(
                             spot.itemId,
                             unitCost,
@@ -529,7 +635,7 @@ export const GatherPanel = () => {
                           );
                         }}
                       >
-                        {t.gatherBtn}
+                        {buttonText}
                       </button>
                     </div>
                   </div>

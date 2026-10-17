@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameStore, translations } from '../store/useGameStore';
+import { isPlayerComatose, getStatusEffects } from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
+import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
 
 /**
  * 頂部抬頭顯示器 (Top HUD) 元件。
@@ -15,14 +17,72 @@ export const TopHUD = () => {
   const mongoStatus = useGameStore((state) => state.mongoStatus);
   const viewMode = useGameStore((state) => state.viewMode);
   const setViewMode = useGameStore((state) => state.setViewMode);
+  const settleEnergyRecovery = useGameStore((state) => state.settleEnergyRecovery);
   const t = translations[language] || translations['zh-TW'];
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerDetailsOpen, setPlayerDetailsOpen] = useState(false);
 
   const maxHp = player?.stats?.maxHp ?? player?.maxHp ?? 100;
+  const maxEnergy = player?.maxEnergy ?? 4320;
   const hpPercent = player ? Math.min(100, Math.max(0, (player.hp / maxHp) * 100)) : 0;
-  const energyPercent = player ? Math.min(100, Math.max(0, (player.energy / player.maxEnergy) * 100)) : 0;
+  const energyPercent = player ? Math.min(100, Math.max(0, (player.energy / maxEnergy) * 100)) : 0;
+  const isFullEnergy = (player?.energy ?? 0) >= maxEnergy;
+  const isComatose = isPlayerComatose(player);
+
+  const statusEffects = player ? getStatusEffects(player) : [];
+  const primaryStatus = statusEffects[0] || null;
+
+  const getStatusLabel = (eff) => {
+    if (!eff) return '';
+    if (eff.id === 'WELL_FED') return t.statusWellFed || '充沛飽足';
+    if (eff.id === 'LIGHT_FED') return t.statusLightFed || '輕度飽足';
+    if (eff.id === 'FAMISHED_DEHYDRATED') return t.statusFamishedDehydrated || '飢渴虛弱';
+    return language === 'en' ? eff.nameEn : eff.name;
+  };
+
+  const getStatusDesc = (eff) => {
+    if (!eff) return '';
+    if (eff.id === 'WELL_FED') return t.statusWellFedDesc || eff.description;
+    if (eff.id === 'LIGHT_FED') return t.statusLightFedDesc || eff.description;
+    if (eff.id === 'FAMISHED_DEHYDRATED') return t.statusFamishedDehydratedDesc || eff.description;
+    return language === 'en' ? eff.descriptionEn : eff.description;
+  };
+
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  useEffect(() => {
+    if (!player || isFullEnergy) return;
+
+    const updateCountdown = () => {
+      const now = Date.now();
+      const lastTime = player.lastEnergyRecoveredAt
+        ? new Date(player.lastEnergyRecoveredAt).getTime()
+        : now;
+      const elapsed = now - lastTime;
+      if (elapsed >= ENERGY_RECOVERY_INTERVAL_MS) {
+        settleEnergyRecovery();
+      } else {
+        const remaining = Math.max(0, Math.ceil((ENERGY_RECOVERY_INTERVAL_MS - elapsed) / 1000));
+        setSecondsLeft(remaining);
+      }
+    };
+
+    const initialTimeout = setTimeout(updateCountdown, 0);
+    const interval = setInterval(updateCountdown, 1000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [player, isFullEnergy, settleEnergyRecovery]);
+
+  const formatCountdown = (secs) => {
+    if (secs <= 0) return '00:00';
+    const mins = Math.floor(secs / 60);
+    const remainderSecs = secs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(remainderSecs).padStart(2, '0')}`;
+  };
 
   const playerNameText = player?.name || (user?.isLoggedIn ? user.name : t.playerDefaultName);
 
@@ -57,8 +117,25 @@ export const TopHUD = () => {
                   )}
                 </div>
                 <div className="player-basic-info">
-                  <span className="player-details-name">{playerNameText}</span>
-                  <span className="player-details-level">LV.{player?.level ?? 1}</span>
+                  <span className="player-details-name">
+                    {playerNameText}
+                    {isComatose && (
+                      <span className="player-comatose-tag" style={{ color: '#ef4444', marginLeft: '6px', fontWeight: 'bold' }}>
+                        （{t.comatose || '昏迷中'}）
+                      </span>
+                    )}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
+                    <span className="player-details-level">LV.{player?.level ?? 1}</span>
+                    {primaryStatus && (
+                      <span
+                        className={`hud-status-badge mini status-${primaryStatus.id.toLowerCase()}`}
+                        title={getStatusDesc(primaryStatus)}
+                      >
+                        {getStatusLabel(primaryStatus)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -97,12 +174,12 @@ export const TopHUD = () => {
                   <div className="stat-card water">
                     <span className="stat-icon">💧</span>
                     <span className="stat-label">{t.waterLabel || '水分'}</span>
-                    <span className="stat-value">{player?.stats?.water ?? 100}</span>
+                    <span className="stat-value">{player?.stats?.water ?? MAX_WATER}</span>
                   </div>
                   <div className="stat-card food">
                     <span className="stat-icon">🍖</span>
                     <span className="stat-label">{t.foodLabel || '飽食'}</span>
-                    <span className="stat-value">{player?.stats?.food ?? 100}</span>
+                    <span className="stat-value">{player?.stats?.food ?? MAX_FOOD}</span>
                   </div>
                 </div>
               </div>
@@ -193,13 +270,32 @@ export const TopHUD = () => {
             </div>
           )}
         </div>
+
+        {primaryStatus && (
+          <div
+            className={`hud-status-badge status-${primaryStatus.id.toLowerCase()}`}
+            title={getStatusDesc(primaryStatus)}
+          >
+            {getStatusLabel(primaryStatus)}
+          </div>
+        )}
       </div>
 
       <div className="hud-right-bars">
-        <div className="status-bar-group energy-group">
+        <div
+          className="status-bar-group energy-group"
+          title={`${t.energyRecoveryTooltip || '每 15 分鐘恢復 15 點精力'} (${isFullEnergy ? (t.energyFull || '精力已滿') : `${t.nextEnergyRecovery || '下次恢復'}: ${formatCountdown(secondsLeft)}`})`}
+        >
           <div className="status-bar-info">
-            <span className="bar-label">{t.energy}</span>
-            <span className="bar-val">{player?.energy ?? 0} / {player?.maxEnergy ?? 4320}</span>
+            <span className="bar-label">
+              {t.energy}
+              {!isFullEnergy && secondsLeft > 0 && (
+                <span style={{ fontSize: '0.68rem', color: '#fbbf24', marginLeft: '4px', fontWeight: 'normal' }}>
+                  ⏱️{formatCountdown(secondsLeft)}
+                </span>
+              )}
+            </span>
+            <span className="bar-val">{player?.energy ?? 0} / {maxEnergy}</span>
           </div>
           <div className="bar-track">
             <div className="bar-fill energy-fill" style={{ width: `${energyPercent}%` }}></div>

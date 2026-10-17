@@ -4,7 +4,21 @@ import {
   normalizePlayerStats,
   addItemsToInventory,
   calculateCombatTurn,
+  isPlayerComatose,
+  getStatusEffects,
+  calculateEffectiveEnergyCost,
 } from '../utils/gameHelpers';
+import {
+  MAX_WATER,
+  MAX_FOOD,
+  MAX_HP,
+  MAX_ENERGY,
+  DEFAULT_INITIAL_STATS,
+  ENERGY_RECOVERY_INTERVAL_MS,
+  ENERGY_RECOVERY_AMOUNT,
+  ENERGY_DRAIN_CYCLE,
+  ENERGY_HP_REGEN_CYCLE,
+} from '../constants/gameConstants';
 
 export { translations };
 
@@ -34,6 +48,85 @@ const fetchCollection = async (endpoint, stateKey, set) => {
     set({ mongoStatus: 'offline', isDisconnected: true });
   }
   return null;
+};
+
+/**
+ * 計算精力消耗對水分、飽食度與累計池之影響，並於充沛飽足狀態下計算生命值回復。
+ * 規則：
+ * 1. 水分與飽食度：每消耗 15 點精力，扣除 1 點水分與 1 點飽食度。未滿 15 的消耗累計至下次。
+ * 2. 飽足回血：處於充沛飽足 (WELL_FED) 時，每消耗 10 點精力恢復 1 點 HP。未滿 10 的消耗累計至下次。
+ * 支援小數精度（保留三位小數避免浮點數誤差）。
+ * 水分、飽食度或生命值只要有一項 <= 0，即處於昏迷狀態。
+ * @param {Object} player - 玩家物件。
+ * @param {number} energyCost - 實際消耗的精力點數。
+ * @returns {{ newStats: Object, newAccumulator: number, newHpAccumulator: number, newHp: number, drainCount: number, hpGain: number, isComatose: boolean }}
+ */
+export const calculateEnergyConsumption = (player, energyCost) => {
+  if (!player || typeof energyCost !== 'number' || energyCost <= 0) {
+    const isComatose = isPlayerComatose(player);
+    return {
+      newStats: player?.stats || {},
+      newAccumulator: player?.energySpentAccumulator || 0,
+      newHpAccumulator: player?.hpRegenAccumulator || 0,
+      newHp: player?.hp ?? 100,
+      drainCount: 0,
+      hpGain: 0,
+      isComatose,
+    };
+  }
+
+  const effects = getStatusEffects(player);
+  const canRegenHp = effects.some((e) => e.canRegenHp);
+
+  // 1. 生命值回復結算 (每消耗 ENERGY_HP_REGEN_CYCLE 點精力恢復 1 點 HP)
+  let hpGain = 0;
+  let newHpAccumulator = Number(player.hpRegenAccumulator) || 0;
+  const maxHp = player.stats?.maxHp ?? player.maxHp ?? MAX_HP;
+  let newHp = player.hp ?? maxHp;
+
+  if (canRegenHp) {
+    const totalHpSpent = Math.round((newHpAccumulator + energyCost) * 1000) / 1000;
+    hpGain = Math.floor(totalHpSpent / ENERGY_HP_REGEN_CYCLE);
+    newHpAccumulator = Math.round((totalHpSpent - hpGain * ENERGY_HP_REGEN_CYCLE) * 1000) / 1000;
+
+    if (hpGain > 0) {
+      newHp = Math.min(maxHp, newHp + hpGain);
+    }
+  }
+
+  // 2. 水分與飽食度扣除結算 (每消耗 ENERGY_DRAIN_CYCLE 點精力扣 1 水分與 1 飽食度)
+  const currentAccumulator = Number(player.energySpentAccumulator) || 0;
+  const totalSpent = Math.round((currentAccumulator + energyCost) * 1000) / 1000;
+  const drainCount = Math.floor(totalSpent / ENERGY_DRAIN_CYCLE);
+  const newAccumulator = Math.round((totalSpent - drainCount * ENERGY_DRAIN_CYCLE) * 1000) / 1000;
+
+  const currentStats = player.stats || { ...DEFAULT_INITIAL_STATS };
+
+  const newWater = drainCount > 0
+    ? Math.max(0, Math.min(MAX_WATER, Math.round(((currentStats.water ?? MAX_WATER) - drainCount) * 100) / 100))
+    : Math.min(MAX_WATER, currentStats.water ?? MAX_WATER);
+
+  const newFood = drainCount > 0
+    ? Math.max(0, Math.min(MAX_FOOD, Math.round(((currentStats.food ?? MAX_FOOD) - drainCount) * 100) / 100))
+    : Math.min(MAX_FOOD, currentStats.food ?? MAX_FOOD);
+
+  const newStats = {
+    ...currentStats,
+    water: newWater,
+    food: newFood,
+  };
+
+  const isComatose = newWater <= 0 || newFood <= 0 || newHp <= 0;
+
+  return {
+    newStats,
+    newAccumulator,
+    newHpAccumulator,
+    newHp,
+    drainCount,
+    hpGain,
+    isComatose,
+  };
 };
 
 export const useGameStore = create((set, get) => ({
@@ -105,6 +198,65 @@ export const useGameStore = create((set, get) => ({
   isBattling: false,
 
   /**
+   * 統一將後端回傳的玩家資料同步寫入 Zustand Store。
+   * 作為單一真實資料來源 (SSOT)，避免不同端點同步時產生欄位遺漏或漂移。
+   * @param {Object} dbP - 後端回傳之玩家資料物件 (formatPlayerResponse)。
+   * @param {Object} [extraState={}] - 額外需一併更新的 Store 狀態屬性 (例如 screenMode, user, locations 等)。
+   */
+  applyPlayerData: (dbP, extraState = {}) => {
+    if (!dbP) {
+      if (Object.keys(extraState).length > 0) {
+        set(extraState);
+      }
+      return;
+    }
+
+    const stats = normalizePlayerStats(dbP.stats, dbP);
+    const isCreated = Boolean(dbP.isCharacterCreated);
+
+    set((state) => {
+      const inventory = extraState.inventory !== undefined
+        ? extraState.inventory
+        : (Array.isArray(dbP.inventory) ? dbP.inventory : (state.inventory || []));
+
+      return {
+        ...extraState,
+        isDisconnected: false,
+        inventory,
+        player: {
+          ...state.player,
+          ...dbP,
+          ...(extraState.player || {}),
+          name: dbP.name || state.player?.name || '冒險者',
+          isCharacterCreated: isCreated,
+          stats,
+          skills: Array.isArray(dbP.skills) && dbP.skills.length > 0
+            ? dbP.skills
+            : [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+          str: stats.strength,
+          spd: stats.speed,
+          dex: stats.dexterity,
+          maxHp: stats.maxHp,
+          hp: dbP.hp ?? stats.maxHp ?? 100,
+          money: dbP.money ?? 0,
+          energy: dbP.energy ?? 4320,
+          maxEnergy: dbP.maxEnergy ?? 4320,
+          lastEnergyRecoveredAt: dbP.lastEnergyRecoveredAt || new Date().toISOString(),
+          energySpentAccumulator: Number(dbP.energySpentAccumulator) || 0,
+          hpRegenAccumulator: Number(dbP.hpRegenAccumulator) || 0,
+          statusEffects: Array.isArray(dbP.statusEffects) ? dbP.statusEffects : getStatusEffects(dbP),
+          level: dbP.level ?? 1,
+          location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
+          mentor: dbP.mentor || state.player?.mentor || 'Martha',
+          knownLocations: Array.isArray(dbP.knownLocations) ? dbP.knownLocations : (state.player?.knownLocations || []),
+          quests: Array.isArray(dbP.quests) ? dbP.quests : (state.player?.quests || []),
+          unlockedRecipes: Array.isArray(dbP.unlockedRecipes) ? dbP.unlockedRecipes : (state.player?.unlockedRecipes || []),
+        },
+      };
+    });
+  },
+
+  /**
    * 建立玩家角色並初始化三維能力值與導師房間。
    * @param {string} name - 角色名稱。
    * @param {number|Object} str - 力量數值或包含三維能力的物件。
@@ -129,8 +281,8 @@ export const useGameStore = create((set, get) => ({
             strength,
             speed,
             dexterity: dexVal,
-            water: 100,
-            food: 100,
+            water: MAX_WATER,
+            food: MAX_FOOD,
           },
         }),
       });
@@ -138,41 +290,8 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          const dbP = result.data;
-          const stats = normalizePlayerStats(dbP.stats, {
-            strength,
-            speed,
-            dexterity: dexVal,
-            maxHp: dbP.maxHp ?? 100,
-            water: 100,
-            food: 100,
-          });
-
           await get().fetchLocations();
-
-          set((state) => ({
-            player: {
-              ...state.player,
-              name: dbP.name,
-              mentor: dbP.mentor || mentor,
-              stats,
-              skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
-              str: stats.strength,
-              spd: stats.speed,
-              dex: stats.dexterity,
-              maxHp: stats.maxHp,
-              level: 1,
-              isCharacterCreated: true,
-              hp: dbP.hp,
-              money: dbP.money ?? 0,
-              energy: dbP.energy,
-              maxEnergy: dbP.maxEnergy,
-              location: dbP.location,
-              knownLocations: dbP.knownLocations || [],
-            },
-            screenMode: 'game',
-          }));
-
+          get().applyPlayerData(result.data, { screenMode: 'game' });
           return true;
         }
       }
@@ -201,41 +320,14 @@ export const useGameStore = create((set, get) => ({
         if (result.success && result.user) {
           const gUser = result.user;
           const dbP = result.player;
-          const stats = normalizePlayerStats(dbP?.stats, {
-            strength: dbP?.str,
-            speed: dbP?.spd,
-            dexterity: dbP?.dex,
-            maxHp: dbP?.maxHp,
-            water: 100,
-            food: 100,
-          });
-
-          set((state) => ({
-            user: {
-              isLoggedIn: true,
-              name: gUser.name,
-              email: gUser.email,
-              pictureUrl: gUser.picture,
-            },
-            player: {
-              ...state.player,
-              name: dbP?.name || gUser.name,
-              isCharacterCreated: dbP ? dbP.isCharacterCreated : false,
-              stats,
-              skills: dbP?.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
-              str: stats.strength,
-              spd: stats.speed,
-              dex: stats.dexterity,
-              maxHp: stats.maxHp,
-              level: dbP?.level ?? 1,
-              hp: dbP?.hp ?? 100,
-              money: dbP?.money ?? 0,
-              energy: dbP?.energy ?? 4320,
-              maxEnergy: dbP?.maxEnergy ?? 4320,
-              location: dbP?.location || 'AZURE_BAY_PORT',
-            },
-            screenMode: dbP && dbP.isCharacterCreated ? 'game' : 'character_creation',
-          }));
+          const user = {
+            isLoggedIn: true,
+            name: gUser.name,
+            email: gUser.email,
+            pictureUrl: gUser.picture,
+          };
+          const nextScreen = dbP && dbP.isCharacterCreated ? 'game' : 'character_creation';
+          get().applyPlayerData(dbP, { user, screenMode: nextScreen });
           return true;
         }
       }
@@ -328,40 +420,14 @@ export const useGameStore = create((set, get) => ({
       const result = await res.json();
       if (result.success && result.data) {
         const dbP = result.data;
-        const stats = normalizePlayerStats(dbP.stats, dbP);
+        const isCreated = Boolean(dbP.isCharacterCreated);
+        const nextScreen = !dbP.isLoggedIn ? 'login' : !isCreated ? 'character_creation' : 'game';
 
-        set((state) => {
-          const isCreated = dbP.isCharacterCreated || false;
-          const nextScreen = !dbP.isLoggedIn ? 'login' : !isCreated ? 'character_creation' : 'game';
-
-          return {
-            isDisconnected: false,
-            player: {
-              ...state.player,
-              name: dbP.name || state.player?.name || '冒險者',
-              isCharacterCreated: isCreated,
-              stats,
-              skills: dbP.skills || [{ skillId: 'NORMAL_ATTACK', level: 1 }],
-              str: stats.strength,
-              spd: stats.speed,
-              dex: stats.dexterity,
-              maxHp: stats.maxHp,
-              hp: dbP.hp ?? state.player?.hp ?? stats.maxHp ?? 100,
-              money: dbP.money ?? state.player?.money ?? 0,
-              energy: dbP.energy ?? state.player?.energy ?? 4320,
-              maxEnergy: dbP.maxEnergy ?? state.player?.maxEnergy ?? 4320,
-              level: dbP.level ?? 1,
-              location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
-              mentor: dbP.mentor || state.player?.mentor || 'Martha',
-              knownLocations: dbP.knownLocations || state.player?.knownLocations || [],
-              quests: dbP.quests || [],
-            },
-            user: dbP.isLoggedIn
-              ? { isLoggedIn: true, name: dbP.name, email: dbP.email, pictureUrl: dbP.pictureUrl }
-              : state.user,
-            screenMode: dbP.isLoggedIn ? nextScreen : state.screenMode,
-            inventory: dbP.inventory || [],
-          };
+        get().applyPlayerData(dbP, {
+          user: dbP.isLoggedIn
+            ? { isLoggedIn: true, name: dbP.name, email: dbP.email, pictureUrl: dbP.pictureUrl }
+            : get().user,
+          screenMode: dbP.isLoggedIn ? nextScreen : get().screenMode,
         });
       }
 
@@ -418,35 +484,67 @@ export const useGameStore = create((set, get) => ({
     const { locations, player } = get();
     if (!player) return;
 
+    if (isPlayerComatose(player)) {
+      get().addLog(
+        '系統',
+        'System',
+        `【${player.name}】處於昏迷中，無法移動！`,
+        `[${player.name}] is comatose and cannot move!`,
+        'system'
+      );
+      return;
+    }
+
     const currentLoc = locations.find((l) => l.locationId === player.location);
     const connection = currentLoc?.connections?.find((c) => c.targetLocationId === targetLocId);
-    const cost = connection?.energyCost ?? 1;
+    const baseCost = connection?.energyCost ?? 1;
+    const cost = calculateEffectiveEnergyCost(player, baseCost);
 
     if (player.energy < cost) {
       return;
     }
 
-    const newEnergy = player.energy - cost;
+    const maxEnergy = player.maxEnergy ?? 4320;
+    const wasFull = (player.energy ?? 0) >= maxEnergy;
+    const newEnergy = Math.max(0, player.energy - cost);
+    const newLastRecoveredAt = (wasFull && newEnergy < maxEnergy)
+      ? new Date().toISOString()
+      : player.lastEnergyRecoveredAt;
+
+    const { newStats, newAccumulator, newHpAccumulator, newHp } = calculateEnergyConsumption(player, cost);
 
     set((state) => ({
       player: {
         ...state.player,
         location: targetLocId,
         energy: newEnergy,
+        hp: newHp,
+        lastEnergyRecoveredAt: newLastRecoveredAt,
+        stats: newStats,
+        energySpentAccumulator: newAccumulator,
+        hpRegenAccumulator: newHpAccumulator,
       },
     }));
 
     try {
-      const res = await fetch(`${API_BASE}/player`, {
-        method: 'PUT',
+      const res = await fetch(`${API_BASE}/player/travel`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: targetLocId,
-          energy: newEnergy,
-        }),
+        body: JSON.stringify({ targetLocationId: targetLocId }),
       });
-      if (!res.ok) {
-        set({ mongoStatus: 'offline', isDisconnected: true });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          get().applyPlayerData(result.data);
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        if (errData?.message) {
+          get().addLog('系統', 'System', errData.message, errData.message, 'system');
+        }
+        if (res.status >= 500) {
+          set({ mongoStatus: 'offline', isDisconnected: true });
+        }
       }
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });
@@ -461,17 +559,108 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<void>}
    */
   performGather: async (itemId, cost, qty = 1) => {
-    const { player } = get();
-    const addQty = Math.max(1, Number(qty) || 1);
-    const totalCost = cost * addQty;
+    const { player, inventory, items, locations, buildings } = get();
+    if (!player) return false;
 
-    if (player.energy < totalCost) {
-      return;
+    if (isPlayerComatose(player)) {
+      get().addLog(
+        '系統',
+        'System',
+        `【${player.name}】處於昏迷中，無法採集！`,
+        `[${player.name}] is comatose and cannot gather!`,
+        'system'
+      );
+      return false;
     }
 
+    const addQty = Math.max(1, Number(qty) || 1);
+    const baseTotalCost = cost * addQty;
+    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+
+    const currentEnergy = player.energy ?? 0;
+    if (currentEnergy < totalCost) {
+      return false;
+    }
+
+    const currentLocation = locations.find((l) => l.locationId === player.location);
+    const spot = (currentLocation?.gatherables || []).find((g) => g.itemId === itemId);
+    const reqTools = spot?.requiredToolTypes || [];
+
+    const getItemTypes = (targetItemId) => {
+      const dbI = items.find((i) => i.itemId === targetItemId);
+      if (!dbI || !dbI.type) return [];
+      return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
+    };
+
+    let updatedInventory = inventory.map((item) => ({ ...item }));
+
+    if (reqTools.length > 0) {
+      const locBuildingList = currentLocation?.buildings || [];
+      const locBuildingTypes = locBuildingList.map((b) => {
+        const dbB = buildings.find((item) => item.buildingId === b.buildingId);
+        return dbB ? dbB.type : b.buildingId;
+      });
+
+      const nonConsumableReqs = reqTools.filter((t) => t !== 'BAIT');
+      const hasTools = nonConsumableReqs.every((t) =>
+        locBuildingTypes.includes(t) ||
+        updatedInventory.some((inv) => getItemTypes(inv.itemId).includes(t) && (inv.count || 1) > 0)
+      );
+
+      if (!hasTools) {
+        return false;
+      }
+
+      if (reqTools.includes('BAIT')) {
+        const requiredBaitQty = 1 * addQty;
+        const totalBait = updatedInventory
+          .filter((inv) => getItemTypes(inv.itemId).includes('BAIT'))
+          .reduce((sum, inv) => sum + (inv.count || 1), 0);
+
+        if (totalBait < requiredBaitQty) {
+          return false;
+        }
+
+        let remainingToDeduct = requiredBaitQty;
+        for (let i = 0; i < updatedInventory.length; i++) {
+          if (remainingToDeduct <= 0) break;
+          const invItem = updatedInventory[i];
+          if (getItemTypes(invItem.itemId).includes('BAIT')) {
+            const curCount = invItem.count || 1;
+            if (curCount <= remainingToDeduct) {
+              updatedInventory[i] = { ...invItem, count: 0 };
+              remainingToDeduct -= curCount;
+            } else {
+              updatedInventory[i] = { ...invItem, count: curCount - remainingToDeduct };
+              remainingToDeduct = 0;
+            }
+          }
+        }
+        updatedInventory = updatedInventory.filter((i) => (i.count || 0) > 0);
+      }
+    }
+
+    const maxEnergy = player.maxEnergy ?? 4320;
+    const wasFull = currentEnergy >= maxEnergy;
+    const newEnergy = Math.max(0, currentEnergy - totalCost);
+    const newLastRecoveredAt = (wasFull && newEnergy < maxEnergy)
+      ? new Date().toISOString()
+      : player.lastEnergyRecoveredAt;
+
+    const { newStats, newAccumulator, newHpAccumulator, newHp } = calculateEnergyConsumption(player, totalCost);
+    const finalInventory = addItemsToInventory(updatedInventory, itemId, addQty);
+
     set((state) => ({
-      player: { ...state.player, energy: state.player.energy - totalCost },
-      inventory: addItemsToInventory(state.inventory, itemId, addQty),
+      player: {
+        ...state.player,
+        energy: newEnergy,
+        hp: newHp,
+        lastEnergyRecoveredAt: newLastRecoveredAt,
+        stats: newStats,
+        energySpentAccumulator: newAccumulator,
+        hpRegenAccumulator: newHpAccumulator,
+      },
+      inventory: finalInventory,
     }));
 
     try {
@@ -480,12 +669,19 @@ export const useGameStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cost: totalCost, itemId, qty: addQty }),
       });
-      if (!res.ok) {
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          get().applyPlayerData(result.data);
+        }
+      } else {
         set({ mongoStatus: 'offline', isDisconnected: true });
       }
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });
     }
+
+    return true;
   },
 
   /**
@@ -498,6 +694,17 @@ export const useGameStore = create((set, get) => ({
   performCraft: async (recipe, selectedMaterials = {}, craftQty = 1) => {
     const { player, inventory, items, locations, buildings } = get();
     if (!player || !recipe) return false;
+
+    if (isPlayerComatose(player)) {
+      get().addLog(
+        '系統',
+        'System',
+        `【${player.name}】處於昏迷中，無法製作！`,
+        `[${player.name}] is comatose and cannot craft!`,
+        'system'
+      );
+      return false;
+    }
 
     const numCraftQty = Math.max(1, Number(craftQty) || 1);
 
@@ -523,204 +730,42 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
 
-    const energyCost = (recipe.energyCost || 0) * numCraftQty;
+    const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
+    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
     const currentEnergy = player.energy ?? 0;
     if (currentEnergy < energyCost) {
       return false;
     }
-    const newEnergy = Math.max(0, currentEnergy - energyCost);
-
-    const reqItems = recipe.requiredItems || [];
-    let updatedInv = inventory.map((item) => ({ ...item }));
-
-    for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
-      const req = reqItems[reqIdx];
-      const requiredTotalCount = req.quantity * numCraftQty;
-      const selectedId = selectedMaterials[reqIdx];
-
-      if (!selectedId) {
-        return false;
-      }
-
-      const invIndex = updatedInv.findIndex(
-        (i) => i.itemId === selectedId
-      );
-
-      if (invIndex < 0) {
-        return false;
-      }
-
-      const invItem = updatedInv[invIndex];
-      const dbI = items.find((i) => i.itemId === invItem.itemId);
-      const types = dbI && dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
-
-      const matchesItem = req.itemId ? invItem.itemId === req.itemId : false;
-      const matchesType = req.type ? types.includes(req.type) : false;
-
-      if (!matchesItem && !matchesType) {
-        return false;
-      }
-
-      const curCount = invItem.count || 1;
-      if (curCount < requiredTotalCount) {
-        return false;
-      }
-
-      if (curCount === requiredTotalCount) {
-        updatedInv[invIndex] = { ...invItem, count: 0 };
-      } else {
-        updatedInv[invIndex] = { ...invItem, count: curCount - requiredTotalCount };
-      }
-    }
-
-    updatedInv = updatedInv.filter((i) => i.count > 0);
-
-    let calculatedDurability = -1;
-    const firstSelId = selectedMaterials[0];
-    if (recipe.durabilityFormula) {
-      let matDurability = -1;
-      if (firstSelId) {
-        const selectedMatInv = inventory.find((i) => i.itemId === firstSelId);
-        if (selectedMatInv) {
-          const matDbItem = items.find((i) => i.itemId === selectedMatInv.itemId);
-          matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
-            ? selectedMatInv.durability
-            : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
-        }
-      }
-      try {
-        const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);
-        calculatedDurability = computeFn({ durability: matDurability > 0 ? matDurability : 0 });
-      } catch (err) {
-        console.error('[Durability Formula Error]', err);
-      }
-    }
-
-    const outputItems = recipe.outputItems || [];
-    for (const out of outputItems) {
-      const outItemId = out.itemId || recipe.recipeId;
-      const dbOut = items.find(
-        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
-      );
-      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
-      const addQty = (out.quantity || 1) * numCraftQty;
-
-      const existingMatchIndex = updatedInv.findIndex((inv) => {
-        if (inv.itemId !== finalItemId) {
-          return false;
-        }
-
-        const oldDurability = inv.durability !== undefined && inv.durability > 0 ? inv.durability : -1;
-        const newDurability = calculatedDurability > 0 ? calculatedDurability : -1;
-
-        if (oldDurability <= 0 && newDurability <= 0) {
-          return true;
-        }
-
-        if (oldDurability > 0 && newDurability > 0) {
-          const minAllowed = oldDurability * 0.9;
-          const maxAllowed = oldDurability * 1.1;
-          return newDurability >= minAllowed && newDurability <= maxAllowed;
-        }
-
-        return false;
-      });
-
-      if (existingMatchIndex >= 0) {
-        const existingItem = updatedInv[existingMatchIndex];
-        const oldCount = existingItem.count || 1;
-        const newTotalCount = oldCount + addQty;
-        const oldDurability = existingItem.durability !== undefined && existingItem.durability > 0 ? existingItem.durability : -1;
-
-        const updatedItem = {
-          ...existingItem,
-          count: newTotalCount,
-        };
-
-        if (oldDurability > 0 && calculatedDurability > 0) {
-          const weightedDurability = Math.round(
-            (oldDurability * oldCount + calculatedDurability * addQty) / newTotalCount
-          );
-          updatedItem.durability = weightedDurability;
-        } else if (calculatedDurability > 0) {
-          updatedItem.durability = calculatedDurability;
-        }
-
-        updatedInv[existingMatchIndex] = updatedItem;
-      } else {
-        const newItem = {
-          instanceId: `inst_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-          itemId: finalItemId,
-          count: addQty,
-          quality: '普通',
-        };
-
-        if (calculatedDurability > 0) {
-          newItem.durability = calculatedDurability;
-        }
-
-        updatedInv.push(newItem);
-      }
-    }
-
-    const questsList = get().questsList || [];
-    let updatedQuests = player.quests ? player.quests.map((q) => ({
-      ...q,
-      progress: q.progress ? q.progress.map((p) => ({ ...p })) : [],
-    })) : [];
-
-    let hasQuestUpdate = false;
-    for (const out of outputItems) {
-      const outItemId = out.itemId || recipe.recipeId;
-      const dbOut = items.find(
-        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
-      );
-      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
-      const addQty = (out.quantity || 1) * numCraftQty;
-
-      for (const q of updatedQuests) {
-        if (q.status !== 'IN_PROGRESS') continue;
-        const qDef = (questsList || []).find((def) => def.questId === q.questId);
-        if (!qDef) continue;
-        (qDef.objectives || []).forEach((obj, objIdx) => {
-          if (obj.type === 'CRAFT' && obj.targetId === finalItemId) {
-            let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
-            if (!prog) {
-              prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
-              q.progress = q.progress || [];
-              q.progress.push(prog);
-            }
-            prog.currentCount = (prog.currentCount || 0) + addQty;
-            if (prog.currentCount >= (obj.requiredCount || 1)) {
-              prog.isCompleted = true;
-            }
-            hasQuestUpdate = true;
-          }
-        });
-      }
-    }
-
-    set((state) => ({
-      inventory: updatedInv,
-      player: {
-        ...state.player,
-        energy: newEnergy,
-        ...(hasQuestUpdate ? { quests: updatedQuests } : {}),
-      },
-    }));
 
     try {
-      await fetch(`${API_BASE}/player`, {
-        method: 'PUT',
+      const res = await fetch(`${API_BASE}/player/craft`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          inventory: updatedInv,
-          energy: newEnergy,
-          ...(hasQuestUpdate ? { quests: updatedQuests } : {}),
+          recipeId: recipe.recipeId || recipe.id,
+          selectedMaterials,
+          craftQty: numCraftQty,
         }),
       });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          get().applyPlayerData(result.data);
+          return true;
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData?.message || '製作失敗！';
+        get().addLog('系統', 'System', msg, msg, 'system');
+        if (res.status >= 500) {
+          set({ mongoStatus: 'offline', isDisconnected: true });
+        }
+        return false;
+      }
     } catch (err) {
       console.error('[Craft Sync Error]', err);
+      set({ mongoStatus: 'offline', isDisconnected: true });
+      return false;
     }
 
     return true;
@@ -765,10 +810,10 @@ export const useGameStore = create((set, get) => ({
     const currentSpd = currentStats.speed ?? player.spd ?? 1;
     const currentDex = currentStats.dexterity ?? player.dex ?? 1;
     const currentDef = currentStats.defense ?? 0;
-    const currentMaxHp = currentStats.maxHp ?? player.maxHp ?? 100;
-    const currentWater = currentStats.water ?? 100;
-    const currentFood = currentStats.food ?? 100;
-    const currentHp = player.hp ?? 100;
+    const currentMaxHp = currentStats.maxHp ?? player.maxHp ?? MAX_HP;
+    const currentWater = currentStats.water ?? MAX_WATER;
+    const currentFood = currentStats.food ?? MAX_FOOD;
+    const currentHp = player.hp ?? MAX_HP;
 
     // Add nutrition values onto player stats (accumulating rather than replacing)
     const newStr = Math.round((currentStr + strGain) * 100) / 100;
@@ -776,8 +821,8 @@ export const useGameStore = create((set, get) => ({
     const newDex = Math.round((currentDex + dexGain) * 100) / 100;
     const newDef = Math.round((currentDef + defGain) * 100) / 100;
     const newMaxHp = Math.round((currentMaxHp + maxHpGain) * 100) / 100;
-    const newWater = Math.round((currentWater + waterGain) * 100) / 100;
-    const newFood = Math.round((currentFood + foodGain) * 100) / 100;
+    const newWater = Math.max(0, Math.min(MAX_WATER, Math.round((currentWater + waterGain) * 100) / 100));
+    const newFood = Math.max(0, Math.min(MAX_FOOD, Math.round((currentFood + foodGain) * 100) / 100));
 
     const newHp = hpGain !== 0
       ? Math.max(0, Math.min(newMaxHp, currentHp + hpGain))
@@ -883,20 +928,7 @@ export const useGameStore = create((set, get) => ({
       } else {
         const result = await res.json();
         if (result.success && result.data) {
-          const dbP = result.data;
-          const syncedStats = normalizePlayerStats(dbP.stats, dbP);
-          set((state) => ({
-            player: {
-              ...state.player,
-              stats: syncedStats,
-              str: syncedStats.strength,
-              spd: syncedStats.speed,
-              dex: syncedStats.dexterity,
-              maxHp: syncedStats.maxHp,
-              hp: dbP.hp ?? state.player.hp,
-              energy: dbP.energy ?? state.player.energy,
-            },
-          }));
+          get().applyPlayerData(result.data);
         }
       }
     } catch {
@@ -950,12 +982,7 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          set((state) => ({
-            player: {
-              ...state.player,
-              money: result.data.money ?? newMoney,
-            },
-          }));
+          get().applyPlayerData(result.data);
         }
       } else {
         set({ mongoStatus: 'offline', isDisconnected: true });
@@ -1026,12 +1053,7 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          set((state) => ({
-            player: {
-              ...state.player,
-              money: result.data.money ?? newMoney,
-            },
-          }));
+          get().applyPlayerData(result.data);
         }
       } else {
         set({ mongoStatus: 'offline', isDisconnected: true });
@@ -1059,14 +1081,9 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          set((state) => ({
-            player: {
-              ...state.player,
-              ...result.data,
-            },
-            inventory: result.data.inventory || state.inventory,
-            locations: result.locations || state.locations,
-          }));
+          get().applyPlayerData(result.data, {
+            locations: result.locations || get().locations,
+          });
         }
       }
     } catch (err) {
@@ -1108,14 +1125,9 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          set((state) => ({
-            player: {
-              ...state.player,
-              ...result.data,
-            },
-            inventory: result.data.inventory || state.inventory,
-            locations: result.locations || state.locations,
-          }));
+          get().applyPlayerData(result.data, {
+            locations: result.locations || get().locations,
+          });
 
           if (result.quest && result.quest.description) {
             const npcId = result.quest.triggerNpcId || result.quest.submitNpcId || 'Brock';
@@ -1155,14 +1167,9 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
-          set((state) => ({
-            player: {
-              ...state.player,
-              ...result.data,
-            },
-            inventory: result.data.inventory || state.inventory,
-            locations: result.locations || state.locations,
-          }));
+          get().applyPlayerData(result.data, {
+            locations: result.locations || get().locations,
+          });
 
           if (result.completeText) {
             const senderName = get().getNpcDisplayName(result.submitNpcId);
@@ -1292,11 +1299,17 @@ export const useGameStore = create((set, get) => ({
           set({ inventory: updatedInv, isBattling: false });
 
           try {
-            await fetch(`${API_BASE}/player`, {
+            const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ hp: pCurrentHp, inventory: updatedInv }),
             });
+            if (res.ok) {
+              const result = await res.json();
+              if (result.success && result.data) {
+                get().applyPlayerData(result.data);
+              }
+            }
           } catch (err) {
             console.error('[Battle Victory Sync Error]', err);
           }
@@ -1338,11 +1351,17 @@ export const useGameStore = create((set, get) => ({
             'event'
           );
           try {
-            await fetch(`${API_BASE}/player`, {
+            const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ hp: pCurrentHp }),
             });
+            if (res.ok) {
+              const result = await res.json();
+              if (result.success && result.data) {
+                get().applyPlayerData(result.data);
+              }
+            }
           } catch (err) {
             console.error('[Battle HP Sync Error]', err);
           }
@@ -1354,5 +1373,71 @@ export const useGameStore = create((set, get) => ({
     }, 1000);
 
     return true;
+  },
+
+  /**
+   * 結算並恢復精力（每 15 分鐘恢復 15 點精力，上限為 maxEnergy）。
+   * 同步更新 Zustand state 與後端資料庫。
+   */
+  settleEnergyRecovery: () => {
+    const { player } = get();
+    if (!player) return;
+    const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
+    const currentEnergy = player.energy ?? maxEnergy;
+    const now = Date.now();
+    const lastRecoveredTime = player.lastEnergyRecoveredAt
+      ? new Date(player.lastEnergyRecoveredAt).getTime()
+      : now;
+
+    const INTERVAL_MS = ENERGY_RECOVERY_INTERVAL_MS;
+    const RECOVERY_AMOUNT = ENERGY_RECOVERY_AMOUNT;
+    const elapsed = now - lastRecoveredTime;
+
+    if (elapsed < INTERVAL_MS) return;
+
+    const intervals = Math.floor(elapsed / INTERVAL_MS);
+    if (intervals <= 0) return;
+
+    if (currentEnergy >= maxEnergy) {
+      set((state) => ({
+        player: {
+          ...state.player,
+          lastEnergyRecoveredAt: new Date(now).toISOString(),
+        },
+      }));
+      return;
+    }
+
+    const addedEnergy = intervals * RECOVERY_AMOUNT;
+    const newEnergy = Math.min(maxEnergy, currentEnergy + addedEnergy);
+    const newLastRecoveredAt = newEnergy >= maxEnergy
+      ? new Date(now).toISOString()
+      : new Date(lastRecoveredTime + intervals * INTERVAL_MS).toISOString();
+
+    set((state) => ({
+      player: {
+        ...state.player,
+        energy: newEnergy,
+        lastEnergyRecoveredAt: newLastRecoveredAt,
+      },
+    }));
+
+    fetch(`${API_BASE}/player`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        energy: newEnergy,
+        lastEnergyRecoveredAt: newLastRecoveredAt,
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((result) => {
+        if (result?.success && result.data) {
+          get().applyPlayerData(result.data);
+        }
+      })
+      .catch((err) => {
+        console.error('[Energy Recovery Sync Error]', err);
+      });
   },
 }));

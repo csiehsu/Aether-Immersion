@@ -1,4 +1,11 @@
 import mongoose from 'mongoose';
+import {
+  MAX_WATER,
+  MAX_FOOD,
+  MAX_HP,
+  MAX_ENERGY,
+  DEFAULT_INITIAL_STATS,
+} from '../../src/constants/gameConstants.js';
 
 const InventoryItemSchema = new mongoose.Schema(
   {
@@ -13,13 +20,13 @@ const InventoryItemSchema = new mongoose.Schema(
 
 const StatsSchema = new mongoose.Schema(
   {
-    strength: { type: Number, default: 1 },
-    speed: { type: Number, default: 1 },
-    dexterity: { type: Number, default: 1 },
-    maxHp: { type: Number, default: 100 },
-    defense: { type: Number, default: 0 },
-    water: { type: Number, default: 100 },
-    food: { type: Number, default: 100 },
+    strength: { type: Number, default: DEFAULT_INITIAL_STATS.strength },
+    speed: { type: Number, default: DEFAULT_INITIAL_STATS.speed },
+    dexterity: { type: Number, default: DEFAULT_INITIAL_STATS.dexterity },
+    maxHp: { type: Number, default: MAX_HP },
+    defense: { type: Number, default: DEFAULT_INITIAL_STATS.defense },
+    water: { type: Number, default: MAX_WATER },
+    food: { type: Number, default: MAX_FOOD },
   },
   { _id: false }
 );
@@ -73,17 +80,20 @@ const PlayerSchema = new mongoose.Schema(
     isCharacterCreated: { type: Boolean, default: false },
     stats: {
       type: StatsSchema,
-      default: () => ({ strength: 1, speed: 1, dexterity: 1, maxHp: 100, defense: 0, water: 100, food: 100 }),
+      default: () => ({ ...DEFAULT_INITIAL_STATS }),
     },
     skills: {
       type: [PlayerSkillSchema],
       default: () => [{ skillId: 'NORMAL_ATTACK', level: 1 }],
     },
     level: { type: Number, default: 1 },
-    hp: { type: Number, default: 100 },
+    hp: { type: Number, default: MAX_HP },
     money: { type: Number, default: 0 },
-    energy: { type: Number, default: 4320 },
-    maxEnergy: { type: Number, default: 4320 },
+    energy: { type: Number, default: MAX_ENERGY },
+    maxEnergy: { type: Number, default: MAX_ENERGY },
+    lastEnergyRecoveredAt: { type: Date, default: Date.now },
+    energySpentAccumulator: { type: Number, default: 0 },
+    hpRegenAccumulator: { type: Number, default: 0 },
     location: { type: String, default: 'AZURE_BAY_PORT' },
     mentor: { type: String, default: 'Martha' },
     knownLocations: {

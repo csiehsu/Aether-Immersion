@@ -1,4 +1,5 @@
 import { useGameStore, translations } from '../../store/useGameStore';
+import { isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 
@@ -30,30 +31,55 @@ export const MovePanel = () => {
     return isKnown && isAdjacent;
   });
 
+  const isComatose = isPlayerComatose(player);
+
   return (
     <CollapsiblePanel title={t.moveTitle} className="move-panel">
       <div className="location-list">
         {availableLocations.map((loc) => {
           const isCurrent = player?.location === loc.locationId;
+          const isDisabled = isCurrent || isComatose;
+          const connection = (currentLocation?.connections || []).find((c) => c.targetLocationId === loc.locationId);
+          const baseCost = connection?.energyCost ?? 1;
+          const cost = calculateEffectiveEnergyCost(player, baseCost);
+
+          const buttonLabel = isCurrent
+            ? t.currentLocation
+            : isComatose
+            ? (t.comatose || '昏迷中')
+            : t.goToLocation;
 
           return (
             <div key={loc.locationId} className={`location-card ${isCurrent ? 'current' : ''}`}>
               <div className="location-main">
-                <div className="location-title-row">
+                <div className="location-title-row" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span className="location-name">{getLocalizedName(loc, language)}</span>
+                  {!isCurrent && (
+                    <span className="location-cost" style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      ⚡ {cost}
+                      {cost < baseCost && (
+                        <span style={{ color: '#10b981', marginLeft: '3px' }}>(-10%)</span>
+                      )}
+                      {cost > baseCost && (
+                        <span style={{ color: '#ef4444', marginLeft: '3px' }}>(+20%)</span>
+                      )}
+                    </span>
+                  )}
                 </div>
                 {isCurrent && <p className="location-desc">{getLocalizedDesc(loc, language)}</p>}
               </div>
               <button
                 type="button"
                 className={`btn-move ${isCurrent ? 'btn-active' : ''}`}
-                disabled={isCurrent}
+                disabled={isDisabled}
+                title={isComatose && !isCurrent ? (t.comatoseCannotAct || '昏迷中，無法行動') : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (isDisabled) return;
                   changeLocation(loc.locationId);
                 }}
               >
-                {isCurrent ? t.currentLocation : t.goToLocation}
+                {buttonLabel}
               </button>
             </div>
           );
