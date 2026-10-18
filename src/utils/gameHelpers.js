@@ -187,7 +187,78 @@ export const calculateEffectiveEnergyCost = (player, baseEnergyCost) => {
 };
 
 /**
- * 統一將道具新增至背包陣列；若相同 itemId 已存在則增加堆疊數量，否則新增實體。
+ * 檢查兩份營養加成物件是否完全一致。
+ * @param {Object} [bonusA]
+ * @param {Object} [bonusB]
+ * @returns {boolean}
+ */
+export const areBonusNutritionsEqual = (bonusA, bonusB) => {
+  const a = bonusA || {};
+  const b = bonusB || {};
+  const allKeys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)]));
+  for (const k of allKeys) {
+    const valA = Number(a[k]) || 0;
+    const valB = Number(b[k]) || 0;
+    if (valA !== valB) return false;
+  }
+  return true;
+};
+
+/**
+ * 檢查兩件道具是否符合堆疊規則（同一 itemId、相同客製名稱、相同附加營養、相容耐久度）。
+ * @param {Object} itemA
+ * @param {Object} itemB
+ * @returns {boolean}
+ */
+export const canItemsStack = (itemA, itemB) => {
+  if (!itemA || !itemB) return false;
+  const idA = itemA.itemId || itemA.id || '';
+  const idB = itemB.itemId || itemB.id || '';
+  if (!idA || !idB || idA !== idB) return false;
+  if ((itemA.customName || '') !== (itemB.customName || '')) return false;
+  if (!areBonusNutritionsEqual(itemA.bonusNutrition, itemB.bonusNutrition)) return false;
+
+  const durA = itemA.durability !== undefined && itemA.durability !== null && itemA.durability > 0 ? itemA.durability : -1;
+  const durB = itemB.durability !== undefined && itemB.durability !== null && itemB.durability > 0 ? itemB.durability : -1;
+  if (durA <= 0 && durB <= 0) return true;
+  if (durA > 0 && durB > 0) {
+    return durB >= durA * 0.9 && durB <= durA * 1.1;
+  }
+  return false;
+};
+
+/**
+ * 依堆疊規則將道具新增至地面放置物清單 (placedItems)。
+ * 若完全符合堆疊條件則合併數量，否則新增獨立實體。
+ * @param {Array<Object>} [placedItems=[]]
+ * @param {Object} itemToAdd
+ * @returns {Array<Object>}
+ */
+export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
+  const updated = (placedItems || []).map((p) => (p && p.toObject ? p.toObject() : { ...p }));
+  const addCount = Math.max(1, Number(itemToAdd.count) || 1);
+  const matchIdx = updated.findIndex((p) => canItemsStack(p, itemToAdd));
+
+  if (matchIdx >= 0) {
+    updated[matchIdx].count = (updated[matchIdx].count || 1) + addCount;
+  } else {
+    updated.push({
+      instanceId: itemToAdd.instanceId || generateInstanceId(),
+      itemId: itemToAdd.itemId,
+      count: addCount,
+      durability: itemToAdd.durability !== undefined ? itemToAdd.durability : -1,
+      quality: itemToAdd.quality || '普通',
+      customName: itemToAdd.customName || '',
+      customNameEn: itemToAdd.customNameEn || '',
+      bonusNutrition: itemToAdd.bonusNutrition ? { ...itemToAdd.bonusNutrition } : undefined,
+      triggerQuestId: itemToAdd.triggerQuestId || '',
+    });
+  }
+  return updated;
+};
+
+/**
+ * 統一將道具新增至背包陣列；若相同 itemId 且屬性相同則增加堆疊數量，否則新增實體。
  * @param {Array<Object>} [inventory=[]] - 現有背包陣列。
  * @param {string} itemId - 道具識別碼。
  * @param {number} [count=1] - 增加的道具數量。
@@ -203,25 +274,16 @@ export const calculateEffectiveEnergyCost = (player, baseEnergyCost) => {
 export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}) => {
   const addQty = Math.max(1, Number(count) || 1);
   const updated = [...inventory];
-  const targetCustomName = options.customName || '';
-  const targetCustomNameEn = options.customNameEn || '';
-  const targetBonus = options.bonusNutrition;
+  const targetItem = {
+    itemId,
+    customName: options.customName || '',
+    customNameEn: options.customNameEn || '',
+    bonusNutrition: options.bonusNutrition,
+    durability: options.durability,
+    quality: options.quality || '普通',
+  };
 
-  const existingIdx = updated.findIndex((i) => {
-    if (i.itemId !== itemId) return false;
-    if ((i.customName || '') !== targetCustomName) return false;
-
-    if (options.durability !== undefined) {
-      const oldDur = i.durability !== undefined && i.durability > 0 ? i.durability : -1;
-      const newDur = options.durability > 0 ? options.durability : -1;
-      if (oldDur <= 0 && newDur <= 0) return true;
-      if (oldDur > 0 && newDur > 0) {
-        return newDur >= oldDur * 0.9 && newDur <= oldDur * 1.1;
-      }
-      return false;
-    }
-    return true;
-  });
+  const existingIdx = updated.findIndex((i) => canItemsStack(i, targetItem));
 
   if (existingIdx >= 0) {
     const existing = updated[existingIdx];
@@ -230,8 +292,8 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
     const updatedItem = {
       ...existing,
       count: newTotalCount,
-      ...(targetCustomName ? { customName: targetCustomName, customNameEn: targetCustomNameEn } : {}),
-      ...(targetBonus ? { bonusNutrition: targetBonus } : {}),
+      ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
+      ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
       ...(options.quality ? { quality: options.quality } : {}),
     };
 
@@ -251,8 +313,8 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
       count: addQty,
       durability: options.durability !== undefined ? options.durability : -1,
       quality: options.quality || '普通',
-      ...(targetCustomName ? { customName: targetCustomName, customNameEn: targetCustomNameEn } : {}),
-      ...(targetBonus ? { bonusNutrition: targetBonus } : {}),
+      ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
+      ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
     });
   }
 

@@ -11,13 +11,15 @@ import { QuantitySelector } from '../common/QuantitySelector';
  */
 export const InventoryPanel = () => {
   const inventory = useGameStore((state) => state.inventory || []);
+  const player = useGameStore((state) => state.player || {});
   const items = useGameStore((state) => state.items || []);
   const consumeItem = useGameStore((state) => state.consumeItem);
+  const dropItem = useGameStore((state) => state.dropItem);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
   const [selectedItemKey, setSelectedItemKey] = useState(null);
-  const [useQty, setUseQty] = useState(1);
+  const [actionQty, setActionQty] = useState(1);
 
   /**
    * 選取或取消選取背包中的道具。
@@ -26,10 +28,10 @@ export const InventoryPanel = () => {
   const handleSelectItem = (key) => {
     if (selectedItemKey === key) {
       setSelectedItemKey(null);
-      setUseQty(1);
+      setActionQty(1);
     } else {
       setSelectedItemKey(key);
-      setUseQty(1);
+      setActionQty(1);
     }
   };
 
@@ -140,26 +142,58 @@ export const InventoryPanel = () => {
                     </div>
                   ) : null;
                 })()}
-                {hasNutrition && (
-                  <div className="inventory-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                <div className="inventory-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+                  {(selectedItem.count || 1) > 1 ? (
                     <QuantitySelector
-                      value={useQty}
-                      onChange={setUseQty}
+                      value={actionQty}
+                      onChange={setActionQty}
                       min={1}
                       max={selectedItem.count || 1}
                     />
+                  ) : <div />}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {hasNutrition && (
+                      <button
+                        type="button"
+                        className="btn-use-item"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await consumeItem(selectedItem.instanceId || selectedItem.itemId, actionQty);
+                        }}
+                      >
+                        {t.useBtn || (language === 'en' ? 'Use' : '使用')}
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="btn-use-item"
+                      className="btn-drop-item"
+                      style={{
+                        background: '#dc2626',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '6px 12px',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease',
+                      }}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        await consumeItem(selectedItem.instanceId || selectedItem.itemId, useQty);
+                        const targetKey = selectedItem.instanceId || selectedItem.itemId;
+                        const currentLocId = player?.location || 'AZURE_BAY_PORT';
+                        const success = await dropItem(currentLocId, targetKey, actionQty);
+                        if (success) {
+                          if ((selectedItem.count || 1) <= actionQty) {
+                            setSelectedItemKey(null);
+                          }
+                        }
                       }}
                     >
-                      {t.useBtn || (language === 'en' ? 'Use' : '使用')}
+                      {t.dropBtn || (language === 'en' ? 'Drop' : '丟棄')}
                     </button>
                   </div>
-                )}
+                </div>
               </div>
             );
           })()}

@@ -1134,11 +1134,51 @@ export const useGameStore = create((set, get) => ({
           get().applyPlayerData(result.data, {
             locations: result.locations || get().locations,
           });
+          return true;
         }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        const errMsg = err.message || '拾取失敗！';
+        get().addLog('系統', 'System', errMsg, errMsg, 'system');
+        await get().fetchLocations();
       }
     } catch (err) {
       console.error('[Pickup Item Error]', err);
     }
+    return false;
+  },
+
+  /**
+   * 將背包內的道具丟棄至當前地點成為現場物品。
+   * @param {string} locationId - 當前地點識別碼。
+   * @param {string} itemKey - 道具 instanceId 或 itemId。
+   * @param {number} count - 丟棄數量。
+   * @returns {Promise<boolean>} 是否成功丟棄。
+   */
+  dropItem: async (locationId, itemKey, count = 1) => {
+    try {
+      const res = await fetch(`${API_BASE}/player/drop-item`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId, itemKey, count }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
+          get().applyPlayerData(result.data, {
+            locations: result.locations || get().locations,
+          });
+          return true;
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        const errMsg = err.message || '丟棄失敗！';
+        get().addLog('系統', 'System', errMsg, errMsg, 'system');
+      }
+    } catch (err) {
+      console.error('[Drop Item Error]', err);
+    }
+    return false;
   },
 
   /**

@@ -15,15 +15,26 @@ export const CollapsiblePanel = ({
   children,
   className = '',
   defaultOpen = true,
+  isOpen: controlledIsOpen,
+  onToggle,
   headerExtra = null,
 }) => {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : internalOpen;
+
+  const handleHeaderClick = () => {
+    const nextOpen = !isOpen;
+    if (onToggle) onToggle(nextOpen);
+    if (controlledIsOpen === undefined) {
+      setInternalOpen(nextOpen);
+    }
+  };
 
   return (
     <div className={`panel-container ${className} ${isOpen ? 'is-open' : 'is-collapsed'}`}>
       <div
         className="panel-header clickable-header"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleHeaderClick}
         title="切換開合"
       >
         <h3 className="panel-title">

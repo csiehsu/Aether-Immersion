@@ -31,7 +31,11 @@ import {
   MAX_ENERGY,
   DEFAULT_INITIAL_STATS,
 } from '../../src/constants/gameConstants.js';
-import { addLifeSkillExp } from '../../src/utils/gameHelpers.js';
+import {
+  addLifeSkillExp,
+  addItemToPlacedItems,
+  addItemsToInventory,
+} from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
 
@@ -185,12 +189,18 @@ const transferPlacedItemToPlayer = (location, instanceId, player) => {
   location.placedItems.splice(placedIndex, 1);
 
   player.inventory = sanitizeInventoryItems(player.inventory);
-  player.inventory.push({
-    instanceId: generateInstanceId(),
-    itemId: itemToPick.itemId,
-    count: 1,
-    quality: '普通',
-  });
+  player.inventory = addItemsToInventory(
+    player.inventory,
+    itemToPick.itemId,
+    itemToPick.count || 1,
+    {
+      durability: itemToPick.durability,
+      quality: itemToPick.quality || '普通',
+      customName: itemToPick.customName || '',
+      customNameEn: itemToPick.customNameEn || '',
+      bonusNutrition: itemToPick.bonusNutrition,
+    }
+  );
   return itemToPick;
 };
 
@@ -1222,9 +1232,8 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
     const { locationId, instanceId } = req.body;
-    const location = await Location.findOne({ locationId });
-    if (!location) {
-      return res.status(404).json({ success: false, message: '找不到該地點！' });
+    if (!locationId || !instanceId) {
+      return res.status(400).json({ success: false, message: '缺少必要參數！' });
     }
 
     let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
@@ -1232,18 +1241,124 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
 
-    const itemToPick = transferPlacedItemToPlayer(location, instanceId, player);
-    if (!itemToPick) {
-      return res.status(404).json({ success: false, message: '該地點找不到此道具！' });
+    // 原子鎖操作：利用 findOneAndUpdate 與 $pull 原子抽取物品
+    // 若已被其他玩家先一步撿走，此查詢匹配 0 筆並回傳 null，完全杜絕併發搶奪複製
+    const oldLocation = await Location.findOneAndUpdate(
+      {
+        locationId,
+        'placedItems.instanceId': instanceId,
+      },
+      {
+        $pull: { placedItems: { instanceId } },
+      },
+      {
+        returnDocument: 'before',
+      }
+    );
+
+    if (!oldLocation) {
+      return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
     }
 
-    await location.save();
+    const itemToPick = (oldLocation.placedItems || []).find((p) => p.instanceId === instanceId);
+    if (!itemToPick) {
+      return res.status(404).json({ success: false, message: '找不到此道具資料！' });
+    }
+
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    player.inventory = addItemsToInventory(
+      player.inventory,
+      itemToPick.itemId,
+      itemToPick.count || 1,
+      {
+        durability: itemToPick.durability,
+        quality: itemToPick.quality || '普通',
+        customName: itemToPick.customName || '',
+        customNameEn: itemToPick.customNameEn || '',
+        bonusNutrition: itemToPick.bonusNutrition,
+      }
+    );
+    player.markModified('inventory');
     await player.save();
 
     const allLocations = await Location.find({});
     return res.json({ success: true, data: formatPlayerResponse(player), locations: allLocations });
   } catch (err) {
     console.error('[API Error] POST /api/location/pickup-item:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/drop-item
+router.post('/player/drop-item', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { locationId, itemKey, count } = req.body;
+    if (!locationId || !itemKey) {
+      return res.status(400).json({ success: false, message: '缺少必要參數！' });
+    }
+
+    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    if (player.location !== locationId) {
+      return res.status(400).json({ success: false, message: '玩家不在該地點！' });
+    }
+
+    const location = await Location.findOne({ locationId });
+    if (!location) {
+      return res.status(404).json({ success: false, message: '找不到該地點！' });
+    }
+
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    const invIdx = player.inventory.findIndex(
+      (i) => (i.instanceId && i.instanceId === itemKey) || i.itemId === itemKey
+    );
+    if (invIdx < 0) {
+      return res.status(400).json({ success: false, message: '背包中沒有該道具！' });
+    }
+
+    const invItem = player.inventory[invIdx];
+    const availableCount = invItem.count || 1;
+    const dropQty = Math.max(1, Math.min(Number(count) || 1, availableCount));
+
+    const droppedItemData = {
+      instanceId: generateInstanceId(),
+      itemId: invItem.itemId,
+      count: dropQty,
+      durability: invItem.durability,
+      quality: invItem.quality || '普通',
+      customName: invItem.customName || '',
+      customNameEn: invItem.customNameEn || '',
+      bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
+    };
+
+    if (availableCount <= dropQty) {
+      player.inventory.splice(invIdx, 1);
+    } else {
+      invItem.count = availableCount - dropQty;
+    }
+    player.markModified('inventory');
+
+    // 依背包相同堆疊規則將物品加入現場物品
+    location.placedItems = addItemToPlacedItems(location.placedItems || [], droppedItemData);
+    location.markModified('placedItems');
+
+    await location.save();
+    await player.save();
+
+    const allLocations = await Location.find({});
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      locations: allLocations,
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/drop-item:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
