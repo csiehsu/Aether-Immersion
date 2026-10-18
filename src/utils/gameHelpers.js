@@ -380,3 +380,43 @@ export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
   };
 };
 
+/**
+ * 計算玩家負重上限。
+ * 規則：基礎上限 100，每 1 點力量再多 0.1。
+ * @param {Object} player - 玩家物件。
+ * @returns {number} 負重上限值（保留一位小數）。
+ */
+export const calculateMaxWeight = (player) => {
+  const str = Number(player?.stats?.strength ?? player?.str ?? 1);
+  return Math.round((100 + str * 0.1) * 10) / 10;
+};
+
+/**
+ * 計算背包中所有物品的總負重。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包陣列。
+ * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @returns {number} 當前總重量（保留一位小數）。
+ */
+export const calculateCurrentWeight = (inventory = [], items = []) => {
+  const total = (inventory || []).reduce((sum, inv) => {
+    const dbItem = (items || []).find((i) => i.itemId === inv.itemId);
+    const w = dbItem?.weight ?? 1;
+    return sum + w * (inv.count || 1);
+  }, 0);
+  return Math.round(total * 10) / 10;
+};
+
+/**
+ * 檢查玩家是否處於負重超載狀態。
+ * 當背包總重嚴格大於負重上限時判定為超重。
+ * @param {Object} player - 玩家物件。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包陣列。
+ * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @returns {boolean} 是否超重。
+ */
+export const isPlayerOverburdened = (player, inventory = [], items = []) => {
+  if (!player) return false;
+  return calculateCurrentWeight(inventory, items) > calculateMaxWeight(player);
+};
+
+

@@ -35,6 +35,7 @@ import {
   addLifeSkillExp,
   addItemToPlacedItems,
   addItemsToInventory,
+  isPlayerOverburdened,
 } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -759,6 +760,16 @@ router.post('/player/travel', async (req, res) => {
 
     if (isPlayerComatose(player)) {
       return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
+    }
+
+    const invItemIds = (player.inventory || []).map((i) => i.itemId);
+    let dbItems = await Item.find({ itemId: { $in: invItemIds } });
+    if (!dbItems || dbItems.length === 0) {
+      dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
+    }
+
+    if (isPlayerOverburdened(player, player.inventory, dbItems)) {
+      return res.status(400).json({ success: false, message: '背包負重超載，無法移動！' });
     }
 
     let locationDoc = await Location.findOne({ locationId: player.location });

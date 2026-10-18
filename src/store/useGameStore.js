@@ -7,6 +7,7 @@ import {
   isPlayerComatose,
   getStatusEffects,
   calculateEffectiveEnergyCost,
+  isPlayerOverburdened,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -487,7 +488,7 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<void>}
    */
   changeLocation: async (targetLocId) => {
-    const { locations, player } = get();
+    const { locations, player, inventory, items } = get();
     if (!player) return;
 
     if (isPlayerComatose(player)) {
@@ -498,6 +499,10 @@ export const useGameStore = create((set, get) => ({
         `[${player.name}] is comatose and cannot move!`,
         'system'
       );
+      return;
+    }
+
+    if (isPlayerOverburdened(player, inventory, items)) {
       return;
     }
 

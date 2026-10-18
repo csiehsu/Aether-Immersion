@@ -81,6 +81,8 @@ export const translations = {
     statusWellFedDesc: '飽食與水分皆達 80% 以上：行動精力消耗 -10%，每消耗 10 點精力恢復 1 HP',
     statusLightFedDesc: '飽食與水分皆達 60% 以上：行動精力消耗 -10%',
     statusFamishedDehydratedDesc: '飽食與水分皆低於 30%：行動精力消耗 +20%',
+    overburdened: '負重超載',
+    weight: '重量',
   },
   'en': {
     brand: 'Aether Immersion',
@@ -164,6 +166,8 @@ export const translations = {
     statusWellFedDesc: 'Food and Water >= 80%: Action energy cost -10%, restore 1 HP for every 10 energy spent',
     statusLightFedDesc: 'Food and Water >= 60%: Action energy cost -10%',
     statusFamishedDehydratedDesc: 'Food and Water < 30%: Action energy cost +20%',
+    overburdened: 'Overburdened',
+    weight: 'Weight',
   },
 };
 

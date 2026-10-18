@@ -1,5 +1,11 @@
 import { useGameStore, translations } from '../../store/useGameStore';
-import { isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
+import {
+  isPlayerComatose,
+  calculateEffectiveEnergyCost,
+  isPlayerOverburdened,
+  calculateCurrentWeight,
+  calculateMaxWeight,
+} from '../../utils/gameHelpers';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 
@@ -11,6 +17,8 @@ import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 export const MovePanel = () => {
   const locations = useGameStore((state) => state.locations || []);
   const player = useGameStore((state) => state.player);
+  const inventory = useGameStore((state) => state.inventory || []);
+  const items = useGameStore((state) => state.items || []);
   const changeLocation = useGameStore((state) => state.changeLocation);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
@@ -32,13 +40,33 @@ export const MovePanel = () => {
   });
 
   const isComatose = isPlayerComatose(player);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const currentWeight = calculateCurrentWeight(inventory, items);
+  const maxWeight = calculateMaxWeight(player);
 
   return (
-    <CollapsiblePanel title={t.moveTitle} className="move-panel">
+    <CollapsiblePanel
+      title={t.moveTitle}
+      className="move-panel"
+      headerExtra={
+        <div
+          style={{
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            color: isOverburdened ? '#ef4444' : '#94a3b8',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}
+        >
+          <span>⚖️ {currentWeight} / {maxWeight} kg</span>
+        </div>
+      }
+    >
       <div className="location-list">
         {availableLocations.map((loc) => {
           const isCurrent = player?.location === loc.locationId;
-          const isDisabled = isCurrent || isComatose;
+          const isDisabled = isCurrent || isComatose || isOverburdened;
           const connection = (currentLocation?.connections || []).find((c) => c.targetLocationId === loc.locationId);
           const baseCost = connection?.energyCost ?? 1;
           const cost = calculateEffectiveEnergyCost(player, baseCost);
@@ -47,6 +75,8 @@ export const MovePanel = () => {
             ? t.currentLocation
             : isComatose
             ? (t.comatose || '昏迷中')
+            : isOverburdened
+            ? (t.overburdened || (language === 'en' ? 'Overburdened' : '負重超載'))
             : t.goToLocation;
 
           return (
@@ -70,9 +100,8 @@ export const MovePanel = () => {
               </div>
               <button
                 type="button"
-                className={`btn-move ${isCurrent ? 'btn-active' : ''}`}
+                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''}`}
                 disabled={isDisabled}
-                title={isComatose && !isCurrent ? (t.comatoseCannotAct || '昏迷中，無法行動') : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isDisabled) return;

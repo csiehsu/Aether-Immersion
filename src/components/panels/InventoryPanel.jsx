@@ -3,6 +3,11 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { QuantitySelector } from '../common/QuantitySelector';
+import {
+  calculateCurrentWeight,
+  calculateMaxWeight,
+  isPlayerOverburdened,
+} from '../../utils/gameHelpers';
 
 /**
  * 玩家背包物品清單面板元件。
@@ -20,6 +25,10 @@ export const InventoryPanel = () => {
 
   const [selectedItemKey, setSelectedItemKey] = useState(null);
   const [actionQty, setActionQty] = useState(1);
+
+  const currentWeight = calculateCurrentWeight(inventory, items);
+  const maxWeight = calculateMaxWeight(player);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items);
 
   /**
    * 選取或取消選取背包中的道具。
@@ -40,7 +49,24 @@ export const InventoryPanel = () => {
   );
 
   return (
-    <CollapsiblePanel title={t.inventoryTitle} className="inventory-panel">
+    <CollapsiblePanel
+      title={t.inventoryTitle}
+      className="inventory-panel"
+      headerExtra={
+        <div
+          style={{
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            color: isOverburdened ? '#ef4444' : '#94a3b8',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}
+        >
+          <span>⚖️ {currentWeight} / {maxWeight} kg</span>
+        </div>
+      }
+    >
       {inventory.length === 0 ? (
         <div className="empty-inventory-notice">
           <span>🎒 {language === 'en' ? 'Inventory is empty.' : '背包是空的。'}</span>
@@ -125,6 +151,15 @@ export const InventoryPanel = () => {
                     <span>{language === 'en' ? 'Durability' : '耐久度'}: {durabilityVal}</span>
                   </div>
                 )}
+                {(() => {
+                  const singleWeight = dbItem?.weight ?? 1;
+                  const totalItemWeight = Math.round(singleWeight * (selectedItem.count || 1) * 10) / 10;
+                  return (
+                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
+                      <span>⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleWeight} kg ({language === 'en' ? 'Total' : '總重'}: {totalItemWeight} kg)</span>
+                    </div>
+                  );
+                })()}
                 {hasNutrition && (() => {
                   const n = totalNutrition;
                   const parts = [];

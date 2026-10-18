@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useGameStore, translations } from '../store/useGameStore';
-import { isPlayerComatose, getStatusEffects, getRequiredExpForNextLevel } from '../utils/gameHelpers';
+import {
+  isPlayerComatose,
+  getStatusEffects,
+  getRequiredExpForNextLevel,
+  calculateCurrentWeight,
+  calculateMaxWeight,
+  isPlayerOverburdened,
+} from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
 
@@ -11,6 +18,8 @@ import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/g
  */
 export const TopHUD = () => {
   const player = useGameStore((state) => state.player);
+  const inventory = useGameStore((state) => state.inventory || []);
+  const items = useGameStore((state) => state.items || []);
   const user = useGameStore((state) => state.user);
   const language = useGameStore((state) => state.language);
   const setLanguage = useGameStore((state) => state.setLanguage);
@@ -30,6 +39,10 @@ export const TopHUD = () => {
   const energyPercent = player ? Math.min(100, Math.max(0, (displayEnergy / maxEnergy) * 100)) : 0;
   const isFullEnergy = displayEnergy >= maxEnergy;
   const isComatose = isPlayerComatose(player);
+  const currentWeight = calculateCurrentWeight(inventory, items);
+  const maxWeight = calculateMaxWeight(player);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
 
   const statusEffects = player ? getStatusEffects(player) : [];
   const primaryStatus = statusEffects[0] || null;
@@ -148,6 +161,24 @@ export const TopHUD = () => {
                   </div>
                   <div className="bar-track">
                     <div className="bar-fill hp-fill" style={{ width: `${hpPercent}%` }}></div>
+                  </div>
+                </div>
+
+                <div className="status-bar-group details-weight" style={{ marginBottom: '8px' }}>
+                  <div className="status-bar-info">
+                    <span className="bar-label">⚖️ {language === 'en' ? 'Weight' : '負重'}</span>
+                    <span className="bar-val" style={{ color: isOverburdened ? '#ef4444' : undefined, fontWeight: isOverburdened ? 700 : undefined }}>
+                      {currentWeight} / {maxWeight} kg {isOverburdened ? `(${language === 'en' ? 'Overburdened' : '超重'})` : ''}
+                    </span>
+                  </div>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{
+                        width: `${weightPercent}%`,
+                        background: isOverburdened ? '#ef4444' : (weightPercent >= 80 ? '#f59e0b' : '#38bdf8'),
+                      }}
+                    />
                   </div>
                 </div>
 
