@@ -1205,7 +1205,27 @@ router.get('/logs', async (req, res) => {
     if (!isDbConnected()) {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
-    const logs = await GameLog.find().sort({ createdAt: -1 }).limit(20);
+    const { locationId, playerId } = req.query;
+
+    let query = {};
+    if (locationId || playerId) {
+      const orConditions = [];
+      if (locationId) {
+        orConditions.push({
+          type: { $in: ['dialogue', 'event'] },
+          locationId: String(locationId),
+        });
+      }
+      if (playerId) {
+        orConditions.push({
+          type: 'system',
+          targetPlayerId: String(playerId),
+        });
+      }
+      query = orConditions.length > 0 ? { $or: orConditions } : {};
+    }
+
+    const logs = await GameLog.find(query).sort({ createdAt: -1 }).limit(50);
     return res.json({ success: true, source: 'mongodb', data: logs });
   } catch (err) {
     console.error('[API Error] GET /api/logs:', err);
@@ -1219,7 +1239,7 @@ router.post('/logs', async (req, res) => {
     if (!isDbConnected()) {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
-    const { sender, senderEn, text, textEn, type } = req.body;
+    const { sender, senderEn, text, textEn, type, locationId, targetPlayerId } = req.body;
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const logDoc = await GameLog.create({
       time: timeStr,
@@ -1228,6 +1248,8 @@ router.post('/logs', async (req, res) => {
       text: text || '',
       textEn: textEn || '',
       type: type || 'dialogue',
+      locationId: type === 'system' ? '' : (locationId || ''),
+      targetPlayerId: type === 'system' ? (targetPlayerId || '') : '',
     });
     return res.json({ success: true, data: logDoc });
   } catch (err) {

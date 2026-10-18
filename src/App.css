@@ -1390,6 +1390,8 @@
 .log-text { color: #ffffff; }
 .type-system .log-sender { color: var(--accent-gold); }
 .type-event .log-sender { color: var(--accent-green); }
+.type-system .log-text { color: #facc15; }
+.type-event .log-text { color: #6ee7b7; }
 
 .dialogue-input-bar {
   display: flex;

@@ -438,16 +438,33 @@ export const useGameStore = create((set, get) => ({
         });
       }
 
-      const logRes = await fetch(`${API_BASE}/logs`);
-      if (logRes.ok) {
-        const logData = await logRes.json();
-        if (logData.success && logData.data) {
+      await get().fetchLogs();
+    } catch (err) {
+      console.error('[MongoDB Sync Error]', err);
+      set({ mongoStatus: 'offline', isDisconnected: true });
+    }
+  },
+
+  /**
+   * 向後端獲取當前地點之對話紀錄、事件紀錄與玩家私人系統訊息。
+   * @returns {Promise<void>}
+   */
+  fetchLogs: async () => {
+    const { player } = get();
+    const locId = player?.location || 'AZURE_BAY_PORT';
+    const pId = player?._id || player?.googleId || player?.name || '';
+    try {
+      const res = await fetch(
+        `${API_BASE}/logs?locationId=${encodeURIComponent(locId)}&playerId=${encodeURIComponent(pId)}`
+      );
+      if (res.ok) {
+        const logData = await res.json();
+        if (logData.success && Array.isArray(logData.data)) {
           set({ logs: logData.data });
         }
       }
     } catch (err) {
-      console.error('[MongoDB Sync Error]', err);
-      set({ mongoStatus: 'offline', isDisconnected: true });
+      console.error('[Fetch Logs Error]', err);
     }
   },
 
@@ -457,12 +474,40 @@ export const useGameStore = create((set, get) => ({
    * @param {string} [senderEn] - 發送者英文名稱。
    * @param {string} text - 中文訊息內容。
    * @param {string} [textEn] - 英文訊息內容。
-   * @param {'dialogue' | 'system' | 'combat'} [type='dialogue'] - 紀錄類型。
+   * @param {'dialogue' | 'system' | 'event'} [type='dialogue'] - 紀錄類型。
+   * @param {string} [locationId=null] - 所屬地點（對話與事件專用）。
+   * @param {string} [targetPlayerId=null] - 專屬目標玩家（系統訊息專用）。
    * @returns {Promise<void>}
    */
-  addLog: async (sender, senderEn, text, textEn, type = 'dialogue') => {
+  addLog: async (sender, senderEn, text, textEn, type = 'dialogue', locationId = null, targetPlayerId = null) => {
+    const { player } = get();
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-    const newEntry = { id: `${Date.now()}-${Math.random()}`, time: timeStr, sender, senderEn, text, textEn, type };
+    const locId = locationId || player?.location || 'AZURE_BAY_PORT';
+    const pId = targetPlayerId || player?._id || player?.googleId || player?.name || '';
+
+    // 若為對話且未指定發話者名稱，預設使用玩家名稱
+    const isPlayerDialogue = type === 'dialogue' && (!sender || sender === '玩家對話');
+    const actualSender = isPlayerDialogue
+      ? (player?.name || '冒險者')
+      : (sender || '系統');
+    const actualSenderEn = isPlayerDialogue
+      ? (player?.name || 'Adventurer')
+      : (senderEn || 'System');
+
+    const logLocationId = type === 'system' ? '' : locId;
+    const logTargetPlayerId = type === 'system' ? pId : (targetPlayerId || '');
+
+    const newEntry = {
+      id: `${Date.now()}-${Math.random()}`,
+      time: timeStr,
+      sender: actualSender,
+      senderEn: actualSenderEn,
+      text,
+      textEn,
+      type,
+      locationId: logLocationId,
+      targetPlayerId: logTargetPlayerId,
+    };
 
     set((state) => ({
       logs: [newEntry, ...state.logs],
@@ -472,7 +517,15 @@ export const useGameStore = create((set, get) => ({
       const res = await fetch(`${API_BASE}/logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender, senderEn, text, textEn, type }),
+        body: JSON.stringify({
+          sender: actualSender,
+          senderEn: actualSenderEn,
+          text,
+          textEn,
+          type,
+          locationId: logLocationId,
+          targetPlayerId: logTargetPlayerId,
+        }),
       });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
@@ -538,6 +591,8 @@ export const useGameStore = create((set, get) => ({
       },
     }));
 
+    get().fetchLogs();
+
     try {
       const res = await fetch(`${API_BASE}/player/travel`, {
         method: 'POST',
@@ -548,6 +603,7 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          get().fetchLogs();
         }
       } else {
         const errData = await res.json().catch(() => ({}));
