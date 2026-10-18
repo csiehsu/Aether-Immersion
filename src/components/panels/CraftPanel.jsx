@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
-import { TOOL_TYPE_LABELS } from '../../constants/translations';
+import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
 import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel } from '../../utils/gameHelpers';
@@ -101,6 +101,30 @@ export const CraftPanel = () => {
     }
   };
 
+  // 依據當前配方需求與背包材料，即時衍生出最終選取的材料（若符合的材料只有一項，則替使用者預先選定該材料）
+  const effectiveSelectedMaterials = {};
+  if (selectedRecipe && selectedRecipe.requiredItems) {
+    selectedRecipe.requiredItems.forEach((req, reqIdx) => {
+      const reqTotal = (req.quantity || 1) * craftQty;
+      const eligible = inventory.filter((inv) => {
+        const dbI = items.find((i) => i.itemId === inv.itemId);
+        if (!dbI) return false;
+        const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+        const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+        const matchesType = req.type ? types.includes(req.type) : false;
+        return (matchesItem || matchesType) && (inv.count || 1) >= reqTotal;
+      });
+
+      if (selectedMaterials[reqIdx] !== undefined) {
+        if (selectedMaterials[reqIdx] && eligible.some((e) => e.itemId === selectedMaterials[reqIdx])) {
+          effectiveSelectedMaterials[reqIdx] = selectedMaterials[reqIdx];
+        }
+      } else if (eligible.length === 1) {
+        effectiveSelectedMaterials[reqIdx] = eligible[0].itemId;
+      }
+    });
+  }
+
   /**
    * 執行觸發合成製作。
    * @param {Object} rec - 配方物件。
@@ -110,7 +134,7 @@ export const CraftPanel = () => {
   const handleStartCraft = async (rec, e, isReady) => {
     e.stopPropagation();
     if (!isReady) return;
-    const success = await performCraft(rec, selectedMaterials, craftQty);
+    const success = await performCraft(rec, effectiveSelectedMaterials, craftQty);
     if (success) {
       setSelectedMaterials({});
     }
@@ -153,25 +177,51 @@ export const CraftPanel = () => {
             const hasTools = checkToolsAvailable(rec);
 
             const toolLabelText = language === 'en' ? 'Required Tools:' : '需要工具：';
-            const availableMatLabelText = t.availableMaterials || (language === 'en' ? 'Available Materials:' : '可用材料：');
 
             const reqToolsStr = rec.requiredToolTypes && rec.requiredToolTypes.length > 0
-              ? rec.requiredToolTypes.map((type) => (TOOL_TYPE_LABELS[language] && TOOL_TYPE_LABELS[language][type]) || type).join(', ')
+              ? rec.requiredToolTypes.map((type) => getLocalizedType(type, language)).join(', ')
               : (language === 'en' ? 'None' : '無');
 
             const reqItemsList = rec.requiredItems || [];
             const hasSelectedAllMaterials = reqItemsList.length === 0 || reqItemsList.every((req, reqIdx) => {
-              const selId = selectedMaterials[reqIdx];
+              const selId = effectiveSelectedMaterials[reqIdx];
               if (!selId) return false;
               const inv = inventory.find((i) => i.itemId === selId);
               if (!inv) return false;
               return (inv.count || 1) >= req.quantity * craftQty;
             });
 
+            const isComatose = isPlayerComatose(player);
+            const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
+            const singleEnergyCost = calculateEffectiveEnergyCost(player, rec.energyCost || 0);
+            const maxByEnergy = singleEnergyCost > 0 ? Math.floor(currentEnergy / singleEnergyCost) : Infinity;
+
+            const materialLimits = reqItemsList.map((req, reqIdx) => {
+              const selId = effectiveSelectedMaterials[reqIdx];
+              if (selId) {
+                const matchingInv = inventory.filter((i) => i.itemId === selId);
+                const totalCount = matchingInv.reduce((sum, i) => sum + (i.count || 1), 0);
+                return Math.floor(totalCount / (req.quantity || 1));
+              }
+              const eligible = inventory.filter((inv) => {
+                const dbI = items.find((i) => i.itemId === inv.itemId);
+                if (!dbI) return false;
+                const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+                const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+                const matchesType = req.type ? types.includes(req.type) : false;
+                return matchesItem || matchesType;
+              });
+              const maxInEligible = eligible.map((inv) => Math.floor((inv.count || 1) / (req.quantity || 1)));
+              return maxInEligible.length > 0 ? Math.max(...maxInEligible) : 0;
+            });
+            const maxByMaterials = materialLimits.length > 0 ? Math.min(...materialLimits) : Infinity;
+            const calculatedMaxCraft = (!hasTools || isComatose)
+              ? 1
+              : Math.max(1, Math.min(maxByEnergy, maxByMaterials));
+
             const baseEnergyCost = (rec.energyCost || 0) * craftQty;
             const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
-            const hasEnergy = (Math.round((player?.energy ?? 0) * 10) / 10) >= totalEnergyCost;
-            const isComatose = isPlayerComatose(player);
+            const hasEnergy = currentEnergy >= totalEnergyCost;
             const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
 
             const craftSkill = rec.skillType || 'COOKING';
@@ -202,12 +252,17 @@ export const CraftPanel = () => {
                       return (matchesItem || matchesType) && (inv.count || 1) >= reqTotal;
                     });
                     const targetItem = req.itemId ? items.find((it) => it.itemId === req.itemId) : null;
-                    const reqLabel = targetItem ? getLocalizedName(targetItem, language) : (req.type || req.itemId);
+                    const reqLabel = targetItem
+                      ? getLocalizedName(targetItem, language)
+                      : getLocalizedType(req.type || req.itemId, language);
+                    const reqHeading = language === 'en'
+                      ? `Required Material: ${reqLabel} x${reqTotal}`
+                      : `需求材料：${reqLabel} x${reqTotal}`;
 
                     return (
                       <div className="recipe-detail-row vertical" key={reqIdx} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
                         <span className="recipe-detail-label">
-                          {availableMatLabelText} ({reqLabel} x{reqTotal})：
+                          {reqHeading}
                         </span>
                         <div className="material-options-wrapper">
                           {eligibleItems.length > 0 ? (
@@ -215,7 +270,7 @@ export const CraftPanel = () => {
                               const invKey = inv.itemId;
                               const dbI = items.find((i) => i.itemId === inv.itemId);
                               const itemName = dbI ? getLocalizedName(dbI, language) : inv.itemId;
-                              const isOptionSelected = selectedMaterials[reqIdx] === invKey;
+                              const isOptionSelected = effectiveSelectedMaterials[reqIdx] === invKey;
 
                               return (
                                 <button
@@ -235,10 +290,8 @@ export const CraftPanel = () => {
                               );
                             })
                           ) : (
-                            <span className="no-material-notice">
-                              {language === 'en'
-                                ? `No single item matching ${reqLabel} (req >= ${reqTotal})`
-                                : `無符合數量 (≥${reqTotal}) 的 ${reqLabel} 材料`}
+                            <span className="no-material-notice" style={{ color: '#ef4444', fontWeight: 600, fontSize: '0.8rem' }}>
+                              {language === 'en' ? 'None' : '無'}
                             </span>
                           )}
                         </div>
@@ -257,7 +310,7 @@ export const CraftPanel = () => {
                     const modifierMaterialIds = [];
 
                     reqItemsList.forEach((req, idx) => {
-                      const selId = selectedMaterials[idx];
+                      const selId = effectiveSelectedMaterials[idx];
                       if (!selId) return;
                       if (req.role === 'base') {
                         if (!baseMaterialId) baseMaterialId = selId;
@@ -267,7 +320,7 @@ export const CraftPanel = () => {
                     });
 
                     if (!baseMaterialId) {
-                      baseMaterialId = selectedMaterials[0] || '';
+                      baseMaterialId = effectiveSelectedMaterials[0] || '';
                     }
 
                     // 方案 A：解析 effectiveOutputs（支援字串主要產物映射與完整產物陣列映射）
@@ -399,7 +452,7 @@ export const CraftPanel = () => {
                 </div>
 
                 <div className="recipe-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                  <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} />
+                  <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} max={calculatedMaxCraft} />
                   <button
                     type="button"
                     className="btn-craft"

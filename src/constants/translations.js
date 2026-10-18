@@ -173,12 +173,82 @@ export const TOOL_TYPE_LABELS = {
     LANDING_NET: '撈魚網',
     FISHING_NET: '漁網',
     BAIT: '肉餌',
+    TABLE: '工作檯',
+    HEATING: '加熱工具',
+    PAN: '平底鍋',
+    SMOKER_BOX: '煙燻箱',
+    CUTTING: '切割工具',
+    FIRE: '營火',
+    LIGHT: '照明設備',
+    HELMET: '頭盔',
   },
   'en': {
     MINING_TOOL: 'Mining Tool',
     LANDING_NET: 'Landing Net',
     FISHING_NET: 'Fishing Net',
     BAIT: 'Meat Bait',
+    TABLE: 'Work Table',
+    HEATING: 'Heating Tool',
+    PAN: 'Frying Pan',
+    SMOKER_BOX: 'Smoker Box',
+    CUTTING: 'Cutting Tool',
+    FIRE: 'Campfire',
+    LIGHT: 'Light Source',
+    HELMET: 'Helmet',
   },
 };
+
+export const MATERIAL_TYPE_LABELS = {
+  'zh-TW': {
+    FLOUR: '麵粉',
+    WATER: '水',
+    HERB: '香草',
+    DOUGH: '麵團',
+    FIBER: '纖維',
+    INGREDIENTS: '食材',
+    INGREDIENT: '食材',
+    MATERIALS: '材料',
+    ROPE: '繩索',
+    FEATHER: '羽毛',
+    BAIT: '肉餌',
+    FISH: '魚類',
+    FOOD: '食物',
+    QUEST_ITEM: '任務道具',
+    BOAT_VOUCHER: '船票',
+  },
+  'en': {
+    FLOUR: 'Flour',
+    WATER: 'Water',
+    HERB: 'Herb',
+    DOUGH: 'Dough',
+    FIBER: 'Fiber',
+    INGREDIENTS: 'Ingredients',
+    INGREDIENT: 'Ingredient',
+    MATERIALS: 'Materials',
+    ROPE: 'Rope',
+    FEATHER: 'Feather',
+    BAIT: 'Bait',
+    FISH: 'Fish',
+    FOOD: 'Food',
+    QUEST_ITEM: 'Quest Item',
+    BOAT_VOUCHER: 'Boat Voucher',
+  },
+};
+
+/**
+ * 依語言設定取得材料或工具類別之多國語言名稱。
+ * @param {string} typeKey - 類別識別碼。
+ * @param {string} [language='zh-TW'] - 當前語言代碼。
+ * @returns {string} 本地化名稱。
+ */
+export const getLocalizedType = (typeKey, language = 'zh-TW') => {
+  if (!typeKey) return '';
+  const lang = language === 'en' ? 'en' : 'zh-TW';
+  return (
+    MATERIAL_TYPE_LABELS[lang]?.[typeKey] ||
+    TOOL_TYPE_LABELS[lang]?.[typeKey] ||
+    typeKey
+  );
+};
+
 

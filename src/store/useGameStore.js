@@ -1119,14 +1119,15 @@ export const useGameStore = create((set, get) => ({
    * 拾取場景中的地面放置道具 (Placed Item) 並同步更新背包與地點狀態。
    * @param {string} locationId - 地點識別碼。
    * @param {string} instanceId - 放置道具實體識別碼。
-   * @returns {Promise<void>}
+   * @param {number} [count=1] - 拾取數量。
+   * @returns {Promise<boolean>}
    */
-  pickUpPlacedItem: async (locationId, instanceId) => {
+  pickUpPlacedItem: async (locationId, instanceId, count = 1) => {
     try {
       const res = await fetch(`${API_BASE}/location/pickup-item`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ locationId, instanceId }),
+        body: JSON.stringify({ locationId, instanceId, count }),
       });
       if (res.ok) {
         const result = await res.json();

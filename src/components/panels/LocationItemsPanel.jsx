@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
+import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
  * 當前場景地面放置物品 (Placed Items) 面板元件。
@@ -20,6 +21,7 @@ export const LocationItemsPanel = () => {
 
   const [isOpen, setIsOpen] = useState(true);
   const [selectedInstanceId, setSelectedInstanceId] = useState(null);
+  const [pickQty, setPickQty] = useState(1);
 
   // 面板展開時每 10 秒自動重新整理同步一次現場物品
   useEffect(() => {
@@ -47,8 +49,10 @@ export const LocationItemsPanel = () => {
   const handleSelectItem = (instanceId) => {
     if (selectedInstanceId === instanceId) {
       setSelectedInstanceId(null);
+      setPickQty(1);
     } else {
       setSelectedInstanceId(instanceId);
+      setPickQty(1);
     }
   };
 
@@ -211,60 +215,79 @@ export const LocationItemsPanel = () => {
                   ) : null;
                 })()}
 
-                <div className="inventory-detail-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
-                  {isQuestItem ? (
-                    <button
-                      type="button"
-                      className="btn-use-item"
-                      style={{ background: '#3b82f6', color: '#ffffff' }}
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (acceptQuestFromPlacedItem) {
-                          await acceptQuestFromPlacedItem(
-                            selectedPlacedItem.triggerQuestId,
-                            currentLocation.locationId,
-                            selectedPlacedItem.instanceId
-                          );
-                        }
-                        setSelectedInstanceId(null);
-                      }}
-                    >
-                      {t.acceptBtn || (language === 'en' ? 'Accept' : '接受')}
-                    </button>
-                  ) : (
-                    <>
+                <div className="detail-action-container">
+                  {count > 1 && !isQuestItem && (
+                    <div className="detail-qty-row">
+                      <span className="detail-qty-label">
+                        {language === 'en' ? 'Quantity:' : '選取數量：'}
+                      </span>
+                      <QuantitySelector
+                        value={pickQty}
+                        onChange={setPickQty}
+                        min={1}
+                        max={count}
+                      />
+                    </div>
+                  )}
+                  <div className="detail-buttons-row">
+                    {isQuestItem ? (
                       <button
                         type="button"
                         className="btn-use-item"
-                        style={{ background: '#10b981', color: '#ffffff' }}
+                        style={{ background: '#3b82f6', color: '#ffffff' }}
                         onClick={async (e) => {
                           e.stopPropagation();
-                          if (pickUpPlacedItem) {
-                            const success = await pickUpPlacedItem(
+                          if (acceptQuestFromPlacedItem) {
+                            await acceptQuestFromPlacedItem(
+                              selectedPlacedItem.triggerQuestId,
                               currentLocation.locationId,
                               selectedPlacedItem.instanceId
                             );
-                            if (success) {
-                              setSelectedInstanceId(null);
-                            }
                           }
-                        }}
-                      >
-                        {t.pickupBtn || (language === 'en' ? 'Pick Up' : '撿起')}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-use-item"
-                        style={{ background: '#475569', color: '#ffffff' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
                           setSelectedInstanceId(null);
+                          setPickQty(1);
                         }}
                       >
-                        {t.putDownBtn || (language === 'en' ? 'Put Down' : '放下')}
+                        {t.acceptBtn || (language === 'en' ? 'Accept' : '接受')}
                       </button>
-                    </>
-                  )}
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn-use-item"
+                          style={{ background: '#10b981', color: '#ffffff' }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (pickUpPlacedItem) {
+                              const success = await pickUpPlacedItem(
+                                currentLocation.locationId,
+                                selectedPlacedItem.instanceId,
+                                pickQty
+                              );
+                              if (success) {
+                                setSelectedInstanceId(null);
+                                setPickQty(1);
+                              }
+                            }
+                          }}
+                        >
+                          {t.pickupBtn || (language === 'en' ? 'Pick Up' : '撿起')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-use-item"
+                          style={{ background: '#475569', color: '#ffffff' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedInstanceId(null);
+                            setPickQty(1);
+                          }}
+                        >
+                          {t.putDownBtn || (language === 'en' ? 'Put Down' : '放下')}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );

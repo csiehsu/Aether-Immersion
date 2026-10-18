@@ -571,29 +571,20 @@ export const GatherPanel = () => {
                 const currentSkillInfo = skillNames[spotSkill] || { name: language === 'en' ? 'Gathering' : '採集', icon: '🌿' };
                 const reqExp = getRequiredExpForNextLevel(skillObj.level);
 
+                const singleCost = calculateEffectiveEnergyCost(player, unitCost);
+                const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
+                const maxByBait = hasBaitRequirement ? totalBaitCount : Infinity;
+                const calculatedMaxGather = (!hasNonConsumableTools || isComatose)
+                  ? 1
+                  : Math.max(1, Math.min(maxByEnergy, maxByBait));
+
                 return (
                   <div className="gather-detail-window">
-                    <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span className="gather-cost">
-                          {t.costEnergy}: -{totalCost}
-                          {totalCost < baseTotalCost && (
-                            <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
-                          )}
-                          {totalCost > baseTotalCost && (
-                            <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
-                          )}
-                        </span>
-                        <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
-                          {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
-                        </span>
-                      </div>
-                      <QuantitySelector
-                        value={gatherQty}
-                        onChange={setGatherQty}
-                        min={1}
-                        max={hasBaitRequirement ? Math.max(1, totalBaitCount) : Infinity}
-                      />
+                    <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <span />
+                      <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
+                        {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
+                      </span>
                     </div>
 
                     {reqTools.length > 0 && (
@@ -640,24 +631,46 @@ export const GatherPanel = () => {
                       </div>
                     )}
 
-                    <div className="gather-detail-actions">
-                      <button
-                        type="button"
-                        className="btn-gather"
-                        disabled={!canGather}
-                        title={buttonText}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!canGather) return;
-                          performGather(
-                            spot.itemId,
-                            unitCost,
-                            gatherQty
-                          );
-                        }}
-                      >
-                        {buttonText}
-                      </button>
+                    <div className="detail-action-container">
+                      <div className="detail-qty-row">
+                        <span className="detail-qty-label">
+                          {language === 'en' ? 'Quantity:' : '選取數量：'}
+                        </span>
+                        <QuantitySelector
+                          value={gatherQty}
+                          onChange={setGatherQty}
+                          min={1}
+                          max={calculatedMaxGather}
+                        />
+                      </div>
+                      <div className="detail-buttons-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <span className="gather-cost">
+                          {t.costEnergy}: -{totalCost}
+                          {totalCost < baseTotalCost && (
+                            <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
+                          )}
+                          {totalCost > baseTotalCost && (
+                            <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-gather"
+                          disabled={!canGather}
+                          title={buttonText}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!canGather) return;
+                            performGather(
+                              spot.itemId,
+                              unitCost,
+                              gatherQty
+                            );
+                          }}
+                        >
+                          {buttonText}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

@@ -142,16 +142,21 @@ export const InventoryPanel = () => {
                     </div>
                   ) : null;
                 })()}
-                <div className="inventory-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
-                  {(selectedItem.count || 1) > 1 ? (
-                    <QuantitySelector
-                      value={actionQty}
-                      onChange={setActionQty}
-                      min={1}
-                      max={selectedItem.count || 1}
-                    />
-                  ) : <div />}
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                <div className="detail-action-container">
+                  {(selectedItem.count || 1) > 1 && (
+                    <div className="detail-qty-row">
+                      <span className="detail-qty-label">
+                        {language === 'en' ? 'Quantity:' : '選取數量：'}
+                      </span>
+                      <QuantitySelector
+                        value={actionQty}
+                        onChange={setActionQty}
+                        min={1}
+                        max={selectedItem.count || 1}
+                      />
+                    </div>
+                  )}
+                  <div className="detail-buttons-row">
                     {hasNutrition && (
                       <button
                         type="button"

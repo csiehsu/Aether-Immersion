@@ -1231,7 +1231,7 @@ router.post('/location/pickup-item', async (req, res) => {
     if (!isDbConnected()) {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
-    const { locationId, instanceId } = req.body;
+    const { locationId, instanceId, count } = req.body;
     if (!locationId || !instanceId) {
       return res.status(400).json({ success: false, message: '缺少必要參數！' });
     }
@@ -1241,28 +1241,67 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
 
-    // 原子鎖操作：利用 findOneAndUpdate 與 $pull 原子抽取物品
-    // 若已被其他玩家先一步撿走，此查詢匹配 0 筆並回傳 null，完全杜絕併發搶奪複製
-    const oldLocation = await Location.findOneAndUpdate(
+    const requestedCount = Math.max(1, Number(count) || 1);
+    let itemToPick = null;
+
+    // 分支 1：若現場物品堆疊數量大於欲撿取數量，以 $elemMatch 與 arrayFilters 原子扣減數量
+    const locWithPartial = await Location.findOneAndUpdate(
       {
         locationId,
-        'placedItems.instanceId': instanceId,
+        placedItems: {
+          $elemMatch: {
+            instanceId,
+            count: { $gt: requestedCount },
+          },
+        },
       },
       {
-        $pull: { placedItems: { instanceId } },
+        $inc: { 'placedItems.$[elem].count': -requestedCount },
       },
       {
+        arrayFilters: [{ 'elem.instanceId': instanceId }],
         returnDocument: 'before',
       }
     );
 
-    if (!oldLocation) {
-      return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
+    if (locWithPartial) {
+      const original = (locWithPartial.placedItems || []).find((p) => p.instanceId === instanceId);
+      if (original) {
+        const itemObj = original.toObject ? original.toObject() : original;
+        itemToPick = {
+          ...itemObj,
+          count: requestedCount,
+        };
+      }
+    } else {
+      // 分支 2：若現場物品數量 <= 欲撿取數量，原子抽取移除該放置物
+      const locWithFull = await Location.findOneAndUpdate(
+        {
+          locationId,
+          'placedItems.instanceId': instanceId,
+        },
+        {
+          $pull: { placedItems: { instanceId } },
+        },
+        {
+          returnDocument: 'before',
+        }
+      );
+
+      if (locWithFull) {
+        const original = (locWithFull.placedItems || []).find((p) => p.instanceId === instanceId);
+        if (original) {
+          const itemObj = original.toObject ? original.toObject() : original;
+          itemToPick = {
+            ...itemObj,
+            count: itemObj.count || 1,
+          };
+        }
+      }
     }
 
-    const itemToPick = (oldLocation.placedItems || []).find((p) => p.instanceId === instanceId);
     if (!itemToPick) {
-      return res.status(404).json({ success: false, message: '找不到此道具資料！' });
+      return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
     }
 
     player.inventory = sanitizeInventoryItems(player.inventory);

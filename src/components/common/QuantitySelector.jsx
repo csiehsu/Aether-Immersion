@@ -21,6 +21,8 @@ export const QuantitySelector = ({
   stepLarge = 10,
   disabled = false,
   className = '',
+  showMax = true,
+  onMax,
 }) => {
   /**
    * 限制數值在 [min, max] 區間之內的輔助函式。
@@ -45,6 +47,20 @@ export const QuantitySelector = ({
     const num = isNaN(currentNum) ? min : currentNum;
     const nextVal = clamp(num + delta);
     if (onChange) onChange(nextVal);
+  };
+
+  /**
+   * 處理直接設定為最大值 (MAX)。
+   */
+  const handleMax = () => {
+    if (disabled) return;
+    if (onMax) {
+      onMax();
+      return;
+    }
+    if (max !== Infinity && max > 0) {
+      if (onChange) onChange(clamp(max));
+    }
   };
 
   /**
@@ -124,6 +140,17 @@ export const QuantitySelector = ({
       >
         +{stepLarge}
       </button>
+      {showMax && (
+        <button
+          type="button"
+          className="btn-qty-max"
+          onClick={handleMax}
+          disabled={disabled || (max !== Infinity && current >= max) || (max !== Infinity && max < min)}
+          title="最大值 (MAX)"
+        >
+          MAX
+        </button>
+      )}
     </div>
   );
 };
