@@ -96,6 +96,9 @@ const sanitizeInventoryItems = (inventory) => {
       count: raw.count || 1,
       durability: raw.durability !== undefined ? raw.durability : -1,
       quality: raw.quality || '普通',
+      customName: raw.customName || '',
+      customNameEn: raw.customNameEn || '',
+      bonusNutrition: raw.bonusNutrition ? { ...raw.bonusNutrition } : undefined,
     });
   }
   return clean;
@@ -856,17 +859,109 @@ router.post('/player/craft', async (req, res) => {
       allDbItems = initialItems;
     }
 
-    const outputItems = recipe.outputItems || [];
-    for (const out of outputItems) {
-      const outItemId = out.itemId || recipe.recipeId;
-      const dbOut = allDbItems.find(
-        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
-      );
-      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+    // 通用資料結構方式三：解析 base 材料與 modifier 材料
+    let baseMaterialId = '';
+    const modifierMaterialIds = [];
+
+    reqItems.forEach((req, idx) => {
+      const selId = selectedMaterials[idx];
+      if (!selId) return;
+      if (req.role === 'base') {
+        if (!baseMaterialId) baseMaterialId = selId;
+      } else if (req.role === 'modifier') {
+        modifierMaterialIds.push(selId);
+      }
+    });
+
+    if (!baseMaterialId) {
+      baseMaterialId = selectedMaterials[0] || (Array.isArray(selectedMaterials) ? selectedMaterials[0] : '');
+    }
+    if (modifierMaterialIds.length === 0) {
+      Object.entries(selectedMaterials).forEach(([k, v]) => {
+        if (Number(k) > 0 && v) {
+          modifierMaterialIds.push(v);
+        }
+      });
+    }
+
+    // 計算修飾詞與修飾營養 (Modifiers)
+    let customPrefix = '';
+    let customPrefixEn = '';
+    const bonusNutrition = {
+      hp: 0, strength: 0, speed: 0, dexterity: 0, defense: 0, maxHp: 0, water: 0, food: 0,
+    };
+    let hasBonusNutrition = false;
+
+    if (recipe.modifiers && typeof recipe.modifiers === 'object') {
+      modifierMaterialIds.forEach((modId) => {
+        const mod = recipe.modifiers[modId];
+        if (mod) {
+          if (mod.prefix) {
+            customPrefix = customPrefix ? `${customPrefix}・${mod.prefix}` : mod.prefix;
+          }
+          if (mod.prefixEn) {
+            customPrefixEn = customPrefixEn ? `${mod.prefixEn} ${customPrefixEn}` : mod.prefixEn;
+          }
+          if (mod.bonusNutrition) {
+            for (const [statKey, statVal] of Object.entries(mod.bonusNutrition)) {
+              if (typeof statVal === 'number' && statVal !== 0 && bonusNutrition[statKey] !== undefined) {
+                bonusNutrition[statKey] += statVal;
+                hasBonusNutrition = true;
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 方案 A：解析 effectiveOutputs（支援字串主要產物映射與完整產物陣列映射）
+    const mappedOutput = recipe.outputs && typeof recipe.outputs === 'object'
+      ? (recipe.outputs[baseMaterialId] || recipe.outputs['default'])
+      : null;
+
+    const effectiveOutputs = (Array.isArray(mappedOutput) && mappedOutput.length > 0)
+      ? mappedOutput.map((item) => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        type: item.type,
+      }))
+      : (recipe.outputItems || []).map((out, idx) => {
+        let finalItemId = '';
+        if (idx === 0 && typeof mappedOutput === 'string' && mappedOutput.trim()) {
+          finalItemId = mappedOutput.trim();
+        } else if (out.itemId) {
+          finalItemId = out.itemId;
+        }
+
+        if (!finalItemId) {
+          const outItemId = out.itemId || recipe.recipeId;
+          const dbOut = allDbItems.find(
+            (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
+          );
+          finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+        }
+
+        return {
+          itemId: finalItemId,
+          quantity: out.quantity || 1,
+          type: out.type,
+        };
+      });
+
+    for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
+      const out = effectiveOutputs[outIdx];
+      const finalItemId = out.itemId;
       const addQty = (out.quantity || 1) * numCraftQty;
+      const isPrimary = (outIdx === 0);
+
+      const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
+      const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
+      const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
+      const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
 
       const existingMatchIndex = updatedInv.findIndex((inv) => {
         if (inv.itemId !== finalItemId) return false;
+        if ((inv.customName || '') !== customName) return false;
         const oldDurability = inv.durability !== undefined && inv.durability > 0 ? inv.durability : -1;
         const newDurability = calculatedDurability > 0 ? calculatedDurability : -1;
         if (oldDurability <= 0 && newDurability <= 0) return true;
@@ -887,6 +982,8 @@ router.post('/player/craft', async (req, res) => {
         const updatedItem = {
           ...existingItem,
           count: newTotalCount,
+          ...(customName ? { customName, customNameEn } : {}),
+          ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
         };
 
         if (oldDurability > 0 && calculatedDurability > 0) {
@@ -905,6 +1002,8 @@ router.post('/player/craft', async (req, res) => {
           itemId: finalItemId,
           count: addQty,
           quality: '普通',
+          ...(customName ? { customName, customNameEn } : {}),
+          ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
         };
         if (calculatedDurability > 0) {
           newItem.durability = calculatedDurability;
@@ -926,12 +1025,8 @@ router.post('/player/craft', async (req, res) => {
     }) : [];
 
     let hasQuestUpdate = false;
-    for (const out of outputItems) {
-      const outItemId = out.itemId || recipe.recipeId;
-      const dbOut = allDbItems.find(
-        (i) => i.itemId === outItemId || (out.type && i.type === out.type) || (out.type && Array.isArray(i.type) && i.type.includes(out.type)) || i.name === recipe.name
-      );
-      const finalItemId = out.itemId || (dbOut ? dbOut.itemId : recipe.recipeId);
+    for (const out of effectiveOutputs) {
+      const finalItemId = out.itemId;
       const addQty = (out.quantity || 1) * numCraftQty;
 
       for (const q of updatedQuests) {

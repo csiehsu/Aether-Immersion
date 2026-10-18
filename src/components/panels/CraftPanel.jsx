@@ -243,6 +243,137 @@ export const CraftPanel = () => {
                     <span className="recipe-detail-val">{reqToolsStr}</span>
                   </div>
 
+                  {(() => {
+                    // 解析 base 材料與 modifier 材料以動態計算產出
+                    let baseMaterialId = '';
+                    const modifierMaterialIds = [];
+
+                    reqItemsList.forEach((req, idx) => {
+                      const selId = selectedMaterials[idx];
+                      if (!selId) return;
+                      if (req.role === 'base') {
+                        if (!baseMaterialId) baseMaterialId = selId;
+                      } else if (req.role === 'modifier') {
+                        modifierMaterialIds.push(selId);
+                      }
+                    });
+
+                    if (!baseMaterialId) {
+                      baseMaterialId = selectedMaterials[0] || '';
+                    }
+
+                    // 方案 A：解析 effectiveOutputs（支援字串主要產物映射與完整產物陣列映射）
+                    const mappedOutput = rec.outputs && typeof rec.outputs === 'object'
+                      ? (rec.outputs[baseMaterialId] || rec.outputs['default'])
+                      : null;
+
+                    const effectiveOutputs = (Array.isArray(mappedOutput) && mappedOutput.length > 0)
+                      ? mappedOutput.map((item) => ({
+                        itemId: item.itemId,
+                        quantity: item.quantity || 1,
+                      }))
+                      : (rec.outputItems || []).map((out, idx) => {
+                        let finalItemId = '';
+                        if (idx === 0 && typeof mappedOutput === 'string' && mappedOutput.trim()) {
+                          finalItemId = mappedOutput.trim();
+                        } else if (out.itemId) {
+                          finalItemId = out.itemId;
+                        }
+                        if (!finalItemId) {
+                          finalItemId = out.itemId || rec.recipeId;
+                        }
+                        return {
+                          itemId: finalItemId,
+                          quantity: out.quantity || 1,
+                        };
+                      });
+
+                    let previewPrefix = '';
+                    let previewPrefixEn = '';
+                    const previewBonus = {
+                      hp: 0, strength: 0, speed: 0, dexterity: 0, defense: 0, maxHp: 0, water: 0, food: 0,
+                    };
+                    let hasModifierBonus = false;
+
+                    if (rec.modifiers && typeof rec.modifiers === 'object') {
+                      modifierMaterialIds.forEach((modId) => {
+                        const mod = rec.modifiers[modId];
+                        if (mod) {
+                          if (mod.prefix) {
+                            previewPrefix = previewPrefix ? `${previewPrefix}・${mod.prefix}` : mod.prefix;
+                          }
+                          if (mod.prefixEn) {
+                            previewPrefixEn = previewPrefixEn ? `${mod.prefixEn} ${previewPrefixEn}` : mod.prefixEn;
+                          }
+                          if (mod.bonusNutrition) {
+                            for (const [k, v] of Object.entries(mod.bonusNutrition)) {
+                              if (typeof v === 'number' && v !== 0 && previewBonus[k] !== undefined) {
+                                previewBonus[k] += v;
+                                hasModifierBonus = true;
+                              }
+                            }
+                          }
+                        }
+                      });
+                    }
+
+                    const primaryFinalId = effectiveOutputs[0]?.itemId || '';
+                    const primaryDbItem = items.find((i) => i.itemId === primaryFinalId);
+
+                    const baseNut = primaryDbItem?.nutrition || {};
+                    const totalNut = {
+                      hp: (baseNut.hp || 0) + (hasModifierBonus ? previewBonus.hp : 0),
+                      strength: (baseNut.strength || 0) + (hasModifierBonus ? previewBonus.strength : 0),
+                      speed: (baseNut.speed || 0) + (hasModifierBonus ? previewBonus.speed : 0),
+                      dexterity: (baseNut.dexterity || 0) + (hasModifierBonus ? previewBonus.dexterity : 0),
+                      defense: (baseNut.defense || 0) + (hasModifierBonus ? previewBonus.defense : 0),
+                      maxHp: (baseNut.maxHp || 0) + (hasModifierBonus ? previewBonus.maxHp : 0),
+                      water: (baseNut.water || 0) + (hasModifierBonus ? previewBonus.water : 0),
+                      food: (baseNut.food || 0) + (hasModifierBonus ? previewBonus.food : 0),
+                    };
+
+                    const nutParts = [];
+                    if (totalNut.hp) nutParts.push(`HP ${totalNut.hp > 0 ? `+${totalNut.hp}` : totalNut.hp}`);
+                    if (totalNut.strength) nutParts.push(`${language === 'en' ? 'STR' : '力量'} +${totalNut.strength}`);
+                    if (totalNut.speed) nutParts.push(`${language === 'en' ? 'SPD' : '速度'} +${totalNut.speed}`);
+                    if (totalNut.dexterity) nutParts.push(`${language === 'en' ? 'DEX' : '精巧'} +${totalNut.dexterity}`);
+                    if (totalNut.defense) nutParts.push(`${language === 'en' ? 'DEF' : '防禦'} +${totalNut.defense}`);
+                    if (totalNut.maxHp) nutParts.push(`${language === 'en' ? 'Max HP' : '最大HP'} +${totalNut.maxHp}`);
+                    if (totalNut.water) nutParts.push(`${language === 'en' ? 'Water' : '水分'} ${totalNut.water > 0 ? `+${totalNut.water}` : totalNut.water}`);
+                    if (totalNut.food) nutParts.push(`${language === 'en' ? 'Food' : '飽食'} ${totalNut.food > 0 ? `+${totalNut.food}` : totalNut.food}`);
+
+                    return (
+                      <div className="recipe-detail-row preview-box" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '6px 8px', background: 'rgba(255,255,255,0.04)', borderRadius: '6px', gap: '4px', marginTop: '2px' }}>
+                        <span className="recipe-detail-label">{language === 'en' ? 'Output:' : '產出預覽：'}</span>
+                        {effectiveOutputs.map((out, outIdx) => {
+                          const isPrimary = (outIdx === 0);
+                          const previewDbItem = items.find((i) => i.itemId === out.itemId);
+                          const baseItemName = previewDbItem ? getLocalizedName(previewDbItem, language) : (out.itemId || rec.name);
+                          const previewDisplayName = isPrimary && previewPrefix && language !== 'en'
+                            ? `${previewPrefix}・${baseItemName}`
+                            : (isPrimary && previewPrefixEn && language === 'en' ? `${previewPrefixEn} ${baseItemName}` : baseItemName);
+                          const outputQuantity = (out.quantity || 1) * craftQty;
+
+                          return (
+                            <div key={`${out.itemId}_${outIdx}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              {previewDbItem?.imageUrl && (
+                                <img src={previewDbItem.imageUrl} alt={previewDisplayName} style={{ width: '20px', height: '20px', objectFit: 'contain' }} />
+                              )}
+                              <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                                {previewDisplayName} x{outputQuantity}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {nutParts.length > 0 && (
+                          <div style={{ fontSize: '0.75rem', color: '#60a5fa' }}>
+                            <span>{language === 'en' ? 'Effect' : '效果'}: {nutParts.join(', ')}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {rec.energyCost ? (
                     <div className="recipe-detail-row">
                       <span className="recipe-detail-label">{language === 'en' ? 'Energy Cost:' : '精力消耗：'}</span>

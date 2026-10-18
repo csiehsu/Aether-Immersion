@@ -195,20 +195,55 @@ export const calculateEffectiveEnergyCost = (player, baseEnergyCost) => {
  * @param {number} [options.durability] - 耐久度數值。
  * @param {string} [options.quality] - 品質標籤。
  * @param {string} [options.instanceId] - 自訂實體識別碼。
+ * @param {string} [options.customName] - 自訂/詞綴中文名稱。
+ * @param {string} [options.customNameEn] - 自訂/詞綴英文名稱。
+ * @param {Object} [options.bonusNutrition] - 附加營養值物件。
  * @returns {Array<Object>} 更新後的背包陣列。
  */
 export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}) => {
   const addQty = Math.max(1, Number(count) || 1);
   const updated = [...inventory];
-  const existingIdx = updated.findIndex((i) => i.itemId === itemId);
+  const targetCustomName = options.customName || '';
+  const targetCustomNameEn = options.customNameEn || '';
+  const targetBonus = options.bonusNutrition;
+
+  const existingIdx = updated.findIndex((i) => {
+    if (i.itemId !== itemId) return false;
+    if ((i.customName || '') !== targetCustomName) return false;
+
+    if (options.durability !== undefined) {
+      const oldDur = i.durability !== undefined && i.durability > 0 ? i.durability : -1;
+      const newDur = options.durability > 0 ? options.durability : -1;
+      if (oldDur <= 0 && newDur <= 0) return true;
+      if (oldDur > 0 && newDur > 0) {
+        return newDur >= oldDur * 0.9 && newDur <= oldDur * 1.1;
+      }
+      return false;
+    }
+    return true;
+  });
 
   if (existingIdx >= 0) {
-    updated[existingIdx] = {
-      ...updated[existingIdx],
-      count: (updated[existingIdx].count || 1) + addQty,
-      ...(options.durability !== undefined ? { durability: options.durability } : {}),
+    const existing = updated[existingIdx];
+    const oldCount = existing.count || 1;
+    const newTotalCount = oldCount + addQty;
+    const updatedItem = {
+      ...existing,
+      count: newTotalCount,
+      ...(targetCustomName ? { customName: targetCustomName, customNameEn: targetCustomNameEn } : {}),
+      ...(targetBonus ? { bonusNutrition: targetBonus } : {}),
       ...(options.quality ? { quality: options.quality } : {}),
     };
+
+    if (existing.durability !== undefined && existing.durability > 0 && options.durability !== undefined && options.durability > 0) {
+      updatedItem.durability = Math.round(
+        (existing.durability * oldCount + options.durability * addQty) / newTotalCount
+      );
+    } else if (options.durability !== undefined) {
+      updatedItem.durability = options.durability;
+    }
+
+    updated[existingIdx] = updatedItem;
   } else {
     updated.push({
       instanceId: options.instanceId || generateInstanceId(),
@@ -216,6 +251,8 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
       count: addQty,
       durability: options.durability !== undefined ? options.durability : -1,
       quality: options.quality || '普通',
+      ...(targetCustomName ? { customName: targetCustomName, customNameEn: targetCustomNameEn } : {}),
+      ...(targetBonus ? { bonusNutrition: targetBonus } : {}),
     });
   }
 

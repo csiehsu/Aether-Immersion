@@ -14,6 +14,18 @@ const InventoryItemSchema = new mongoose.Schema(
     count: { type: Number, default: 1 },
     durability: { type: Number, default: -1 },
     quality: { type: String, default: '普通' },
+    customName: { type: String, default: '' },
+    customNameEn: { type: String, default: '' },
+    bonusNutrition: {
+      hp: { type: Number, default: 0 },
+      strength: { type: Number, default: 0 },
+      speed: { type: Number, default: 0 },
+      dexterity: { type: Number, default: 0 },
+      defense: { type: Number, default: 0 },
+      maxHp: { type: Number, default: 0 },
+      water: { type: Number, default: 0 },
+      food: { type: Number, default: 0 },
+    },
   },
   { _id: false }
 );

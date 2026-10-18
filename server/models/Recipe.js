@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const ItemRequirementSchema = new mongoose.Schema(
   {
+    role: { type: String, enum: ['base', 'modifier', 'default'], default: 'default' },
     type: { type: String, required: false },
     itemId: { type: String, required: false },
     quantity: { type: Number, default: 1 },
@@ -19,6 +20,8 @@ const RecipeSchema = new mongoose.Schema(
     requiredToolTypes: [{ type: String }],
     durabilityFormula: { type: String, default: '' },
     energyCost: { type: Number, default: 0 },
+    outputs: { type: mongoose.Schema.Types.Mixed, default: {} },
+    modifiers: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );

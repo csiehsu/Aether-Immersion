@@ -16,25 +16,25 @@ export const InventoryPanel = () => {
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
-  const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedItemKey, setSelectedItemKey] = useState(null);
   const [useQty, setUseQty] = useState(1);
 
   /**
    * 選取或取消選取背包中的道具。
-   * @param {string} itemId - 道具識別碼。
+   * @param {string} key - 道具實體識別碼或鍵值。
    */
-  const handleSelectItem = (itemId) => {
-    if (selectedItemId === itemId) {
-      setSelectedItemId(null);
+  const handleSelectItem = (key) => {
+    if (selectedItemKey === key) {
+      setSelectedItemKey(null);
       setUseQty(1);
     } else {
-      setSelectedItemId(itemId);
+      setSelectedItemKey(key);
       setUseQty(1);
     }
   };
 
   const selectedItem = inventory.find(
-    (item) => item.itemId === selectedItemId
+    (item, idx) => (item.instanceId || `${item.itemId}_${idx}`) === selectedItemKey
   );
 
   return (
@@ -47,18 +47,20 @@ export const InventoryPanel = () => {
         <div className="inventory-panel-wrapper">
           <div className="inventory-grid">
             {inventory.map((item, idx) => {
-              const itemId = item.itemId;
+              const itemKey = item.instanceId || `${item.itemId}_${idx}`;
               const dbItem = items.find((i) => i.itemId === item.itemId);
-              const itemName = dbItem ? getLocalizedName(dbItem, language) : item.itemId;
+              const itemName = (language === 'en' && item.customNameEn)
+                ? item.customNameEn
+                : (item.customName || (dbItem ? getLocalizedName(dbItem, language) : item.itemId));
               const imageUrl = dbItem?.imageUrl;
               const quality = item.quality || '普通';
-              const isSelected = selectedItemId === itemId;
+              const isSelected = selectedItemKey === itemKey;
 
               return (
                 <div
-                  key={`${itemId}_${idx}`}
+                  key={itemKey}
                   className={`inventory-item-card quality-${quality} ${isSelected ? 'selected' : ''}`}
-                  onClick={() => handleSelectItem(itemId)}
+                  onClick={() => handleSelectItem(itemKey)}
                 >
                   <div className="item-icon-box">
                     {imageUrl ? (
@@ -83,17 +85,28 @@ export const InventoryPanel = () => {
               ? selectedItem.durability
               : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
 
+            const baseNutrition = dbItem?.nutrition || {};
+            const bonusNutrition = selectedItem.bonusNutrition || {};
+            const totalNutrition = {
+              hp: (baseNutrition.hp || 0) + (bonusNutrition.hp || 0),
+              strength: (baseNutrition.strength || 0) + (bonusNutrition.strength || 0),
+              speed: (baseNutrition.speed || 0) + (bonusNutrition.speed || 0),
+              dexterity: (baseNutrition.dexterity || 0) + (bonusNutrition.dexterity || 0),
+              defense: (baseNutrition.defense || 0) + (bonusNutrition.defense || 0),
+              maxHp: (baseNutrition.maxHp || 0) + (bonusNutrition.maxHp || 0),
+              water: (baseNutrition.water || 0) + (bonusNutrition.water || 0),
+              food: (baseNutrition.food || 0) + (bonusNutrition.food || 0),
+            };
+
             const hasNutrition = Boolean(
-              dbItem?.nutrition && (
-                dbItem.nutrition.hp !== 0 ||
-                dbItem.nutrition.strength !== 0 ||
-                dbItem.nutrition.dexterity !== 0 ||
-                dbItem.nutrition.speed !== 0 ||
-                dbItem.nutrition.defense !== 0 ||
-                dbItem.nutrition.maxHp !== 0 ||
-                dbItem.nutrition.water !== 0 ||
-                dbItem.nutrition.food !== 0
-              )
+              totalNutrition.hp !== 0 ||
+              totalNutrition.strength !== 0 ||
+              totalNutrition.dexterity !== 0 ||
+              totalNutrition.speed !== 0 ||
+              totalNutrition.defense !== 0 ||
+              totalNutrition.maxHp !== 0 ||
+              totalNutrition.water !== 0 ||
+              totalNutrition.food !== 0
             );
 
             return (
@@ -111,7 +124,7 @@ export const InventoryPanel = () => {
                   </div>
                 )}
                 {hasNutrition && (() => {
-                  const n = dbItem.nutrition || {};
+                  const n = totalNutrition;
                   const parts = [];
                   if (n.hp) parts.push(`HP ${n.hp > 0 ? `+${n.hp}` : n.hp}`);
                   if (n.strength) parts.push(`${language === 'en' ? 'STR' : '力量'} +${n.strength}`);
@@ -140,7 +153,7 @@ export const InventoryPanel = () => {
                       className="btn-use-item"
                       onClick={async (e) => {
                         e.stopPropagation();
-                        await consumeItem(selectedItem.itemId, useQty);
+                        await consumeItem(selectedItem.instanceId || selectedItem.itemId, useQty);
                       }}
                     >
                       {t.useBtn || (language === 'en' ? 'Use' : '使用')}

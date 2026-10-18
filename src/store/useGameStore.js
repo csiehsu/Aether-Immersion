@@ -772,8 +772,8 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 使用/消耗背包中的道具：累加道具營養值 (nutrition) 至玩家各項能力值（包含 water 與 food），並扣除道具數量。
-   * @param {string} inventoryItemId - 背包中欲使用的道具識別碼。
+   * 使用/消耗背包中的道具：累加道具營養值 (包含基礎營養與自訂附加營養) 至玩家各項能力值（包含 water 與 food），並扣除道具數量。
+   * @param {string} inventoryItemId - 背包中欲使用的道具實體或識別碼。
    * @param {number} [qty=1] - 使用數量。
    * @returns {Promise<boolean>} 使用成功回傳 true，未找到道具或失敗回傳 false。
    */
@@ -782,7 +782,7 @@ export const useGameStore = create((set, get) => ({
     if (!player || !inventoryItemId) return false;
 
     const invIndex = inventory.findIndex(
-      (i) => i.itemId === inventoryItemId
+      (i) => i.instanceId === inventoryItemId || i.itemId === inventoryItemId
     );
     if (invIndex < 0) return false;
 
@@ -795,14 +795,15 @@ export const useGameStore = create((set, get) => ({
     const useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
 
     const nutrition = dbItem?.nutrition || {};
-    const hpGain = (nutrition.hp || 0) * useCount;
-    const strGain = (nutrition.strength || 0) * useCount;
-    const spdGain = (nutrition.speed || 0) * useCount;
-    const dexGain = (nutrition.dexterity || 0) * useCount;
-    const defGain = (nutrition.defense || 0) * useCount;
-    const maxHpGain = (nutrition.maxHp || 0) * useCount;
-    const waterGain = (nutrition.water || 0) * useCount;
-    const foodGain = (nutrition.food || 0) * useCount;
+    const bonus = invItem.bonusNutrition || {};
+    const hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
+    const strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
+    const spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
+    const dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
+    const defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
+    const maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
+    const waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
+    const foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
 
     // Retrieve baseline current stats from player (stats are baseline, never overwritten by item nutrition)
     const currentStats = player.stats || {};
@@ -861,8 +862,8 @@ export const useGameStore = create((set, get) => ({
       inventory: updatedInv,
     }));
 
-    const itemName = dbItem ? dbItem.name : invItem.itemId;
-    const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId;
+    const itemName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
+    const itemNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
 
     const effects = [];
     const effectsEn = [];
@@ -939,7 +940,7 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 向指定 NPC 購買商品：扣除金錢並新增道具至背包。
+   * 向指定 NPC 購買商品：扣除金錢並新增道具至背包，若購買的是工具則自動解鎖對應可製作配方。
    * @param {Object} npc - 交易 NPC 物件。
    * @param {string} itemId - 購買道具識別碼。
    * @param {number} price - 單價。
@@ -947,7 +948,7 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 購買成功回傳 true，金錢不足或無效參數回傳 false。
    */
   performBuy: async (npc, itemId, price, qty = 1) => {
-    const { player, inventory } = get();
+    const { player, inventory, items, recipes } = get();
     if (!player || !npc || !itemId) return false;
 
     const buyQty = Math.max(1, Number(qty) || 1);
@@ -959,13 +960,54 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
 
+    const boughtDbItem = items.find((i) => i.itemId === itemId);
+    const boughtItemTypes = boughtDbItem && boughtDbItem.type
+      ? (Array.isArray(boughtDbItem.type) ? boughtDbItem.type : [boughtDbItem.type])
+      : [];
+
     const newMoney = currentMoney - totalCost;
     const updatedInv = addItemsToInventory(inventory, itemId, buyQty);
+
+    // 檢查購買工具是否可解鎖對應製作配方
+    const currentUnlocked = Array.isArray(player.unlockedRecipes) ? [...player.unlockedRecipes] : [];
+    const newlyUnlockedRecipes = [];
+
+    if (boughtItemTypes.length > 0) {
+      for (const recipe of recipes) {
+        const rId = recipe.recipeId || recipe.id;
+        const alreadyUnlocked = currentUnlocked.some((ur) => {
+          return typeof ur === 'string' ? ur === rId : ur?.recipeId === rId;
+        });
+        if (!alreadyUnlocked) {
+          const reqTools = recipe.requiredToolTypes || [];
+          const matchesTool = reqTools.some((t) => boughtItemTypes.includes(t));
+          if (matchesTool) {
+            newlyUnlockedRecipes.push(recipe);
+            currentUnlocked.push({ recipeId: rId });
+          }
+        }
+      }
+    }
+
+    if (newlyUnlockedRecipes.length > 0) {
+      const namesZh = newlyUnlockedRecipes.map((r) => r.name).join('、');
+      const namesEn = newlyUnlockedRecipes.map((r) => r.nameEn || r.name).join(', ');
+      const toolNameZh = boughtDbItem?.name || itemId;
+      const toolNameEn = boughtDbItem?.nameEn || boughtDbItem?.name || itemId;
+      get().addLog(
+        '配方系統',
+        'Recipe System',
+        `購買了【${toolNameZh}】，領悟了新配方：【${namesZh}】！`,
+        `Purchased [${toolNameEn}], unlocked new recipe(s): [${namesEn}]!`,
+        'event'
+      );
+    }
 
     set((state) => ({
       player: {
         ...state.player,
         money: newMoney,
+        unlockedRecipes: currentUnlocked,
       },
       inventory: updatedInv,
     }));
@@ -977,6 +1019,7 @@ export const useGameStore = create((set, get) => ({
         body: JSON.stringify({
           money: newMoney,
           inventory: updatedInv,
+          unlockedRecipes: currentUnlocked,
         }),
       });
       if (res.ok) {
