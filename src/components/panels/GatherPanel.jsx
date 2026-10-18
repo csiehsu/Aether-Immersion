@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
-import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
+import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
   getActiveQuestForNpc,
@@ -540,7 +540,7 @@ export const GatherPanel = () => {
                   (t) => locBuildingTypes.includes(t) || invToolTypes.includes(t)
                 );
 
-                const currentEnergy = player?.energy ?? 0;
+                const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
                 const hasEnergy = currentEnergy >= totalCost;
                 const isComatose = isPlayerComatose(player);
                 const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy;
@@ -555,18 +555,39 @@ export const GatherPanel = () => {
                   ? (t.notEnoughEnergy || '精力不足')
                   : t.gatherBtn;
 
+                const spotSkill = spot.skillType || (
+                  nonConsumableReqs.includes('MINING_TOOL')
+                    ? 'MINING'
+                    : (reqTools.includes('FISHING_NET') || reqTools.includes('LANDING_NET')
+                      ? 'FISHING'
+                      : 'GATHERING')
+                );
+                const skillObj = player?.lifeSkills?.[spotSkill] || { level: 1, exp: 0 };
+                const skillNames = {
+                  GATHERING: { name: language === 'en' ? 'Gathering' : '採集', icon: '🌿' },
+                  FISHING: { name: language === 'en' ? 'Fishing' : '釣魚', icon: '🎣' },
+                  MINING: { name: language === 'en' ? 'Mining' : '挖礦', icon: '⛏️' },
+                };
+                const currentSkillInfo = skillNames[spotSkill] || { name: language === 'en' ? 'Gathering' : '採集', icon: '🌿' };
+                const reqExp = getRequiredExpForNextLevel(skillObj.level);
+
                 return (
                   <div className="gather-detail-window">
                     <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                      <span className="gather-cost">
-                        {t.costEnergy}: -{totalCost}
-                        {totalCost < baseTotalCost && (
-                          <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
-                        )}
-                        {totalCost > baseTotalCost && (
-                          <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
-                        )}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span className="gather-cost">
+                          {t.costEnergy}: -{totalCost}
+                          {totalCost < baseTotalCost && (
+                            <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
+                          )}
+                          {totalCost > baseTotalCost && (
+                            <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
+                          )}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
+                          {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
+                        </span>
+                      </div>
                       <QuantitySelector
                         value={gatherQty}
                         onChange={setGatherQty}

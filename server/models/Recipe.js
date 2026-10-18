@@ -22,6 +22,9 @@ const RecipeSchema = new mongoose.Schema(
     energyCost: { type: Number, default: 0 },
     outputs: { type: mongoose.Schema.Types.Mixed, default: {} },
     modifiers: { type: mongoose.Schema.Types.Mixed, default: {} },
+    baseExp: { type: Number, default: 0 },
+    ingredientExp: { type: mongoose.Schema.Types.Mixed, default: {} },
+    skillType: { type: String, default: 'COOKING' },
   },
   { timestamps: true }
 );

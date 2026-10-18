@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGameStore, translations } from '../store/useGameStore';
-import { isPlayerComatose, getStatusEffects } from '../utils/gameHelpers';
+import { isPlayerComatose, getStatusEffects, getRequiredExpForNextLevel } from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
 
@@ -26,8 +26,9 @@ export const TopHUD = () => {
   const maxHp = player?.stats?.maxHp ?? player?.maxHp ?? 100;
   const maxEnergy = player?.maxEnergy ?? 4320;
   const hpPercent = player ? Math.min(100, Math.max(0, (player.hp / maxHp) * 100)) : 0;
-  const energyPercent = player ? Math.min(100, Math.max(0, (player.energy / maxEnergy) * 100)) : 0;
-  const isFullEnergy = (player?.energy ?? 0) >= maxEnergy;
+  const displayEnergy = player?.energy != null ? Math.round(player.energy * 10) / 10 : 0;
+  const energyPercent = player ? Math.min(100, Math.max(0, (displayEnergy / maxEnergy) * 100)) : 0;
+  const isFullEnergy = displayEnergy >= maxEnergy;
   const isComatose = isPlayerComatose(player);
 
   const statusEffects = player ? getStatusEffects(player) : [];
@@ -182,6 +183,41 @@ export const TopHUD = () => {
                     <span className="stat-value">{player?.stats?.food ?? MAX_FOOD}</span>
                   </div>
                 </div>
+
+                <div className="player-details-skills-section" style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600, marginBottom: '6px' }}>
+                    {language === 'en' ? 'Life Skills' : '生活技能'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {[
+                      { key: 'GATHERING', icon: '🌿', nameZh: '採集', nameEn: 'Gathering' },
+                      { key: 'FISHING', icon: '🎣', nameZh: '釣魚', nameEn: 'Fishing' },
+                      { key: 'MINING', icon: '⛏️', nameZh: '挖礦', nameEn: 'Mining' },
+                      { key: 'COOKING', icon: '🍳', nameZh: '料理', nameEn: 'Cooking' },
+                    ].map((s) => {
+                      const skillData = player?.lifeSkills?.[s.key] || { level: 1, exp: 0 };
+                      const reqExp = getRequiredExpForNextLevel(skillData.level);
+                      const percent = Math.min(100, Math.max(0, (skillData.exp / reqExp) * 100));
+                      const skillName = language === 'en' ? s.nameEn : s.nameZh;
+
+                      return (
+                        <div key={s.key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
+                            <span style={{ color: '#e2e8f0', fontWeight: 500 }}>
+                              {s.icon} {skillName} <strong style={{ color: '#38bdf8' }}>LV.{skillData.level}</strong>
+                            </span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                              {skillData.exp} / {reqExp}
+                            </span>
+                          </div>
+                          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div style={{ width: `${percent}%`, height: '100%', background: '#38bdf8', transition: 'width 0.3s ease' }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -295,7 +331,7 @@ export const TopHUD = () => {
                 </span>
               )}
             </span>
-            <span className="bar-val">{player?.energy ?? 0} / {maxEnergy}</span>
+            <span className="bar-val">{displayEnergy} / {maxEnergy}</span>
           </div>
           <div className="bar-track">
             <div className="bar-fill energy-fill" style={{ width: `${energyPercent}%` }}></div>

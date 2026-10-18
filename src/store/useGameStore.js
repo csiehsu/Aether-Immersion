@@ -251,6 +251,12 @@ export const useGameStore = create((set, get) => ({
           knownLocations: Array.isArray(dbP.knownLocations) ? dbP.knownLocations : (state.player?.knownLocations || []),
           quests: Array.isArray(dbP.quests) ? dbP.quests : (state.player?.quests || []),
           unlockedRecipes: Array.isArray(dbP.unlockedRecipes) ? dbP.unlockedRecipes : (state.player?.unlockedRecipes || []),
+          lifeSkills: dbP.lifeSkills || state.player?.lifeSkills || {
+            GATHERING: { level: 1, exp: 0 },
+            FISHING: { level: 1, exp: 0 },
+            MINING: { level: 1, exp: 0 },
+            COOKING: { level: 1, exp: 0 },
+          },
         },
       };
     });
@@ -499,14 +505,15 @@ export const useGameStore = create((set, get) => ({
     const connection = currentLoc?.connections?.find((c) => c.targetLocationId === targetLocId);
     const baseCost = connection?.energyCost ?? 1;
     const cost = calculateEffectiveEnergyCost(player, baseCost);
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
 
-    if (player.energy < cost) {
+    if (currentEnergy < cost) {
       return;
     }
 
     const maxEnergy = player.maxEnergy ?? 4320;
     const wasFull = (player.energy ?? 0) >= maxEnergy;
-    const newEnergy = Math.max(0, player.energy - cost);
+    const newEnergy = Math.round(Math.max(0, player.energy - cost) * 10) / 10;
     const newLastRecoveredAt = (wasFull && newEnergy < maxEnergy)
       ? new Date().toISOString()
       : player.lastEnergyRecoveredAt;
@@ -577,7 +584,7 @@ export const useGameStore = create((set, get) => ({
     const baseTotalCost = cost * addQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
 
-    const currentEnergy = player.energy ?? 0;
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < totalCost) {
       return false;
     }
@@ -642,7 +649,7 @@ export const useGameStore = create((set, get) => ({
 
     const maxEnergy = player.maxEnergy ?? 4320;
     const wasFull = currentEnergy >= maxEnergy;
-    const newEnergy = Math.max(0, currentEnergy - totalCost);
+    const newEnergy = Math.round(Math.max(0, currentEnergy - totalCost) * 10) / 10;
     const newLastRecoveredAt = (wasFull && newEnergy < maxEnergy)
       ? new Date().toISOString()
       : player.lastEnergyRecoveredAt;
@@ -732,7 +739,7 @@ export const useGameStore = create((set, get) => ({
 
     const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
     const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
-    const currentEnergy = player.energy ?? 0;
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < energyCost) {
       return false;
     }
@@ -1426,7 +1433,7 @@ export const useGameStore = create((set, get) => ({
     const { player } = get();
     if (!player) return;
     const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
-    const currentEnergy = player.energy ?? maxEnergy;
+    const currentEnergy = Math.round((player.energy ?? maxEnergy) * 10) / 10;
     const now = Date.now();
     const lastRecoveredTime = player.lastEnergyRecoveredAt
       ? new Date(player.lastEnergyRecoveredAt).getTime()
@@ -1452,7 +1459,7 @@ export const useGameStore = create((set, get) => ({
     }
 
     const addedEnergy = intervals * RECOVERY_AMOUNT;
-    const newEnergy = Math.min(maxEnergy, currentEnergy + addedEnergy);
+    const newEnergy = Math.min(maxEnergy, Math.round((currentEnergy + addedEnergy) * 10) / 10);
     const newLastRecoveredAt = newEnergy >= maxEnergy
       ? new Date(now).toISOString()
       : new Date(lastRecoveredTime + intervals * INTERVAL_MS).toISOString();

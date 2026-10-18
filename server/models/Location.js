@@ -6,6 +6,8 @@ const GatherableSchema = new mongoose.Schema(
     cost: { type: Number, default: 1 },
     chance: { type: Number, default: 100 },
     requiredToolTypes: [{ type: String }],
+    skillType: { type: String, default: '' },
+    expPerUnit: { type: Number, default: 0 },
   },
   { _id: false }
 );

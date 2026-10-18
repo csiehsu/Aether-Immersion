@@ -31,6 +31,7 @@ import {
   MAX_ENERGY,
   DEFAULT_INITIAL_STATS,
 } from '../../src/constants/gameConstants.js';
+import { addLifeSkillExp } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
 
@@ -217,6 +218,24 @@ const formatPlayerResponse = (playerDoc) => {
   p.skills = Array.isArray(p.skills) && p.skills.length > 0
     ? p.skills
     : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
+  p.lifeSkills = {
+    GATHERING: {
+      level: p.lifeSkills?.GATHERING?.level || 1,
+      exp: p.lifeSkills?.GATHERING?.exp || 0,
+    },
+    FISHING: {
+      level: p.lifeSkills?.FISHING?.level || 1,
+      exp: p.lifeSkills?.FISHING?.exp || 0,
+    },
+    MINING: {
+      level: p.lifeSkills?.MINING?.level || 1,
+      exp: p.lifeSkills?.MINING?.exp || 0,
+    },
+    COOKING: {
+      level: p.lifeSkills?.COOKING?.level || 1,
+      exp: p.lifeSkills?.COOKING?.exp || 0,
+    },
+  };
   p.money = p.money ?? 0;
   p.mentor = p.mentor || 'Martha';
   p.unlockedRecipes = sanitizeUnlockedRecipes(p.unlockedRecipes);
@@ -360,6 +379,17 @@ router.get('/player', async (req, res) => {
         }
       }
 
+      if (!player.lifeSkills || !player.lifeSkills.GATHERING) {
+        player.lifeSkills = {
+          GATHERING: { level: 1, exp: 0 },
+          FISHING: { level: 1, exp: 0 },
+          MINING: { level: 1, exp: 0 },
+          COOKING: { level: 1, exp: 0 },
+        };
+        player.markModified('lifeSkills');
+        updated = true;
+      }
+
       if (updated) {
         player.markModified('knownLocations');
         await player.save();
@@ -487,11 +517,13 @@ router.put('/player', async (req, res) => {
       settleEnergyRecovery(player);
 
       if (typeof updateData.energy === 'number') {
+        const roundedEnergy = Math.round(updateData.energy * 10) / 10;
         const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
         const wasFull = (player.energy ?? 0) >= maxEnergy;
-        if (wasFull && updateData.energy < maxEnergy && !updateData.lastEnergyRecoveredAt) {
+        if (wasFull && roundedEnergy < maxEnergy && !updateData.lastEnergyRecoveredAt) {
           player.lastEnergyRecoveredAt = new Date();
         }
+        updateData.energy = roundedEnergy;
       }
       if (updateData.lastEnergyRecoveredAt) {
         player.lastEnergyRecoveredAt = new Date(updateData.lastEnergyRecoveredAt);
@@ -510,6 +542,14 @@ router.put('/player', async (req, res) => {
         };
         player.markModified('stats');
         delete updateData.stats;
+      }
+      if (updateData.lifeSkills) {
+        player.lifeSkills = {
+          ...player.lifeSkills?.toObject(),
+          ...updateData.lifeSkills,
+        };
+        player.markModified('lifeSkills');
+        delete updateData.lifeSkills;
       }
       Object.assign(player, updateData);
       if (updateData.quests) {
@@ -563,7 +603,8 @@ router.post('/player/gather', async (req, res) => {
     const unitCost = spot.cost ?? 1;
     const baseTotalCost = unitCost * addQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
-    if (player.energy < totalCost) {
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
+    if (currentEnergy < totalCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
@@ -632,12 +673,41 @@ router.post('/player/gather', async (req, res) => {
 
     const maxEnergy = player.maxEnergy ?? 4320;
     const wasFull = player.energy >= maxEnergy;
-    player.energy = Math.max(0, player.energy - totalCost);
+    player.energy = Math.round(Math.max(0, player.energy - totalCost) * 10) / 10;
     if (wasFull && player.energy < maxEnergy) {
       player.lastEnergyRecoveredAt = new Date();
     }
     applyEnergyConsumption(player, totalCost);
     player.markModified('stats');
+
+    // 結算生活技能經驗（採集、釣魚、挖礦）
+    const spotSkill = spot.skillType || (
+      requiredToolTypes.includes('MINING_TOOL')
+        ? 'MINING'
+        : (requiredToolTypes.includes('FISHING_NET') || requiredToolTypes.includes('LANDING_NET')
+          ? 'FISHING'
+          : 'GATHERING')
+    );
+
+    if (spotSkill) {
+      if (!player.lifeSkills) {
+        player.lifeSkills = {
+          GATHERING: { level: 1, exp: 0 },
+          FISHING: { level: 1, exp: 0 },
+          MINING: { level: 1, exp: 0 },
+          COOKING: { level: 1, exp: 0 },
+        };
+      }
+      const currentSkill = player.lifeSkills[spotSkill] || { level: 1, exp: 0 };
+      const expPerUnit = Number(spot.expPerUnit) || 0;
+      const expToAdd = expPerUnit > 0 ? (expPerUnit * addQty) : (spot.cost || 1) * addQty;
+      const updatedSkill = addLifeSkillExp(currentSkill, expToAdd);
+      player.lifeSkills[spotSkill] = {
+        level: updatedSkill.level,
+        exp: updatedSkill.exp,
+      };
+      player.markModified('lifeSkills');
+    }
 
     const existingItem = player.inventory.find((i) => i.itemId === itemId);
     if (existingItem) {
@@ -693,13 +763,14 @@ router.post('/player/travel', async (req, res) => {
 
     const baseEnergyCost = connection.energyCost ?? 1;
     const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
-    if (player.energy < energyCost) {
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
+    if (currentEnergy < energyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
     const maxEnergy = player.maxEnergy ?? 4320;
     const wasFull = player.energy >= maxEnergy;
-    player.energy = Math.max(0, player.energy - energyCost);
+    player.energy = Math.round(Math.max(0, player.energy - energyCost) * 10) / 10;
     if (wasFull && player.energy < maxEnergy) {
       player.lastEnergyRecoveredAt = new Date();
     }
@@ -796,7 +867,8 @@ router.post('/player/craft', async (req, res) => {
 
     const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
     const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
-    if ((player.energy ?? 0) < totalEnergyCost) {
+    const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
+    if (currentEnergy < totalEnergyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
@@ -1053,7 +1125,7 @@ router.post('/player/craft', async (req, res) => {
 
     const maxEnergy = player.maxEnergy ?? 4320;
     const wasFull = player.energy >= maxEnergy;
-    player.energy = Math.max(0, player.energy - totalEnergyCost);
+    player.energy = Math.round(Math.max(0, player.energy - totalEnergyCost) * 10) / 10;
     if (wasFull && player.energy < maxEnergy) {
       player.lastEnergyRecoveredAt = new Date();
     }
@@ -1064,6 +1136,38 @@ router.post('/player/craft', async (req, res) => {
     if (hasQuestUpdate) {
       player.quests = updatedQuests;
       player.markModified('quests');
+    }
+
+    // 結算生活技能經驗（料理）
+    const craftSkill = recipe.skillType || 'COOKING';
+    if (craftSkill) {
+      if (!player.lifeSkills) {
+        player.lifeSkills = {
+          GATHERING: { level: 1, exp: 0 },
+          FISHING: { level: 1, exp: 0 },
+          MINING: { level: 1, exp: 0 },
+          COOKING: { level: 1, exp: 0 },
+        };
+      }
+      const currentSkill = player.lifeSkills[craftSkill] || { level: 1, exp: 0 };
+      const baseExp = Number(recipe.baseExp) || 0;
+      let materialBonusExp = 0;
+      if (recipe.ingredientExp && typeof recipe.ingredientExp === 'object') {
+        Object.values(selectedMaterials).forEach((matId) => {
+          if (matId && recipe.ingredientExp[matId]) {
+            materialBonusExp += Number(recipe.ingredientExp[matId]) || 0;
+          }
+        });
+      }
+      const totalExpToAdd = (baseExp + materialBonusExp) * numCraftQty;
+      if (totalExpToAdd > 0) {
+        const updatedSkill = addLifeSkillExp(currentSkill, totalExpToAdd);
+        player.lifeSkills[craftSkill] = {
+          level: updatedSkill.level,
+          exp: updatedSkill.exp,
+        };
+        player.markModified('lifeSkills');
+      }
     }
 
     await player.save();

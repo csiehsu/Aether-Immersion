@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -170,17 +170,25 @@ export const CraftPanel = () => {
 
             const baseEnergyCost = (rec.energyCost || 0) * craftQty;
             const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
-            const hasEnergy = (player?.energy ?? 0) >= totalEnergyCost;
+            const hasEnergy = (Math.round((player?.energy ?? 0) * 10) / 10) >= totalEnergyCost;
             const isComatose = isPlayerComatose(player);
             const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
 
+            const craftSkill = rec.skillType || 'COOKING';
+            const skillObj = player?.lifeSkills?.[craftSkill] || { level: 1, exp: 0 };
+            const reqExp = getRequiredExpForNextLevel(skillObj.level);
+            const skillName = craftSkill === 'COOKING' ? (language === 'en' ? 'Cooking' : '料理') : craftSkill;
+
             return (
               <div className="recipe-detail-window">
-                {rec.level ? (
-                  <div className="recipe-detail-header">
+                <div className="recipe-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  {rec.level ? (
                     <span className="recipe-level">{t.reqLevel} LV.{rec.level}</span>
-                  </div>
-                ) : null}
+                  ) : <span />}
+                  <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
+                    🍳 {skillName} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
+                  </span>
+                </div>
 
                 <div className="recipe-detail-body">
                   {reqItemsList.map((req, reqIdx) => {

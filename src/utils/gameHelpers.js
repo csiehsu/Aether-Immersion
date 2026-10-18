@@ -277,3 +277,44 @@ export const calculateCombatTurn = (attacker = {}, defender = {}) => {
 
   return { isHit, damage, hitRate, atkSpeed, defSpeed, atkStr, defDef };
 };
+
+/**
+ * 取得生活技能升至下一級所需的經驗值門檻。
+ * 規則：每級門檻 = level * 100（例：LV.1 需 100，LV.2 需 200，LV.3 需 300）。
+ * @param {number} level - 當前技能等級。
+ * @returns {number} 升級所需經驗值。
+ */
+export const getRequiredExpForNextLevel = (level = 1) => {
+  return Math.max(1, Math.floor(Number(level) || 1)) * 100;
+};
+
+/**
+ * 累加生活技能經驗值，並處理升級與溢出經驗值結算。
+ * @param {{ level: number, exp: number }} skillObj - 技能資料物件。
+ * @param {number} expToAdd - 獲得的經驗值點數。
+ * @returns {{ level: number, exp: number, leveledUp: boolean, levelsGained: number }} 更新後的技能狀態。
+ */
+export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
+  let currentLevel = Math.max(1, Number(skillObj?.level) || 1);
+  let currentExp = Math.max(0, Number(skillObj?.exp) || 0) + Math.max(0, Number(expToAdd) || 0);
+  let levelsGained = 0;
+
+  while (true) {
+    const reqExp = getRequiredExpForNextLevel(currentLevel);
+    if (currentExp >= reqExp) {
+      currentExp -= reqExp;
+      currentLevel += 1;
+      levelsGained += 1;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    level: currentLevel,
+    exp: currentExp,
+    leveledUp: levelsGained > 0,
+    levelsGained,
+  };
+};
+

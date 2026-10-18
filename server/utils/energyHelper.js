@@ -57,7 +57,7 @@ export const settleEnergyRecovery = (player) => {
     return false;
   }
 
-  const currentEnergy = player.energy ?? maxEnergy;
+  const currentEnergy = Math.round((player.energy ?? maxEnergy) * 10) / 10;
 
   // 若目前精力已達上限，重設基準時間為現在，避免滿精力期間溢補週期
   if (currentEnergy >= maxEnergy) {
@@ -69,7 +69,7 @@ export const settleEnergyRecovery = (player) => {
   if (intervals <= 0) return false;
 
   const addedEnergy = intervals * ENERGY_RECOVERY_AMOUNT;
-  const newEnergy = Math.min(maxEnergy, currentEnergy + addedEnergy);
+  const newEnergy = Math.min(maxEnergy, Math.round((currentEnergy + addedEnergy) * 10) / 10);
   player.energy = newEnergy;
 
   if (newEnergy >= maxEnergy) {
