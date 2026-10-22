@@ -83,6 +83,7 @@ export const translations = {
     statusFamishedDehydratedDesc: '飽食與水分皆低於 30%：行動精力消耗 +20%',
     overburdened: '負重超載',
     weight: '重量',
+    gatherAttempts: '採集次數：',
   },
   'en': {
     brand: 'Aether Immersion',
@@ -168,6 +169,7 @@ export const translations = {
     statusFamishedDehydratedDesc: 'Food and Water < 30%: Action energy cost +20%',
     overburdened: 'Overburdened',
     weight: 'Weight',
+    gatherAttempts: 'Attempts:',
   },
 };
 

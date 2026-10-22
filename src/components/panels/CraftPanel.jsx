@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -236,7 +236,7 @@ export const CraftPanel = () => {
                     <span className="recipe-level">{t.reqLevel} LV.{rec.level}</span>
                   ) : <span />}
                   <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
-                    🍳 {skillName} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
+                    🍳 {skillName} LV.{skillObj.level} ({roundExp(skillObj.exp)}/{reqExp} EXP)
                   </span>
                 </div>
 

@@ -33,6 +33,7 @@ import {
 } from '../../src/constants/gameConstants.js';
 import {
   addLifeSkillExp,
+  roundExp,
   addItemToPlacedItems,
   addItemsToInventory,
   isPlayerOverburdened,
@@ -232,19 +233,19 @@ const formatPlayerResponse = (playerDoc) => {
   p.lifeSkills = {
     GATHERING: {
       level: p.lifeSkills?.GATHERING?.level || 1,
-      exp: p.lifeSkills?.GATHERING?.exp || 0,
+      exp: roundExp(p.lifeSkills?.GATHERING?.exp || 0),
     },
     FISHING: {
       level: p.lifeSkills?.FISHING?.level || 1,
-      exp: p.lifeSkills?.FISHING?.exp || 0,
+      exp: roundExp(p.lifeSkills?.FISHING?.exp || 0),
     },
     MINING: {
       level: p.lifeSkills?.MINING?.level || 1,
-      exp: p.lifeSkills?.MINING?.exp || 0,
+      exp: roundExp(p.lifeSkills?.MINING?.exp || 0),
     },
     COOKING: {
       level: p.lifeSkills?.COOKING?.level || 1,
-      exp: p.lifeSkills?.COOKING?.exp || 0,
+      exp: roundExp(p.lifeSkills?.COOKING?.exp || 0),
     },
   };
   p.money = p.money ?? 0;
@@ -691,7 +692,18 @@ router.post('/player/gather', async (req, res) => {
     applyEnergyConsumption(player, totalCost);
     player.markModified('stats');
 
-    // 結算生活技能經驗（採集、釣魚、挖礦）
+    // 依據採集次數、單次獲得量上限與機率進行隨機抽籤
+    const maxYield = Math.max(1, Number(spot.maxYield) || 1);
+    const dropChance = typeof spot.chance === 'number' ? spot.chance : 100;
+    const totalRolls = addQty * maxYield;
+    let gainedQty = 0;
+    for (let i = 0; i < totalRolls; i++) {
+      if (Math.random() * 100 < dropChance) {
+        gainedQty += 1;
+      }
+    }
+
+    // 結算生活技能經驗（採集、釣魚、挖礦）：經驗隨獲得量等比成長
     const spotSkill = spot.skillType || (
       requiredToolTypes.includes('MINING_TOOL')
         ? 'MINING'
@@ -700,7 +712,12 @@ router.post('/player/gather', async (req, res) => {
           : 'GATHERING')
     );
 
-    if (spotSkill) {
+    const expPerUnit = (typeof spot.expPerUnit === 'number')
+      ? spot.expPerUnit
+      : (Number(spot.expPerUnit) > 0 ? Number(spot.expPerUnit) : (spot.cost || 1));
+    const expToAdd = roundExp(gainedQty * expPerUnit);
+
+    if (spotSkill && expToAdd > 0) {
       if (!player.lifeSkills) {
         player.lifeSkills = {
           GATHERING: { level: 1, exp: 0 },
@@ -710,8 +727,6 @@ router.post('/player/gather', async (req, res) => {
         };
       }
       const currentSkill = player.lifeSkills[spotSkill] || { level: 1, exp: 0 };
-      const expPerUnit = Number(spot.expPerUnit) || 0;
-      const expToAdd = expPerUnit > 0 ? (expPerUnit * addQty) : (spot.cost || 1) * addQty;
       const updatedSkill = addLifeSkillExp(currentSkill, expToAdd);
       player.lifeSkills[spotSkill] = {
         level: updatedSkill.level,
@@ -720,19 +735,27 @@ router.post('/player/gather', async (req, res) => {
       player.markModified('lifeSkills');
     }
 
-    const existingItem = player.inventory.find((i) => i.itemId === itemId);
-    if (existingItem) {
-      existingItem.count += addQty;
-    } else {
-      player.inventory.push({
-        itemId,
-        count: addQty,
-        quality: '普通',
-      });
+    if (gainedQty > 0) {
+      const existingItem = player.inventory.find((i) => i.itemId === itemId);
+      if (existingItem) {
+        existingItem.count += gainedQty;
+      } else {
+        player.inventory.push({
+          itemId,
+          count: gainedQty,
+          quality: '普通',
+        });
+      }
+      player.markModified('inventory');
     }
 
     await player.save();
-    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
+    return res.json({
+      success: true,
+      source: 'mongodb',
+      data: formatPlayerResponse(player),
+      result: { gainedQty, gainedExp: expToAdd },
+    });
   } catch (err) {
     console.error('[API Error] POST /api/player/gather:', err);
     res.status(500).json({ success: false, error: err.message });

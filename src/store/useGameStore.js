@@ -716,7 +716,6 @@ export const useGameStore = create((set, get) => ({
       : player.lastEnergyRecoveredAt;
 
     const { newStats, newAccumulator, newHpAccumulator, newHp } = calculateEnergyConsumption(player, totalCost);
-    const finalInventory = addItemsToInventory(updatedInventory, itemId, addQty);
 
     set((state) => ({
       player: {
@@ -728,7 +727,7 @@ export const useGameStore = create((set, get) => ({
         energySpentAccumulator: newAccumulator,
         hpRegenAccumulator: newHpAccumulator,
       },
-      inventory: finalInventory,
+      inventory: updatedInventory,
     }));
 
     try {
@@ -741,9 +740,35 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          const gainedQty = result.result?.gainedQty ?? 0;
+          const targetItem = items.find((i) => i.itemId === itemId);
+          const itemNameZh = targetItem?.name || itemId;
+          const itemNameEn = targetItem?.nameEn || itemNameZh;
+          if (gainedQty > 0) {
+            get().addLog(
+              '系統',
+              'System',
+              `採集到${itemNameZh}x${gainedQty}`,
+              `Gathered ${itemNameEn} x${gainedQty}`,
+              'system'
+            );
+          } else {
+            get().addLog(
+              '系統',
+              'System',
+              `未採集到任何${itemNameZh}`,
+              `Failed to gather any ${itemNameEn}`,
+              'system'
+            );
+          }
         }
       } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData?.message || '採集失敗！';
+        get().addLog('系統', 'System', msg, msg, 'system');
+        if (res.status >= 500) {
+          set({ mongoStatus: 'offline', isDisconnected: true });
+        }
       }
     } catch {
       set({ mongoStatus: 'offline', isDisconnected: true });

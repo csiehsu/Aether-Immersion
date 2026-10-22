@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
-import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel } from '../../utils/gameHelpers';
+import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
   getActiveQuestForNpc,
@@ -583,7 +583,7 @@ export const GatherPanel = () => {
                     <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span />
                       <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
-                        {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({skillObj.exp}/{reqExp} EXP)
+                        {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({roundExp(skillObj.exp)}/{reqExp} EXP)
                       </span>
                     </div>
 
@@ -634,7 +634,7 @@ export const GatherPanel = () => {
                     <div className="detail-action-container">
                       <div className="detail-qty-row">
                         <span className="detail-qty-label">
-                          {language === 'en' ? 'Quantity:' : '選取數量：'}
+                          {t.gatherAttempts || (language === 'en' ? 'Attempts:' : '採集次數：')}
                         </span>
                         <QuantitySelector
                           value={gatherQty}

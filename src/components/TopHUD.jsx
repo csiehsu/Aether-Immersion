@@ -7,6 +7,7 @@ import {
   calculateCurrentWeight,
   calculateMaxWeight,
   isPlayerOverburdened,
+  roundExp,
 } from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
@@ -238,7 +239,7 @@ export const TopHUD = () => {
                               {s.icon} {skillName} <strong style={{ color: '#38bdf8' }}>LV.{skillData.level}</strong>
                             </span>
                             <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
-                              {skillData.exp} / {reqExp}
+                              {roundExp(skillData.exp)} / {reqExp}
                             </span>
                           </div>
                           <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>

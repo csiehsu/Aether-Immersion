@@ -351,20 +351,31 @@ export const getRequiredExpForNextLevel = (level = 1) => {
 };
 
 /**
- * 累加生活技能經驗值，並處理升級與溢出經驗值結算。
+ * 將經驗值四捨五入至小數點後兩位，消除浮點數二進位精度誤差。
+ * @param {number} val - 欲處理的經驗值數值。
+ * @returns {number} 四捨五入後的數值。
+ */
+export const roundExp = (val) => {
+  return Math.round((Number(val || 0) + Number.EPSILON) * 100) / 100;
+};
+
+/**
+ * 累加生活技能經驗值，並處理升級與溢出經驗值結算（支援小數點經驗值）。
  * @param {{ level: number, exp: number }} skillObj - 技能資料物件。
  * @param {number} expToAdd - 獲得的經驗值點數。
  * @returns {{ level: number, exp: number, leveledUp: boolean, levelsGained: number }} 更新後的技能狀態。
  */
 export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
   let currentLevel = Math.max(1, Number(skillObj?.level) || 1);
-  let currentExp = Math.max(0, Number(skillObj?.exp) || 0) + Math.max(0, Number(expToAdd) || 0);
+  const rawCurrentExp = Math.max(0, Number(skillObj?.exp) || 0);
+  const rawExpToAdd = Math.max(0, Number(expToAdd) || 0);
+  let currentExp = roundExp(rawCurrentExp + rawExpToAdd);
   let levelsGained = 0;
 
   while (true) {
     const reqExp = getRequiredExpForNextLevel(currentLevel);
-    if (currentExp >= reqExp) {
-      currentExp -= reqExp;
+    if (roundExp(currentExp - reqExp) >= 0) {
+      currentExp = roundExp(currentExp - reqExp);
       currentLevel += 1;
       levelsGained += 1;
     } else {
@@ -374,7 +385,7 @@ export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
 
   return {
     level: currentLevel,
-    exp: currentExp,
+    exp: roundExp(currentExp),
     leveledUp: levelsGained > 0,
     levelsGained,
   };
