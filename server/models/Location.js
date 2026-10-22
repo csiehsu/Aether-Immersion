@@ -35,6 +35,7 @@ const PlacedItemSchema = new mongoose.Schema(
     itemId: { type: String, required: true },
     count: { type: Number, default: 1 },
     durability: { type: Number, default: -1 },
+    maxDurability: { type: Number, default: -1 },
     quality: { type: String, default: '普通' },
     customName: { type: String, default: '' },
     customNameEn: { type: String, default: '' },

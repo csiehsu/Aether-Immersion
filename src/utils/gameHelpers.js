@@ -220,16 +220,68 @@ export const canItemsStack = (itemA, itemB) => {
 
   const durA = itemA.durability !== undefined && itemA.durability !== null && itemA.durability > 0 ? itemA.durability : -1;
   const durB = itemB.durability !== undefined && itemB.durability !== null && itemB.durability > 0 ? itemB.durability : -1;
-  if (durA <= 0 && durB <= 0) return true;
-  if (durA > 0 && durB > 0) {
-    return durB >= durA * 0.9 && durB <= durA * 1.1;
+
+  // 具有耐久度的道具 (durability > 0) 一律獨立計算，不可堆疊
+  if (durA > 0 || durB > 0) {
+    return false;
   }
-  return false;
+  return durA <= 0 && durB <= 0;
+};
+
+/**
+ * 依耐久度百分比取得進度條顏色。
+ * 規則：30% 以下為紅色，31-90% 為黃色，91% 以上為綠色。
+ * @param {number} percent - 耐久度百分比 (0-100)。
+ * @returns {string} 色碼字串。
+ */
+export const getDurabilityColor = (percent) => {
+  if (percent <= 30) return '#ef4444'; // 紅色
+  if (percent <= 90) return '#eab308'; // 黃色
+  return '#22c55e';                    // 綠色
+};
+
+/**
+ * 計算道具的當前耐久度百分比 (0-100)。
+ * 若無耐久度則回傳 -1。
+ * @param {Object} item - 道具實體物件。
+ * @param {Object} [dbItem] - 物品基礎定義物件。
+ * @returns {number} 0 到 100 之間的數值，無耐久度則為 -1。
+ */
+export const getItemDurabilityPercent = (item, dbItem) => {
+  const curDur = (item?.durability !== undefined && item?.durability !== null && item.durability > 0)
+    ? item.durability
+    : -1;
+  if (curDur <= 0) return -1;
+
+  const maxDur = (item?.maxDurability !== undefined && item?.maxDurability > 0)
+    ? item.maxDurability
+    : ((dbItem?.durability !== undefined && dbItem.durability > 0) ? dbItem.durability : curDur);
+
+  return Math.min(100, Math.max(0, (curDur / maxDur) * 100));
+};
+
+/**
+ * 比較兩道具之耐久度，依指定排序方式排序（耐久度相同時維持原順序）。
+ * @param {Object} a - 道具 A。
+ * @param {Object} b - 道具 B。
+ * @param {'asc'|'desc'|boolean} [order='asc'] - 排序方式：'asc'（預設，最低耐久優先）或 'desc'（最高耐久優先）。
+ * @returns {number}
+ */
+export const compareItemDurability = (a, b, order = 'asc') => {
+  const durA = (a?.durability !== undefined && a?.durability !== null && a.durability > 0) ? a.durability : -1;
+  const durB = (b?.durability !== undefined && b?.durability !== null && b.durability > 0) ? b.durability : -1;
+  if (durA > 0 && durB > 0) {
+    const isDesc = order === 'desc' || order === false;
+    return isDesc ? durB - durA : durA - durB;
+  }
+  if (durA > 0 && durB <= 0) return -1;
+  if (durA <= 0 && durB > 0) return 1;
+  return 0;
 };
 
 /**
  * 依堆疊規則將道具新增至地面放置物清單 (placedItems)。
- * 若完全符合堆疊條件則合併數量，否則新增獨立實體。
+ * 若完全符合堆疊條件則合併數量，否則新增獨立實體。耐久度道具一律為獨立實體。
  * @param {Array<Object>} [placedItems=[]]
  * @param {Object} itemToAdd
  * @returns {Array<Object>}
@@ -237,6 +289,26 @@ export const canItemsStack = (itemA, itemB) => {
 export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
   const updated = (placedItems || []).map((p) => (p && p.toObject ? p.toObject() : { ...p }));
   const addCount = Math.max(1, Number(itemToAdd.count) || 1);
+  const isDurabilityItem = itemToAdd.durability !== undefined && itemToAdd.durability !== null && itemToAdd.durability > 0;
+
+  if (isDurabilityItem) {
+    for (let k = 0; k < addCount; k++) {
+      updated.push({
+        instanceId: (k === 0 && itemToAdd.instanceId) ? itemToAdd.instanceId : generateInstanceId(),
+        itemId: itemToAdd.itemId,
+        count: 1,
+        durability: itemToAdd.durability,
+        maxDurability: itemToAdd.maxDurability !== undefined && itemToAdd.maxDurability > 0 ? itemToAdd.maxDurability : itemToAdd.durability,
+        quality: itemToAdd.quality || '普通',
+        customName: itemToAdd.customName || '',
+        customNameEn: itemToAdd.customNameEn || '',
+        bonusNutrition: itemToAdd.bonusNutrition ? { ...itemToAdd.bonusNutrition } : undefined,
+        triggerQuestId: itemToAdd.triggerQuestId || '',
+      });
+    }
+    return updated;
+  }
+
   const matchIdx = updated.findIndex((p) => canItemsStack(p, itemToAdd));
 
   if (matchIdx >= 0) {
@@ -247,6 +319,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
       itemId: itemToAdd.itemId,
       count: addCount,
       durability: itemToAdd.durability !== undefined ? itemToAdd.durability : -1,
+      maxDurability: itemToAdd.maxDurability !== undefined ? itemToAdd.maxDurability : -1,
       quality: itemToAdd.quality || '普通',
       customName: itemToAdd.customName || '',
       customNameEn: itemToAdd.customNameEn || '',
@@ -258,12 +331,13 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
 };
 
 /**
- * 統一將道具新增至背包陣列；若相同 itemId 且屬性相同則增加堆疊數量，否則新增實體。
+ * 統一將道具新增至背包陣列；若相同 itemId 且屬性相同則增加堆疊數量，否則新增實體。耐久度道具一律各自為獨立實體。
  * @param {Array<Object>} [inventory=[]] - 現有背包陣列。
  * @param {string} itemId - 道具識別碼。
  * @param {number} [count=1] - 增加的道具數量。
  * @param {Object} [options={}] - 其他附加選項（如 durability、quality、instanceId）。
  * @param {number} [options.durability] - 耐久度數值。
+ * @param {number} [options.maxDurability] - 最大耐久度數值。
  * @param {string} [options.quality] - 品質標籤。
  * @param {string} [options.instanceId] - 自訂實體識別碼。
  * @param {string} [options.customName] - 自訂/詞綴中文名稱。
@@ -274,14 +348,32 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
 export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}) => {
   const addQty = Math.max(1, Number(count) || 1);
   const updated = [...inventory];
+  const isDurabilityItem = options.durability !== undefined && options.durability !== null && options.durability > 0;
   const targetItem = {
     itemId,
     customName: options.customName || '',
     customNameEn: options.customNameEn || '',
     bonusNutrition: options.bonusNutrition,
     durability: options.durability,
+    maxDurability: options.maxDurability,
     quality: options.quality || '普通',
   };
+
+  if (isDurabilityItem) {
+    for (let k = 0; k < addQty; k++) {
+      updated.push({
+        instanceId: (k === 0 && options.instanceId) ? options.instanceId : generateInstanceId(),
+        itemId,
+        count: 1,
+        durability: options.durability,
+        maxDurability: options.maxDurability !== undefined && options.maxDurability > 0 ? options.maxDurability : options.durability,
+        quality: options.quality || '普通',
+        ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
+        ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
+      });
+    }
+    return updated;
+  }
 
   const existingIdx = updated.findIndex((i) => canItemsStack(i, targetItem));
 
@@ -297,14 +389,6 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
       ...(options.quality ? { quality: options.quality } : {}),
     };
 
-    if (existing.durability !== undefined && existing.durability > 0 && options.durability !== undefined && options.durability > 0) {
-      updatedItem.durability = Math.round(
-        (existing.durability * oldCount + options.durability * addQty) / newTotalCount
-      );
-    } else if (options.durability !== undefined) {
-      updatedItem.durability = options.durability;
-    }
-
     updated[existingIdx] = updatedItem;
   } else {
     updated.push({
@@ -312,6 +396,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
       itemId,
       count: addQty,
       durability: options.durability !== undefined ? options.durability : -1,
+      maxDurability: options.maxDurability !== undefined ? options.maxDurability : -1,
       quality: options.quality || '普通',
       ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
       ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),

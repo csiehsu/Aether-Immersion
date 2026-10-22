@@ -8,6 +8,7 @@ import {
   getStatusEffects,
   calculateEffectiveEnergyCost,
   isPlayerOverburdened,
+  compareItemDurability,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -874,10 +875,22 @@ export const useGameStore = create((set, get) => ({
     const { player, inventory, items } = get();
     if (!player || !inventoryItemId) return false;
 
-    const invIndex = inventory.findIndex(
-      (i) => i.instanceId === inventoryItemId || i.itemId === inventoryItemId
-    );
-    if (invIndex < 0) return false;
+    const matchingIndices = [];
+    inventory.forEach((item, idx) => {
+      if (item.instanceId === inventoryItemId || item.itemId === inventoryItemId) {
+        matchingIndices.push(idx);
+      }
+    });
+    if (matchingIndices.length === 0) return false;
+
+    // 依最低耐久度優先排序，相同耐久度維持原順序
+    matchingIndices.sort((idxA, idxB) => {
+      const cmp = compareItemDurability(inventory[idxA], inventory[idxB]);
+      if (cmp !== 0) return cmp;
+      return idxA - idxB;
+    });
+
+    const invIndex = matchingIndices[0];
 
     const invItem = inventory[invIndex];
     const dbItem = items.find(
@@ -1059,7 +1072,13 @@ export const useGameStore = create((set, get) => ({
       : [];
 
     const newMoney = currentMoney - totalCost;
-    const updatedInv = addItemsToInventory(inventory, itemId, buyQty);
+    const itemDur = (boughtDbItem?.durability !== undefined && boughtDbItem.durability > 0)
+      ? boughtDbItem.durability
+      : -1;
+    const updatedInv = addItemsToInventory(inventory, itemId, buyQty, {
+      durability: itemDur,
+      maxDurability: itemDur,
+    });
 
     // 檢查購買工具是否可解鎖對應製作配方
     const currentUnlocked = Array.isArray(player.unlockedRecipes) ? [...player.unlockedRecipes] : [];
@@ -1461,7 +1480,13 @@ export const useGameStore = create((set, get) => ({
               const itemName = dbItem ? dbItem.name : drop.itemId;
               const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : drop.itemId;
 
-              updatedInv = addItemsToInventory(updatedInv, drop.itemId, dropQty);
+              const dropDur = (dbItem?.durability !== undefined && dbItem.durability > 0)
+                ? dbItem.durability
+                : -1;
+              updatedInv = addItemsToInventory(updatedInv, drop.itemId, dropQty, {
+                durability: dropDur,
+                maxDurability: dropDur,
+              });
 
               get().addLog(
                 '戰鬥系統',

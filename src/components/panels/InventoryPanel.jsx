@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
@@ -7,11 +7,15 @@ import {
   calculateCurrentWeight,
   calculateMaxWeight,
   isPlayerOverburdened,
+  compareItemDurability,
+  getItemDurabilityPercent,
+  getDurabilityColor,
 } from '../../utils/gameHelpers';
 
 /**
  * 玩家背包物品清單面板元件。
- * 顯示背包內持有道具、品質標籤、數量、耐久度、營養效果預覽，並支援批量食用消耗道具。
+ * 依物品 ID 整合顯示卡片，點開後於說明框顯示所有獨立實體小圖示與耐久度進度條。
+ * 使用或丟棄時預設以最低耐久度個體優先。
  * @returns {JSX.Element}
  */
 export const InventoryPanel = () => {
@@ -23,30 +27,56 @@ export const InventoryPanel = () => {
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
-  const [selectedItemKey, setSelectedItemKey] = useState(null);
+  const [selectedItemId, setSelectedItemId] = useState(null);
   const [actionQty, setActionQty] = useState(1);
 
   const currentWeight = calculateCurrentWeight(inventory, items);
   const maxWeight = calculateMaxWeight(player);
   const isOverburdened = isPlayerOverburdened(player, inventory, items);
 
+  // 相同 ID 的物品統合成一個項目，統計總數量
+  const groupedInventory = useMemo(() => {
+    const groups = [];
+    const map = new Map();
+    (inventory || []).forEach((item) => {
+      const key = item.itemId;
+      if (!map.has(key)) {
+        const newGroup = {
+          itemId: key,
+          items: [],
+          totalCount: 0,
+        };
+        map.set(key, newGroup);
+        groups.push(newGroup);
+      }
+      const g = map.get(key);
+      g.items.push(item);
+      g.totalCount += (item.count || 1);
+    });
+    return groups;
+  }, [inventory]);
+
   /**
-   * 選取或取消選取背包中的道具。
-   * @param {string} key - 道具實體識別碼或鍵值。
+   * 選取或取消選取道具群組。
+   * @param {string} itemId - 道具識別碼。
    */
-  const handleSelectItem = (key) => {
-    if (selectedItemKey === key) {
-      setSelectedItemKey(null);
+  const handleSelectItem = (itemId) => {
+    if (selectedItemId === itemId) {
+      setSelectedItemId(null);
       setActionQty(1);
     } else {
-      setSelectedItemKey(key);
+      setSelectedItemId(itemId);
       setActionQty(1);
     }
   };
 
-  const selectedItem = inventory.find(
-    (item, idx) => (item.instanceId || `${item.itemId}_${idx}`) === selectedItemKey
-  );
+  const selectedGroup = groupedInventory.find((g) => g.itemId === selectedItemId);
+
+  // 排序選中群組下的所有獨立個體：最低耐久度優先，若耐久度相同則以資料庫順序為主
+  const sortedItems = useMemo(() => {
+    if (!selectedGroup) return [];
+    return [...selectedGroup.items].sort(compareItemDurability);
+  }, [selectedGroup]);
 
   return (
     <CollapsiblePanel
@@ -67,28 +97,28 @@ export const InventoryPanel = () => {
         </div>
       }
     >
-      {inventory.length === 0 ? (
+      {groupedInventory.length === 0 ? (
         <div className="empty-inventory-notice">
           <span>🎒 {language === 'en' ? 'Inventory is empty.' : '背包是空的。'}</span>
         </div>
       ) : (
         <div className="inventory-panel-wrapper">
           <div className="inventory-grid">
-            {inventory.map((item, idx) => {
-              const itemKey = item.instanceId || `${item.itemId}_${idx}`;
-              const dbItem = items.find((i) => i.itemId === item.itemId);
-              const itemName = (language === 'en' && item.customNameEn)
-                ? item.customNameEn
-                : (item.customName || (dbItem ? getLocalizedName(dbItem, language) : item.itemId));
+            {groupedInventory.map((group) => {
+              const dbItem = items.find((i) => i.itemId === group.itemId);
+              const repItem = group.items[0] || {};
+              const itemName = (language === 'en' && repItem.customNameEn)
+                ? repItem.customNameEn
+                : (repItem.customName || (dbItem ? getLocalizedName(dbItem, language) : group.itemId));
               const imageUrl = dbItem?.imageUrl;
-              const quality = item.quality || '普通';
-              const isSelected = selectedItemKey === itemKey;
+              const quality = repItem.quality || '普通';
+              const isSelected = selectedItemId === group.itemId;
 
               return (
                 <div
-                  key={itemKey}
+                  key={group.itemId}
                   className={`inventory-item-card quality-${quality} ${isSelected ? 'selected' : ''}`}
-                  onClick={() => handleSelectItem(itemKey)}
+                  onClick={() => handleSelectItem(group.itemId)}
                 >
                   <div className="item-icon-box">
                     {imageUrl ? (
@@ -100,21 +130,21 @@ export const InventoryPanel = () => {
                   <div className="item-info">
                     <span className="item-name">{itemName}</span>
                   </div>
-                  <span className="item-count">x{item.count}</span>
+                  <span className="item-count">x{group.totalCount}</span>
                 </div>
               );
             })}
           </div>
 
-          {selectedItem && (() => {
-            const dbItem = items.find((i) => i.itemId === selectedItem.itemId);
+          {selectedGroup && (() => {
+            const repItem = sortedItems[0] || {};
+            const dbItem = items.find((i) => i.itemId === selectedGroup.itemId);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : null;
-            const durabilityVal = selectedItem.durability !== undefined && selectedItem.durability !== null && selectedItem.durability > 0
-              ? selectedItem.durability
-              : (dbItem && dbItem.durability > 0 ? dbItem.durability : null);
+            const singleWeight = dbItem?.weight ?? 1;
+            const totalItemWeight = Math.round(singleWeight * (selectedGroup.totalCount || 1) * 10) / 10;
 
             const baseNutrition = dbItem?.nutrition || {};
-            const bonusNutrition = selectedItem.bonusNutrition || {};
+            const bonusNutrition = repItem.bonusNutrition || {};
             const totalNutrition = {
               hp: (baseNutrition.hp || 0) + (bonusNutrition.hp || 0),
               strength: (baseNutrition.strength || 0) + (bonusNutrition.strength || 0),
@@ -137,6 +167,10 @@ export const InventoryPanel = () => {
               totalNutrition.food !== 0
             );
 
+            const hasDurability = sortedItems.some(
+              (it) => it.durability !== undefined && it.durability !== null && it.durability > 0
+            );
+
             return (
               <div className="inventory-detail-window">
                 {itemDesc ? (
@@ -146,20 +180,101 @@ export const InventoryPanel = () => {
                     {language === 'en' ? 'No description available.' : '暫無道具說明。'}
                   </p>
                 )}
-                {durabilityVal !== null && (
-                  <div style={{ fontSize: '0.78rem', color: '#34d399', fontWeight: 600, marginTop: '4px' }}>
-                    <span>{language === 'en' ? 'Durability' : '耐久度'}: {durabilityVal}</span>
+
+                {/* 獨立個體小圖示區（不開放點選，上方進度條呈現耐久度色彩，不顯示數字） */}
+                {(sortedItems.length > 1 || hasDurability) && (
+                  <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '0.74rem', color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}>
+                      {language === 'en' ? 'Individual Items:' : '持有實體狀態：'}
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '6px',
+                        padding: '6px',
+                        background: 'rgba(0, 0, 0, 0.25)',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                      }}
+                    >
+                      {sortedItems.map((inst, instIdx) => {
+                        const percent = getItemDurabilityPercent(inst, dbItem);
+                        const hasDur = percent >= 0;
+                        const durColor = hasDur ? getDurabilityColor(percent) : '#22c55e';
+
+                        return (
+                          <div
+                            key={inst.instanceId || `${inst.itemId}_${instIdx}`}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '38px',
+                              height: '46px',
+                              padding: '3px',
+                              background: 'rgba(255, 255, 255, 0.05)',
+                              borderRadius: '4px',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              cursor: 'default',
+                              userSelect: 'none',
+                            }}
+                            title={hasDur ? (language === 'en' ? 'Durability Status' : '耐久度狀態') : ''}
+                          >
+                            {hasDur && (
+                              <div
+                                style={{
+                                  width: '100%',
+                                  height: '4px',
+                                  background: 'rgba(0, 0, 0, 0.6)',
+                                  borderRadius: '2px',
+                                  overflow: 'hidden',
+                                  marginBottom: '3px',
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: `${percent}%`,
+                                    height: '100%',
+                                    background: durColor,
+                                    transition: 'width 0.2s ease',
+                                  }}
+                                />
+                              </div>
+                            )}
+                            <div
+                              style={{
+                                width: '22px',
+                                height: '22px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {dbItem?.imageUrl ? (
+                                <img
+                                  src={dbItem.imageUrl}
+                                  alt=""
+                                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                                />
+                              ) : (
+                                <span style={{ fontSize: '0.9rem' }}>📦</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
-                {(() => {
-                  const singleWeight = dbItem?.weight ?? 1;
-                  const totalItemWeight = Math.round(singleWeight * (selectedItem.count || 1) * 10) / 10;
-                  return (
-                    <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
-                      <span>⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleWeight} kg ({language === 'en' ? 'Total' : '總重'}: {totalItemWeight} kg)</span>
-                    </div>
-                  );
-                })()}
+
+                <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
+                  <span>
+                    ⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleWeight} kg ({language === 'en' ? 'Total' : '總重'}: {totalItemWeight} kg)
+                  </span>
+                </div>
+
                 {hasNutrition && (() => {
                   const n = totalNutrition;
                   const parts = [];
@@ -177,8 +292,9 @@ export const InventoryPanel = () => {
                     </div>
                   ) : null;
                 })()}
+
                 <div className="detail-action-container">
-                  {(selectedItem.count || 1) > 1 && (
+                  {(selectedGroup.totalCount || 1) > 1 && (
                     <div className="detail-qty-row">
                       <span className="detail-qty-label">
                         {language === 'en' ? 'Quantity:' : '選取數量：'}
@@ -187,7 +303,7 @@ export const InventoryPanel = () => {
                         value={actionQty}
                         onChange={setActionQty}
                         min={1}
-                        max={selectedItem.count || 1}
+                        max={selectedGroup.totalCount || 1}
                       />
                     </div>
                   )}
@@ -198,7 +314,7 @@ export const InventoryPanel = () => {
                         className="btn-use-item"
                         onClick={async (e) => {
                           e.stopPropagation();
-                          await consumeItem(selectedItem.instanceId || selectedItem.itemId, actionQty);
+                          await consumeItem(selectedGroup.itemId, actionQty);
                         }}
                       >
                         {t.useBtn || (language === 'en' ? 'Use' : '使用')}
@@ -220,12 +336,11 @@ export const InventoryPanel = () => {
                       }}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        const targetKey = selectedItem.instanceId || selectedItem.itemId;
                         const currentLocId = player?.location || 'AZURE_BAY_PORT';
-                        const success = await dropItem(currentLocId, targetKey, actionQty);
+                        const success = await dropItem(currentLocId, selectedGroup.itemId, actionQty);
                         if (success) {
-                          if ((selectedItem.count || 1) <= actionQty) {
-                            setSelectedItemKey(null);
+                          if ((selectedGroup.totalCount || 1) <= actionQty) {
+                            setSelectedItemId(null);
                           }
                         }
                       }}

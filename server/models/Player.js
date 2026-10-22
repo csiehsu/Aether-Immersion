@@ -13,6 +13,7 @@ const InventoryItemSchema = new mongoose.Schema(
     itemId: { type: String, default: '' },
     count: { type: Number, default: 1 },
     durability: { type: Number, default: -1 },
+    maxDurability: { type: Number, default: -1 },
     quality: { type: String, default: '普通' },
     customName: { type: String, default: '' },
     customNameEn: { type: String, default: '' },

@@ -186,9 +186,9 @@ export const CraftPanel = () => {
             const hasSelectedAllMaterials = reqItemsList.length === 0 || reqItemsList.every((req, reqIdx) => {
               const selId = effectiveSelectedMaterials[reqIdx];
               if (!selId) return false;
-              const inv = inventory.find((i) => i.itemId === selId);
-              if (!inv) return false;
-              return (inv.count || 1) >= req.quantity * craftQty;
+              const matchingInv = inventory.filter((i) => i.itemId === selId);
+              const totalCount = matchingInv.reduce((sum, i) => sum + (i.count || 1), 0);
+              return totalCount >= req.quantity * craftQty;
             });
 
             const isComatose = isPlayerComatose(player);

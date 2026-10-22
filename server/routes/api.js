@@ -37,6 +37,7 @@ import {
   addItemToPlacedItems,
   addItemsToInventory,
   isPlayerOverburdened,
+  compareItemDurability,
 } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -102,6 +103,7 @@ const sanitizeInventoryItems = (inventory) => {
       itemId,
       count: raw.count || 1,
       durability: raw.durability !== undefined ? raw.durability : -1,
+      maxDurability: raw.maxDurability !== undefined ? raw.maxDurability : (raw.durability !== undefined ? raw.durability : -1),
       quality: raw.quality || '普通',
       customName: raw.customName || '',
       customNameEn: raw.customNameEn || '',
@@ -149,12 +151,20 @@ const applyPlayerGrants = (player, grants = {}) => {
   if (grants.items && grants.items.length > 0) {
     player.inventory = sanitizeInventoryItems(player.inventory);
     for (const gItem of grants.items) {
-      player.inventory.push({
-        instanceId: generateInstanceId(),
-        itemId: gItem.itemId,
-        count: gItem.count || 1,
-        quality: gItem.quality || '普通',
-      });
+      const dbItem = initialItems.find((i) => i.itemId === gItem.itemId);
+      const dur = gItem.durability !== undefined
+        ? gItem.durability
+        : (dbItem?.durability !== undefined && dbItem.durability > 0 ? dbItem.durability : -1);
+      player.inventory = addItemsToInventory(
+        player.inventory,
+        gItem.itemId,
+        gItem.count || 1,
+        {
+          durability: dur,
+          maxDurability: dur,
+          quality: gItem.quality || '普通',
+        }
+      );
     }
   }
   if (grants.unlockedLocations && grants.unlockedLocations.length > 0) {
@@ -196,7 +206,9 @@ const transferPlacedItemToPlayer = (location, instanceId, player) => {
     itemToPick.itemId,
     itemToPick.count || 1,
     {
+      instanceId: itemToPick.instanceId,
       durability: itemToPick.durability,
+      maxDurability: itemToPick.maxDurability,
       quality: itemToPick.quality || '普通',
       customName: itemToPick.customName || '',
       customNameEn: itemToPick.customNameEn || '',
@@ -736,16 +748,25 @@ router.post('/player/gather', async (req, res) => {
     }
 
     if (gainedQty > 0) {
-      const existingItem = player.inventory.find((i) => i.itemId === itemId);
-      if (existingItem) {
-        existingItem.count += gainedQty;
-      } else {
-        player.inventory.push({
-          itemId,
-          count: gainedQty,
-          quality: '普通',
-        });
+      let targetItemDoc = await Item.findOne({ itemId });
+      if (!targetItemDoc) {
+        targetItemDoc = initialItems.find((i) => i.itemId === itemId);
       }
+      const itemDurability = (targetItemDoc?.durability !== undefined && targetItemDoc.durability > 0)
+        ? targetItemDoc.durability
+        : -1;
+      const itemMaxDurability = itemDurability > 0 ? itemDurability : -1;
+
+      player.inventory = addItemsToInventory(
+        player.inventory,
+        itemId,
+        gainedQty,
+        {
+          durability: itemDurability,
+          maxDurability: itemMaxDurability,
+          quality: '普通',
+        }
+      );
       player.markModified('inventory');
     }
 
@@ -927,24 +948,37 @@ router.post('/player/craft', async (req, res) => {
         return res.status(400).json({ success: false, message: '未選擇所需材料！' });
       }
 
-      const invIndex = updatedInv.findIndex((i) => i.itemId === selectedId && (i.count || 1) >= requiredTotalCount);
-      if (invIndex < 0) {
+      const matchingIndices = [];
+      updatedInv.forEach((inv, idx) => {
+        if (inv.itemId === selectedId) {
+          matchingIndices.push(idx);
+        }
+      });
+      matchingIndices.sort((a, b) => compareItemDurability(updatedInv[a], updatedInv[b]));
+      const totalAvailable = matchingIndices.reduce((sum, idx) => sum + (updatedInv[idx].count || 1), 0);
+      if (totalAvailable < requiredTotalCount) {
         return res.status(400).json({ success: false, message: '材料不足或未持有指定材料！' });
       }
 
-      const invItem = updatedInv[invIndex];
-      const types = getItemTypes(invItem.itemId);
-      const matchesItem = req.itemId ? invItem.itemId === req.itemId : false;
+      const firstMatchingItem = updatedInv[matchingIndices[0]];
+      const types = getItemTypes(firstMatchingItem.itemId);
+      const matchesItem = req.itemId ? firstMatchingItem.itemId === req.itemId : false;
       const matchesType = req.type ? types.includes(req.type) : false;
       if (!matchesItem && !matchesType) {
         return res.status(400).json({ success: false, message: '所選材料不符合配方需求！' });
       }
 
-      const curCount = invItem.count || 1;
-      if (curCount === requiredTotalCount) {
-        updatedInv[invIndex] = { ...invItem, count: 0 };
-      } else {
-        updatedInv[invIndex] = { ...invItem, count: curCount - requiredTotalCount };
+      let remainingDeduct = requiredTotalCount;
+      for (const idx of matchingIndices) {
+        if (remainingDeduct <= 0) break;
+        const curCount = updatedInv[idx].count || 1;
+        if (curCount <= remainingDeduct) {
+          updatedInv[idx] = { ...updatedInv[idx], count: 0 };
+          remainingDeduct -= curCount;
+        } else {
+          updatedInv[idx] = { ...updatedInv[idx], count: curCount - remainingDeduct };
+          remainingDeduct = 0;
+        }
       }
     }
     updatedInv = updatedInv.filter((i) => (i.count || 0) > 0);
@@ -1075,56 +1109,32 @@ router.post('/player/craft', async (req, res) => {
       const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
       const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
 
-      const existingMatchIndex = updatedInv.findIndex((inv) => {
-        if (inv.itemId !== finalItemId) return false;
-        if ((inv.customName || '') !== customName) return false;
-        const oldDurability = inv.durability !== undefined && inv.durability > 0 ? inv.durability : -1;
-        const newDurability = calculatedDurability > 0 ? calculatedDurability : -1;
-        if (oldDurability <= 0 && newDurability <= 0) return true;
-        if (oldDurability > 0 && newDurability > 0) {
-          const minAllowed = oldDurability * 0.9;
-          const maxAllowed = oldDurability * 1.1;
-          return newDurability >= minAllowed && newDurability <= maxAllowed;
+      const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
+      const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
+      const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+
+      if (finalDurability > 0) {
+        // 耐久度道具一律獨立計算，不進行堆疊，每次批量製作各自生成獨立實體
+        for (let k = 0; k < addQty; k++) {
+          updatedInv.push({
+            instanceId: generateInstanceId(),
+            itemId: finalItemId,
+            count: 1,
+            durability: finalDurability,
+            maxDurability: finalMaxDurability,
+            quality: '普通',
+            ...(customName ? { customName, customNameEn } : {}),
+            ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
+          });
         }
-        return false;
-      });
-
-      if (existingMatchIndex >= 0) {
-        const existingItem = updatedInv[existingMatchIndex];
-        const oldCount = existingItem.count || 1;
-        const newTotalCount = oldCount + addQty;
-        const oldDurability = existingItem.durability !== undefined && existingItem.durability > 0 ? existingItem.durability : -1;
-
-        const updatedItem = {
-          ...existingItem,
-          count: newTotalCount,
-          ...(customName ? { customName, customNameEn } : {}),
-          ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
-        };
-
-        if (oldDurability > 0 && calculatedDurability > 0) {
-          const weightedDurability = Math.round(
-            (oldDurability * oldCount + calculatedDurability * addQty) / newTotalCount
-          );
-          updatedItem.durability = weightedDurability;
-        } else if (calculatedDurability > 0) {
-          updatedItem.durability = calculatedDurability;
-        }
-
-        updatedInv[existingMatchIndex] = updatedItem;
       } else {
-        const newItem = {
-          instanceId: generateInstanceId(),
-          itemId: finalItemId,
-          count: addQty,
+        // 無耐久度道具維持一般堆疊邏輯
+        updatedInv = addItemsToInventory(updatedInv, finalItemId, addQty, {
+          customName,
+          customNameEn,
+          bonusNutrition: finalBonusNutrition,
           quality: '普通',
-          ...(customName ? { customName, customNameEn } : {}),
-          ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
-        };
-        if (calculatedDurability > 0) {
-          newItem.durability = calculatedDurability;
-        }
-        updatedInv.push(newItem);
+        });
       }
     }
 
@@ -1298,81 +1308,89 @@ router.post('/location/pickup-item', async (req, res) => {
     }
 
     const requestedCount = Math.max(1, Number(count) || 1);
-    let itemToPick = null;
 
-    // 分支 1：若現場物品堆疊數量大於欲撿取數量，以 $elemMatch 與 arrayFilters 原子扣減數量
-    const locWithPartial = await Location.findOneAndUpdate(
-      {
-        locationId,
-        placedItems: {
-          $elemMatch: {
-            instanceId,
-            count: { $gt: requestedCount },
-          },
-        },
-      },
-      {
-        $inc: { 'placedItems.$[elem].count': -requestedCount },
-      },
-      {
-        arrayFilters: [{ 'elem.instanceId': instanceId }],
-        returnDocument: 'before',
-      }
-    );
-
-    if (locWithPartial) {
-      const original = (locWithPartial.placedItems || []).find((p) => p.instanceId === instanceId);
-      if (original) {
-        const itemObj = original.toObject ? original.toObject() : original;
-        itemToPick = {
-          ...itemObj,
-          count: requestedCount,
-        };
-      }
-    } else {
-      // 分支 2：若現場物品數量 <= 欲撿取數量，原子抽取移除該放置物
-      const locWithFull = await Location.findOneAndUpdate(
-        {
-          locationId,
-          'placedItems.instanceId': instanceId,
-        },
-        {
-          $pull: { placedItems: { instanceId } },
-        },
-        {
-          returnDocument: 'before',
-        }
-      );
-
-      if (locWithFull) {
-        const original = (locWithFull.placedItems || []).find((p) => p.instanceId === instanceId);
-        if (original) {
-          const itemObj = original.toObject ? original.toObject() : original;
-          itemToPick = {
-            ...itemObj,
-            count: itemObj.count || 1,
-          };
-        }
-      }
+    const location = await Location.findOne({ locationId });
+    if (!location) {
+      return res.status(404).json({ success: false, message: '找不到該地點！' });
     }
 
-    if (!itemToPick) {
+    // 尋找符合 instanceId 或 itemId 的所有地面物品
+    const matchingIndices = [];
+    (location.placedItems || []).forEach((item, idx) => {
+      if (item.instanceId === instanceId || item.itemId === instanceId) {
+        matchingIndices.push(idx);
+      }
+    });
+
+    if (matchingIndices.length === 0) {
       return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
     }
 
-    player.inventory = sanitizeInventoryItems(player.inventory);
-    player.inventory = addItemsToInventory(
-      player.inventory,
-      itemToPick.itemId,
-      itemToPick.count || 1,
-      {
-        durability: itemToPick.durability,
-        quality: itemToPick.quality || '普通',
-        customName: itemToPick.customName || '',
-        customNameEn: itemToPick.customNameEn || '',
-        bonusNutrition: itemToPick.bonusNutrition,
-      }
+    // 預設選擇耐久度最高的，若耐久度相同則以資料庫順序為主
+    matchingIndices.sort((idxA, idxB) => {
+      const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
+      if (cmp !== 0) return cmp;
+      return idxA - idxB;
+    });
+
+    const totalAvailable = matchingIndices.reduce(
+      (sum, idx) => sum + (location.placedItems[idx].count || 1),
+      0
     );
+    const pickQty = Math.max(1, Math.min(requestedCount, totalAvailable));
+
+    let remainingToPick = pickQty;
+    const indicesToRemove = new Set();
+    const pickedItems = [];
+
+    for (const idx of matchingIndices) {
+      if (remainingToPick <= 0) break;
+      const pItem = location.placedItems[idx];
+      const curCount = pItem.count || 1;
+      const deductCount = Math.min(curCount, remainingToPick);
+
+      pickedItems.push({
+        instanceId: pItem.instanceId,
+        itemId: pItem.itemId,
+        count: deductCount,
+        durability: pItem.durability !== undefined ? pItem.durability : -1,
+        maxDurability: pItem.maxDurability !== undefined ? pItem.maxDurability : -1,
+        quality: pItem.quality || '普通',
+        customName: pItem.customName || '',
+        customNameEn: pItem.customNameEn || '',
+        bonusNutrition: pItem.bonusNutrition ? { ...pItem.bonusNutrition } : undefined,
+        triggerQuestId: pItem.triggerQuestId || '',
+      });
+
+      remainingToPick -= deductCount;
+      if (curCount <= deductCount) {
+        indicesToRemove.add(idx);
+      } else {
+        pItem.count = curCount - deductCount;
+      }
+    }
+
+    location.placedItems = location.placedItems.filter((_, idx) => !indicesToRemove.has(idx));
+    location.markModified('placedItems');
+    await location.save();
+
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    for (const pItem of pickedItems) {
+      player.inventory = addItemsToInventory(
+        player.inventory,
+        pItem.itemId,
+        pItem.count || 1,
+        {
+          instanceId: pItem.instanceId,
+          durability: pItem.durability,
+          maxDurability: pItem.maxDurability,
+          quality: pItem.quality || '普通',
+          customName: pItem.customName || '',
+          customNameEn: pItem.customNameEn || '',
+          bonusNutrition: pItem.bonusNutrition,
+        }
+      );
+    }
     player.markModified('inventory');
     await player.save();
 
@@ -1410,37 +1428,69 @@ router.post('/player/drop-item', async (req, res) => {
     }
 
     player.inventory = sanitizeInventoryItems(player.inventory);
-    const invIdx = player.inventory.findIndex(
-      (i) => (i.instanceId && i.instanceId === itemKey) || i.itemId === itemKey
-    );
-    if (invIdx < 0) {
+
+    // 尋找符合 instanceId 或 itemId 的所有背包物品
+    const matchingIndices = [];
+    player.inventory.forEach((item, idx) => {
+      if ((item.instanceId && item.instanceId === itemKey) || item.itemId === itemKey) {
+        matchingIndices.push(idx);
+      }
+    });
+
+    if (matchingIndices.length === 0) {
       return res.status(400).json({ success: false, message: '背包中沒有該道具！' });
     }
 
-    const invItem = player.inventory[invIdx];
-    const availableCount = invItem.count || 1;
-    const dropQty = Math.max(1, Math.min(Number(count) || 1, availableCount));
+    // 預設選擇耐久度最低的，若耐久度相同則以資料庫順序為主
+    matchingIndices.sort((idxA, idxB) => {
+      const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
+      if (cmp !== 0) return cmp;
+      return idxA - idxB;
+    });
 
-    const droppedItemData = {
-      instanceId: generateInstanceId(),
-      itemId: invItem.itemId,
-      count: dropQty,
-      durability: invItem.durability,
-      quality: invItem.quality || '普通',
-      customName: invItem.customName || '',
-      customNameEn: invItem.customNameEn || '',
-      bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
-    };
+    const totalAvailable = matchingIndices.reduce(
+      (sum, idx) => sum + (player.inventory[idx].count || 1),
+      0
+    );
+    const dropQty = Math.max(1, Math.min(Number(count) || 1, totalAvailable));
 
-    if (availableCount <= dropQty) {
-      player.inventory.splice(invIdx, 1);
-    } else {
-      invItem.count = availableCount - dropQty;
+    let remainingToDrop = dropQty;
+    const indicesToRemove = new Set();
+    const droppedItems = [];
+
+    for (const idx of matchingIndices) {
+      if (remainingToDrop <= 0) break;
+      const invItem = player.inventory[idx];
+      const curCount = invItem.count || 1;
+      const deductCount = Math.min(curCount, remainingToDrop);
+
+      droppedItems.push({
+        instanceId: generateInstanceId(),
+        itemId: invItem.itemId,
+        count: deductCount,
+        durability: invItem.durability !== undefined ? invItem.durability : -1,
+        maxDurability: invItem.maxDurability !== undefined ? invItem.maxDurability : -1,
+        quality: invItem.quality || '普通',
+        customName: invItem.customName || '',
+        customNameEn: invItem.customNameEn || '',
+        bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
+      });
+
+      remainingToDrop -= deductCount;
+      if (curCount <= deductCount) {
+        indicesToRemove.add(idx);
+      } else {
+        invItem.count = curCount - deductCount;
+      }
     }
+
+    player.inventory = player.inventory.filter((_, idx) => !indicesToRemove.has(idx));
     player.markModified('inventory');
 
-    // 依背包相同堆疊規則將物品加入現場物品
-    location.placedItems = addItemToPlacedItems(location.placedItems || [], droppedItemData);
+    // 依堆疊規則將物品加入現場物品（耐久度道具各自為獨立實體）
+    for (const dItem of droppedItems) {
+      location.placedItems = addItemToPlacedItems(location.placedItems || [], dItem);
+    }
     location.markModified('placedItems');
 
     await location.save();
