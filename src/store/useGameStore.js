@@ -9,6 +9,7 @@ import {
   calculateEffectiveEnergyCost,
   isPlayerOverburdened,
   compareItemDurability,
+  settleItemDecay,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -741,6 +742,7 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          await get().fetchLogs();
           const gainedQty = result.result?.gainedQty ?? 0;
           const targetItem = items.find((i) => i.itemId === itemId);
           const itemNameZh = targetItem?.name || itemId;
@@ -845,6 +847,7 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          await get().fetchLogs();
           return true;
         }
       } else {
@@ -872,6 +875,7 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 使用成功回傳 true，未找到道具或失敗回傳 false。
    */
   consumeItem: async (inventoryItemId, qty = 1) => {
+    get().settleInventoryDecay();
     const { player, inventory, items } = get();
     if (!player || !inventoryItemId) return false;
 
@@ -1641,5 +1645,58 @@ export const useGameStore = create((set, get) => ({
       .catch((err) => {
         console.error('[Energy Recovery Sync Error]', err);
       });
+  },
+
+  /**
+   * 結算背包道具腐敗狀態。
+   * 每 1 分鐘 -1 耐久度，扣至 <= 0 自動刪除，並輸出提示文字「道具名稱已腐敗。」。
+   */
+  settleInventoryDecay: () => {
+    const { inventory, items } = get();
+    if (!inventory || inventory.length === 0) return;
+    const { updatedItems, rottedItems, isChanged } = settleItemDecay(inventory, items, { isPlayer: true });
+    if (!isChanged) return;
+
+    set({ inventory: updatedItems });
+
+    for (const rotted of rottedItems) {
+      get().addLog('系統', 'System', `${rotted.name}已腐敗。`, `${rotted.nameEn} has rotted.`, 'system');
+    }
+
+    fetch(`${API_BASE}/player`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        inventory: updatedItems,
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((result) => {
+        if (result?.success && result.data) {
+          get().applyPlayerData(result.data);
+        }
+      })
+      .catch((err) => {
+        console.error('[Decay Sync Error]', err);
+      });
+  },
+
+  /**
+   * 結算當前地點地面物品腐敗狀態。
+   * 扣至 <= 0 自動刪除，地面物品不顯示提示文字。
+   */
+  settleGroundItemsDecay: () => {
+    const { locations, player, items } = get();
+    const locId = player?.location || 'AZURE_BAY_PORT';
+    const currentLoc = locations.find((l) => l.locationId === locId);
+    if (!currentLoc || !currentLoc.placedItems || currentLoc.placedItems.length === 0) return;
+
+    const { updatedItems, isChanged } = settleItemDecay(currentLoc.placedItems, items, { isPlayer: false });
+    if (!isChanged) return;
+
+    const updatedLocations = locations.map((loc) =>
+      loc.locationId === locId ? { ...loc, placedItems: updatedItems } : loc
+    );
+    set({ locations: updatedLocations });
   },
 }));

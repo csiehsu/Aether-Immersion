@@ -3,7 +3,16 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
-import { getNpcIcon, isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp } from '../../utils/gameHelpers';
+import {
+  getNpcIcon,
+  isPlayerComatose,
+  calculateEffectiveEnergyCost,
+  getRequiredExpForNextLevel,
+  roundExp,
+  getMatchingToolsAscending,
+  getItemDurabilityPercent,
+  getDurabilityStatusInfo,
+} from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
   getActiveQuestForNpc,
@@ -610,19 +619,45 @@ export const GatherPanel = () => {
                                 </span>
                               );
                             } else {
-                              const hasThisTool = locBuildingTypes.includes(toolType) || invToolTypes.includes(toolType);
+                              const isBuilding = locBuildingTypes.includes(toolType);
+                              const matchingTools = getMatchingToolsAscending(inventory, toolType, items);
+                              const hasThisTool = isBuilding || matchingTools.length > 0;
+                              let displayText;
+                              let badgeStyle;
+
+                              if (isBuilding) {
+                                displayText = t.toolFacility || (language === 'en' ? 'Facility' : '已具備(設施)');
+                                badgeStyle = {
+                                  background: 'rgba(34, 197, 94, 0.15)',
+                                  color: '#4ade80',
+                                  border: '1px solid rgba(34, 197, 94, 0.3)',
+                                };
+                              } else if (!hasThisTool) {
+                                displayText = t.toolMissing || (language === 'en' ? 'Missing' : '缺少');
+                                badgeStyle = {
+                                  background: 'rgba(239, 68, 68, 0.15)',
+                                  color: '#f87171',
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                };
+                              } else {
+                                const targetTool = matchingTools[0];
+                                const dbI = items.find((i) => i.itemId === targetTool.itemId);
+                                const percent = getItemDurabilityPercent(targetTool, dbI);
+                                const statusInfo = getDurabilityStatusInfo(percent, language);
+                                displayText = statusInfo.text;
+                                badgeStyle = statusInfo.badgeStyle;
+                              }
+
                               return (
                                 <span
                                   key={toolType}
                                   style={{
                                     padding: '2px 6px',
                                     borderRadius: '4px',
-                                    background: hasThisTool ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                                    color: hasThisTool ? '#4ade80' : '#f87171',
-                                    border: `1px solid ${hasThisTool ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                                    ...badgeStyle,
                                   }}
                                 >
-                                  {typeName} ({hasThisTool ? (t.toolAvailable || '已具備') : (t.toolMissing || '缺少')})
+                                  {typeName} ({displayText})
                                 </span>
                               );
                             }

@@ -28,6 +28,8 @@ export const TopHUD = () => {
   const viewMode = useGameStore((state) => state.viewMode);
   const setViewMode = useGameStore((state) => state.setViewMode);
   const settleEnergyRecovery = useGameStore((state) => state.settleEnergyRecovery);
+  const settleInventoryDecay = useGameStore((state) => state.settleInventoryDecay);
+  const settleGroundItemsDecay = useGameStore((state) => state.settleGroundItemsDecay);
   const t = translations[language] || translations['zh-TW'];
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -91,6 +93,17 @@ export const TopHUD = () => {
       clearInterval(interval);
     };
   }, [player, isFullEnergy, settleEnergyRecovery]);
+
+  useEffect(() => {
+    if (!player) return;
+    const updateDecay = () => {
+      if (settleInventoryDecay) settleInventoryDecay();
+      if (settleGroundItemsDecay) settleGroundItemsDecay();
+    };
+    updateDecay();
+    const interval = setInterval(updateDecay, 10000);
+    return () => clearInterval(interval);
+  }, [player, settleInventoryDecay, settleGroundItemsDecay]);
 
   const formatCountdown = (secs) => {
     if (secs <= 0) return '00:00';

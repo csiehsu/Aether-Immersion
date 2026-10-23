@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -27,6 +27,11 @@ export const CraftPanel = () => {
   const [craftQty, setCraftQty] = useState(1);
 
   const currentLocation = locations.find((l) => l.locationId === player?.location);
+  const locBuildingList = currentLocation?.buildings || [];
+  const locBuildingTypes = locBuildingList.map((b) => {
+    const dbB = buildings.find((item) => item.buildingId === b.buildingId);
+    return dbB ? dbB.type : b.buildingId;
+  });
 
   /**
    * 檢查目前場景建築或背包中是否具備配方所需的工具設施。
@@ -37,11 +42,6 @@ export const CraftPanel = () => {
     if (!rec.requiredToolTypes || rec.requiredToolTypes.length === 0) {
       return true;
     }
-    const locBuildingList = currentLocation?.buildings || [];
-    const locBuildingTypes = locBuildingList.map((b) => {
-      const dbB = buildings.find((item) => item.buildingId === b.buildingId);
-      return dbB ? dbB.type : b.buildingId;
-    });
 
     const invToolTypes = inventory.flatMap((inv) => {
       const dbI = items.find((i) => i.itemId === inv.itemId);
@@ -178,9 +178,6 @@ export const CraftPanel = () => {
 
             const toolLabelText = language === 'en' ? 'Required Tools:' : '需要工具：';
 
-            const reqToolsStr = rec.requiredToolTypes && rec.requiredToolTypes.length > 0
-              ? rec.requiredToolTypes.map((type) => getLocalizedType(type, language)).join(', ')
-              : (language === 'en' ? 'None' : '無');
 
             const reqItemsList = rec.requiredItems || [];
             const hasSelectedAllMaterials = reqItemsList.length === 0 || reqItemsList.every((req, reqIdx) => {
@@ -299,9 +296,60 @@ export const CraftPanel = () => {
                     );
                   })}
 
-                  <div className="recipe-detail-row">
+                  <div className="recipe-detail-row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                     <span className="recipe-detail-label">{toolLabelText}</span>
-                    <span className="recipe-detail-val">{reqToolsStr}</span>
+                    {(!rec.requiredToolTypes || rec.requiredToolTypes.length === 0) ? (
+                      <span className="recipe-detail-val">{language === 'en' ? 'None' : '無'}</span>
+                    ) : (
+                      <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {rec.requiredToolTypes.map((type) => {
+                          const isBuilding = locBuildingTypes.includes(type);
+                          const matchingTools = getMatchingToolsAscending(inventory, type, items);
+                          const hasThisTool = isBuilding || matchingTools.length > 0;
+                          const typeName = getLocalizedType(type, language);
+
+                          let displayText;
+                              let badgeStyle;
+
+                          if (isBuilding) {
+                            displayText = t.toolFacility || (language === 'en' ? 'Facility' : '已具備(設施)');
+                            badgeStyle = {
+                              background: 'rgba(34, 197, 94, 0.15)',
+                              color: '#4ade80',
+                              border: '1px solid rgba(34, 197, 94, 0.3)',
+                            };
+                          } else if (!hasThisTool) {
+                            displayText = t.toolMissing || (language === 'en' ? 'Missing' : '缺少');
+                            badgeStyle = {
+                              background: 'rgba(239, 68, 68, 0.15)',
+                              color: '#f87171',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                            };
+                          } else {
+                            const targetTool = matchingTools[0];
+                            const dbI = items.find((i) => i.itemId === targetTool.itemId);
+                            const percent = getItemDurabilityPercent(targetTool, dbI);
+                            const statusInfo = getDurabilityStatusInfo(percent, language);
+                            displayText = statusInfo.text;
+                            badgeStyle = statusInfo.badgeStyle;
+                          }
+
+                          return (
+                            <span
+                              key={type}
+                              style={{
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '0.8rem',
+                                ...badgeStyle,
+                              }}
+                            >
+                              {typeName} ({displayText})
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {(() => {

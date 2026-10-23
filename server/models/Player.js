@@ -27,6 +27,7 @@ const InventoryItemSchema = new mongoose.Schema(
       water: { type: Number, default: 0 },
       food: { type: Number, default: 0 },
     },
+    lastDecayedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );

@@ -261,6 +261,51 @@ export const getItemDurabilityPercent = (item, dbItem) => {
 };
 
 /**
+ * 依耐久度百分比取得道具狀態文字與顏色樣式。
+ * 規則：
+ * - 91% 以上（綠色）：穩固 (Sturdy)
+ * - 31% - 90%（黃色）：普通 (Decent)
+ * - 30% 以下（紅色）：破舊 (Worn)
+ *
+ * @param {number} percent - 耐久度百分比 (0-100)。
+ * @param {string} [language='zh-TW'] - 語系代碼 ('zh-TW' 或 'en')。
+ * @returns {{ text: string, color: string, badgeStyle: { background: string, color: string, border: string } }}
+ */
+export const getDurabilityStatusInfo = (percent, language = 'zh-TW') => {
+  if (percent <= 30) {
+    return {
+      text: language === 'en' ? 'Worn' : '破舊',
+      color: '#ef4444',
+      badgeStyle: {
+        background: 'rgba(239, 68, 68, 0.15)',
+        color: '#f87171',
+        border: '1px solid rgba(239, 68, 68, 0.3)',
+      },
+    };
+  }
+  if (percent <= 90) {
+    return {
+      text: language === 'en' ? 'Decent' : '普通',
+      color: '#eab308',
+      badgeStyle: {
+        background: 'rgba(234, 179, 8, 0.15)',
+        color: '#facc15',
+        border: '1px solid rgba(234, 179, 8, 0.3)',
+      },
+    };
+  }
+  return {
+    text: language === 'en' ? 'Sturdy' : '穩固',
+    color: '#22c55e',
+    badgeStyle: {
+      background: 'rgba(34, 197, 94, 0.15)',
+      color: '#4ade80',
+      border: '1px solid rgba(34, 197, 94, 0.3)',
+    },
+  };
+};
+
+/**
  * 比較兩道具之耐久度，依指定排序方式排序（耐久度相同時維持原順序）。
  * @param {Object} a - 道具 A。
  * @param {Object} b - 道具 B。
@@ -277,6 +322,286 @@ export const compareItemDurability = (a, b, order = 'asc') => {
   if (durA > 0 && durB <= 0) return -1;
   if (durA <= 0 && durB > 0) return 1;
   return 0;
+};
+
+/**
+ * 判斷指定道具是否會隨時間腐敗。
+ * 規則：道具定義中的 type 包含 'DECAY' 且具有耐久度 (durability > 0)；工具或無 DECAY 標籤者不腐爛。
+ * @param {Object} item - 道具實體物件。
+ * @param {Object} [dbItem] - 物品基礎定義物件。
+ * @returns {boolean} 是否會腐爛。
+ */
+export const isDecayItem = (item, dbItem) => {
+  if (!item && !dbItem) return false;
+  const curDur = (item?.durability !== undefined && item?.durability !== null) ? Number(item.durability) : -1;
+  const maxDur = (item?.maxDurability !== undefined && item?.maxDurability !== null) ? Number(item.maxDurability) : -1;
+  const baseDur = (dbItem?.durability !== undefined && dbItem?.durability !== null) ? Number(dbItem.durability) : -1;
+  const hasDurability = curDur > 0 || maxDur > 0 || baseDur > 0;
+  if (!hasDurability) return false;
+
+  const rawType = dbItem?.type || item?.type;
+  if (!rawType) return false;
+  if (Array.isArray(rawType)) {
+    return rawType.includes('DECAY');
+  }
+  if (typeof rawType === 'string') {
+    return rawType.split(',').map((t) => t.trim()).includes('DECAY');
+  }
+  return false;
+};
+
+/**
+ * 結算道具清單的腐爛狀態。
+ * 規則：
+ * 1. 每 1 分鐘 -1 耐久度，以道具獨立時間戳 (lastDecayedAt) 為準。
+ * 2. 耐久度扣至 <= 0 時自動刪除。
+ * 3. 推進時間戳時保留未滿 1 分鐘的餘額 (lastTime + elapsedMinutes * 60000)。
+ * 4. 若為玩家道具 (isPlayer=true) 且發生腐爛，記錄腐爛物品資訊以便後續發送系統訊息。
+ *
+ * @param {Array<Object>} [items=[]] - 道具實體清單（背包或地面物品）。
+ * @param {Array<Object>} [allDbItems=[]] - 物品基礎定義清單。
+ * @param {Object} [options={}] - 選項物件。
+ * @param {boolean} [options.isPlayer=false] - 是否為玩家背包物品。
+ * @param {number|Date} [options.currentTime] - 當前結算時間（預設為 Date.now()）。
+ * @returns {{ updatedItems: Array<Object>, rottedItems: Array<Object>, isChanged: boolean }}
+ */
+export const settleItemDecay = (items = [], allDbItems = [], options = {}) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return { updatedItems: [], rottedItems: [], isChanged: false };
+  }
+
+  const isPlayer = Boolean(options.isPlayer);
+  const now = options.currentTime ? new Date(options.currentTime).getTime() : Date.now();
+  const dbItemMap = new Map();
+  if (Array.isArray(allDbItems)) {
+    for (const d of allDbItems) {
+      if (d && d.itemId) {
+        dbItemMap.set(d.itemId, d);
+      }
+    }
+  }
+
+  const updatedItems = [];
+  const rottedItems = [];
+  let isChanged = false;
+
+  for (const rawItem of items) {
+    const item = rawItem && rawItem.toObject ? rawItem.toObject() : { ...rawItem };
+    const dbItem = dbItemMap.get(item.itemId);
+
+    if (!isDecayItem(item, dbItem)) {
+      updatedItems.push(item);
+      continue;
+    }
+
+    const lastTime = item.lastDecayedAt ? new Date(item.lastDecayedAt).getTime() : now;
+    if (!item.lastDecayedAt) {
+      item.lastDecayedAt = new Date(now).toISOString();
+      isChanged = true;
+    }
+
+    const elapsedMs = Math.max(0, now - lastTime);
+    const elapsedMinutes = Math.floor(elapsedMs / 60000);
+
+    if (elapsedMinutes <= 0) {
+      updatedItems.push(item);
+      continue;
+    }
+
+    isChanged = true;
+    const currentDur = Number(item.durability) || 0;
+    const newDurability = currentDur - elapsedMinutes;
+
+    if (newDurability <= 0) {
+      if (isPlayer) {
+        const itemName = item.customName || dbItem?.name || item.itemId;
+        const itemNameEn = item.customNameEn || dbItem?.nameEn || dbItem?.name || item.itemId;
+        rottedItems.push({
+          instanceId: item.instanceId,
+          itemId: item.itemId,
+          name: itemName,
+          nameEn: itemNameEn,
+          count: item.count || 1,
+        });
+      }
+      // 耐久 <= 0 時自動刪除，不推入 updatedItems
+    } else {
+      const newLastDecayedAt = new Date(lastTime + elapsedMinutes * 60000).toISOString();
+      updatedItems.push({
+        ...item,
+        durability: newDurability,
+        lastDecayedAt: newLastDecayedAt,
+      });
+    }
+  }
+
+  return { updatedItems, rottedItems, isChanged };
+};
+
+/**
+ * 取得背包中符合特定工具類型的所有可用工具實體（durability > 0），並依耐久度升序排序（最低耐久者優先）。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包清單。
+ * @param {string} toolType - 所需工具類型。
+ * @param {Array<Object>} [allDbItems=[]] - 物品基礎定義清單。
+ * @returns {Array<Object>} 排序後的工具實體陣列。
+ */
+export const getMatchingToolsAscending = (inventory = [], toolType, allDbItems = []) => {
+  if (!Array.isArray(inventory) || !toolType) return [];
+  const dbItemMap = new Map();
+  if (Array.isArray(allDbItems)) {
+    for (const d of allDbItems) {
+      if (d && d.itemId) dbItemMap.set(d.itemId, d);
+    }
+  }
+
+  const matching = [];
+  for (const item of inventory) {
+    if (!item || !item.itemId) continue;
+    const dbItem = dbItemMap.get(item.itemId);
+    const rawTypes = dbItem?.type || item.type;
+    const types = Array.isArray(rawTypes) ? rawTypes : (rawTypes ? [rawTypes] : []);
+    if (!types.includes(toolType)) continue;
+
+    // 檢查耐久度：實體或基礎定義有耐久度，且當前耐久 > 0
+    const dur = item.durability !== undefined && item.durability !== null ? Number(item.durability) : -1;
+    if (dur > 0) {
+      matching.push(item);
+    }
+  }
+
+  // 依耐久度升序排序（最低耐久度者排第一位）
+  matching.sort((a, b) => compareItemDurability(a, b, 'asc'));
+  return matching;
+};
+
+/**
+ * 計算單一工具在單次精力消耗下最大可執行的次數。
+ * 規則：
+ * 1. 若單次精力消耗 <= 0，工具不限制次數 (Infinity)。
+ * 2. 若工具耐久度不足以執行 1 次 (0 < durability < singleCost)，無論玩家選擇幾次，都只執行 1 次，接著毀壞。
+ * 3. 若耐久度 >= singleCost，可執行 Math.ceil(durability / singleCost) 次（最後一次即使剩餘耐久不足 1 次精力，亦允許執行最後 1 次後損毀）。
+ *
+ * @param {Object} tool - 工具實體物件。
+ * @param {number} singleCost - 單次行動實際精力消耗。
+ * @returns {number} 最大可執行次數。
+ */
+export const calculateToolMaxExecutions = (tool, singleCost) => {
+  if (typeof singleCost !== 'number' || singleCost <= 0) return Infinity;
+  const dur = Number(tool?.durability) || 0;
+  if (dur <= 0) return 0;
+  return Math.max(1, Math.ceil(dur / singleCost));
+};
+
+/**
+ * 計算所有需求工具在該行動下的最大可執行次數（瓶頸最小值）。
+ * 若工具需求已由場景設施 (locBuildingTypes) 提供，則免扣耐久且不限制次數。
+ *
+ * @param {Array<Object>} [inventory=[]] - 玩家背包清單。
+ * @param {Array<string>} [requiredToolTypes=[]] - 行動所需工具類型。
+ * @param {number} [singleCost=0] - 單次行動實際精力消耗。
+ * @param {Array<Object>} [allDbItems=[]] - 物品基礎定義清單。
+ * @param {Array<string>} [locBuildingTypes=[]] - 場景設施類型。
+ * @returns {{ maxExecutableQty: number, selectedTools: Map<string, Object> }}
+ */
+export const calculateMaxExecutableByTools = (
+  inventory = [],
+  requiredToolTypes = [],
+  singleCost = 0,
+  allDbItems = [],
+  locBuildingTypes = []
+) => {
+  const nonConsumables = (requiredToolTypes || []).filter((t) => t !== 'BAIT');
+  if (nonConsumables.length === 0) {
+    return { maxExecutableQty: Infinity, selectedTools: new Map() };
+  }
+
+  let minLimit = Infinity;
+  const selectedTools = new Map();
+
+  for (const toolType of nonConsumables) {
+    // 1. 若場景內已有固定建築（如工作檯、爐台），免扣耐久且不限次數
+    if (Array.isArray(locBuildingTypes) && locBuildingTypes.includes(toolType)) {
+      continue;
+    }
+
+    // 2. 需由背包提供：篩選並按耐久升序排序
+    const matching = getMatchingToolsAscending(inventory, toolType, allDbItems);
+    if (matching.length === 0) {
+      return { maxExecutableQty: 0, selectedTools };
+    }
+
+    const chosenTool = matching[0];
+    selectedTools.set(toolType, chosenTool);
+
+    const limit = calculateToolMaxExecutions(chosenTool, singleCost);
+    if (limit < minLimit) {
+      minLimit = limit;
+    }
+  }
+
+  return {
+    maxExecutableQty: minLimit,
+    selectedTools,
+  };
+};
+
+/**
+ * 扣除背包工具的耐久度，若耐久度扣至 <= 0 則自背包中刪除該道具實體，並回傳損壞的工具資訊。
+ *
+ * @param {Array<Object>} [inventory=[]] - 玩家背包清單。
+ * @param {Map<string, Object>|Array<Object>} [toolsToConsume=[]] - 欲扣除的工具實體。
+ * @param {number} [totalEnergyCost=0] - 該次行動實際消耗的總精力量。
+ * @returns {{ updatedInventory: Array<Object>, brokenTools: Array<Object> }}
+ */
+export const applyToolsDurabilityDeduction = (
+  inventory = [],
+  toolsToConsume = [],
+  totalEnergyCost = 0
+) => {
+  const toolList = Array.isArray(toolsToConsume)
+    ? toolsToConsume
+    : (toolsToConsume instanceof Map ? Array.from(toolsToConsume.values()) : []);
+
+  if (toolList.length === 0 || totalEnergyCost <= 0) {
+    return { updatedInventory: [...inventory], brokenTools: [] };
+  }
+
+  const brokenTools = [];
+  const brokenInstanceIds = new Set();
+  const updatedDurabilityMap = new Map();
+
+  for (const tool of toolList) {
+    const curDur = Number(tool.durability) || 0;
+    const newDur = Math.round((curDur - totalEnergyCost) * 100) / 100;
+
+    if (newDur <= 0) {
+      brokenInstanceIds.add(tool.instanceId);
+      brokenTools.push({
+        ...tool,
+        durability: 0,
+      });
+    } else {
+      updatedDurabilityMap.set(tool.instanceId, newDur);
+    }
+  }
+
+  const updatedInventory = [];
+  for (const item of inventory) {
+    if (brokenInstanceIds.has(item.instanceId)) {
+      // 耐久扣至 <= 0，直接自背包中刪除該道具實體
+      continue;
+    }
+    if (updatedDurabilityMap.has(item.instanceId)) {
+      updatedInventory.push({
+        ...item,
+        durability: updatedDurabilityMap.get(item.instanceId),
+      });
+    } else {
+      updatedInventory.push({ ...item });
+    }
+  }
+
+  return { updatedInventory, brokenTools };
 };
 
 /**
@@ -304,6 +629,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
         customNameEn: itemToAdd.customNameEn || '',
         bonusNutrition: itemToAdd.bonusNutrition ? { ...itemToAdd.bonusNutrition } : undefined,
         triggerQuestId: itemToAdd.triggerQuestId || '',
+        lastDecayedAt: itemToAdd.lastDecayedAt ? new Date(itemToAdd.lastDecayedAt).toISOString() : new Date().toISOString(),
       });
     }
     return updated;
@@ -325,6 +651,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
       customNameEn: itemToAdd.customNameEn || '',
       bonusNutrition: itemToAdd.bonusNutrition ? { ...itemToAdd.bonusNutrition } : undefined,
       triggerQuestId: itemToAdd.triggerQuestId || '',
+      lastDecayedAt: itemToAdd.lastDecayedAt ? new Date(itemToAdd.lastDecayedAt).toISOString() : new Date().toISOString(),
     });
   }
   return updated;
@@ -343,6 +670,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
  * @param {string} [options.customName] - 自訂/詞綴中文名稱。
  * @param {string} [options.customNameEn] - 自訂/詞綴英文名稱。
  * @param {Object} [options.bonusNutrition] - 附加營養值物件。
+ * @param {Date|string} [options.lastDecayedAt] - 道具時間戳。
  * @returns {Array<Object>} 更新後的背包陣列。
  */
 export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}) => {
@@ -359,6 +687,8 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
     quality: options.quality || '普通',
   };
 
+  const itemLastDecayedAt = options.lastDecayedAt ? new Date(options.lastDecayedAt).toISOString() : new Date().toISOString();
+
   if (isDurabilityItem) {
     for (let k = 0; k < addQty; k++) {
       updated.push({
@@ -368,6 +698,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
         durability: options.durability,
         maxDurability: options.maxDurability !== undefined && options.maxDurability > 0 ? options.maxDurability : options.durability,
         quality: options.quality || '普通',
+        lastDecayedAt: itemLastDecayedAt,
         ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
         ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
       });
@@ -398,6 +729,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
       durability: options.durability !== undefined ? options.durability : -1,
       maxDurability: options.maxDurability !== undefined ? options.maxDurability : -1,
       quality: options.quality || '普通',
+      lastDecayedAt: itemLastDecayedAt,
       ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
       ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
     });

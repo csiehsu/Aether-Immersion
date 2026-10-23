@@ -38,6 +38,9 @@ import {
   addItemsToInventory,
   isPlayerOverburdened,
   compareItemDurability,
+  settleItemDecay,
+  calculateMaxExecutableByTools,
+  applyToolsDurabilityDeduction,
 } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -76,6 +79,15 @@ collectionRoutes.forEach(({ path, model, initialData }) => {
   router.get(path, async (req, res) => {
     try {
       const result = await fetchCollectionData(model, initialData);
+      if (path === '/locations' && Array.isArray(result.data)) {
+        let allDbItems = await Item.find();
+        if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+        for (const loc of result.data) {
+          if (loc.placedItems && loc.placedItems.length > 0) {
+            await settleLocationPlacedItemsDecay(loc, allDbItems);
+          }
+        }
+      }
       res.json({ success: true, ...result });
     } catch (err) {
       console.error(`[API Error] GET ${path}:`, err);
@@ -83,6 +95,68 @@ collectionRoutes.forEach(({ path, model, initialData }) => {
     }
   });
 });
+
+/**
+ * 結算玩家背包道具腐敗狀態，若有道具扣至 <= 0 則自動刪除並記錄系統提示訊息。
+ * @param {Object} player - 玩家 Mongoose 文件物件。
+ * @param {Array<Object>} allDbItems - 物品基礎定義清單。
+ * @returns {Promise<boolean>} 若玩家背包有變更回傳 true，否則回傳 false。
+ */
+const settlePlayerInventoryDecay = async (player, allDbItems) => {
+  if (!player || !player.inventory || player.inventory.length === 0) return false;
+  const { updatedItems, rottedItems, isChanged } = settleItemDecay(
+    player.inventory,
+    allDbItems,
+    { isPlayer: true }
+  );
+
+  if (isChanged) {
+    player.inventory = updatedItems;
+    player.markModified('inventory');
+  }
+
+  if (rottedItems && rottedItems.length > 0) {
+    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+    for (const rotted of rottedItems) {
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `${rotted.name}已腐敗。`,
+        textEn: `${rotted.nameEn} has rotted.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+  }
+
+  return isChanged;
+};
+
+/**
+ * 結算指定場景中地面放置道具的腐敗狀態，扣至 <= 0 自動刪除，不發送提示訊息。
+ * @param {Object} location - 地點 Mongoose 文件物件。
+ * @param {Array<Object>} allDbItems - 物品基礎定義清單。
+ * @returns {Promise<boolean>} 若地面放置道具清單有變更回傳 true，否則回傳 false。
+ */
+const settleLocationPlacedItemsDecay = async (location, allDbItems) => {
+  if (!location || !location.placedItems || location.placedItems.length === 0) return false;
+  const { updatedItems, isChanged } = settleItemDecay(
+    location.placedItems,
+    allDbItems,
+    { isPlayer: false }
+  );
+
+  if (isChanged) {
+    location.placedItems = updatedItems;
+    location.markModified('placedItems');
+    await location.save();
+  }
+
+  return isChanged;
+};
 
 /**
  * 清理並標準化玩家背包道具結構，確保具備 instanceId、itemId、count 等必填欄位。
@@ -108,6 +182,7 @@ const sanitizeInventoryItems = (inventory) => {
       customName: raw.customName || '',
       customNameEn: raw.customNameEn || '',
       bonusNutrition: raw.bonusNutrition ? { ...raw.bonusNutrition } : undefined,
+      lastDecayedAt: raw.lastDecayedAt ? new Date(raw.lastDecayedAt) : new Date(),
     });
   }
   return clean;
@@ -213,6 +288,7 @@ const transferPlacedItemToPlayer = (location, instanceId, player) => {
       customName: itemToPick.customName || '',
       customNameEn: itemToPick.customNameEn || '',
       bonusNutrition: itemToPick.bonusNutrition,
+      lastDecayedAt: itemToPick.lastDecayedAt || new Date(),
     }
   );
   return itemToPick;
@@ -378,7 +454,10 @@ router.get('/player', async (req, res) => {
       console.log('[MongoDB] Created initial player record in MongoDB.');
     } else {
       const energyUpdated = settleEnergyRecovery(player);
-      let updated = energyUpdated;
+      let allDbItems = await Item.find();
+      if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+      const decayUpdated = await settlePlayerInventoryDecay(player, allDbItems);
+      let updated = energyUpdated || decayUpdated;
 
       if (player.isCharacterCreated) {
         const currentMentor = player.mentor || 'Martha';
@@ -624,75 +703,84 @@ router.post('/player/gather', async (req, res) => {
       return res.status(400).json({ success: false, message: '當前地點無法採集該資源！' });
     }
 
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settlePlayerInventoryDecay(player, allDbItems);
+    const requiredToolTypes = spot.requiredToolTypes || [];
+
     const unitCost = spot.cost ?? 1;
-    const baseTotalCost = unitCost * addQty;
-    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+    const singleCost = calculateEffectiveEnergyCost(player, unitCost);
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
-    if (currentEnergy < totalCost) {
+    if (singleCost > 0 && currentEnergy < singleCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
-    player.inventory = sanitizeInventoryItems(player.inventory);
-    const requiredToolTypes = spot.requiredToolTypes || [];
+    const locBuildingList = locationDoc?.buildings || [];
+    const locBuildingIds = locBuildingList.map((b) => b.buildingId);
+    let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
+    const locBuildingTypes = locBuildingList.map((b) => {
+      const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
+      return found?.type || b.buildingId;
+    });
 
-    if (requiredToolTypes.length > 0) {
-      const invItemIds = player.inventory.map((i) => i.itemId);
-      let dbItems = await Item.find({ itemId: { $in: invItemIds } });
-      if (!dbItems || dbItems.length === 0) {
-        dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
-      }
+    // 依耐久度升序檢查工具需求，並計算工具最大可執行次數（瓶頸最小值）
+    const { maxExecutableQty: maxByTools, selectedTools } = calculateMaxExecutableByTools(
+      player.inventory,
+      requiredToolTypes,
+      singleCost,
+      allDbItems,
+      locBuildingTypes
+    );
 
+    if (maxByTools === 0) {
+      return res.status(400).json({ success: false, message: '缺少採集所需工具！' });
+    }
+
+    // 檢查肉餌需求與最大可執行次數
+    let maxByBait = Infinity;
+    if (requiredToolTypes.includes('BAIT')) {
       const getItemTypes = (targetItemId) => {
-        const found = dbItems.find((d) => d.itemId === targetItemId) || initialItems.find((d) => d.itemId === targetItemId);
+        const found = allDbItems.find((d) => d.itemId === targetItemId);
         if (!found || !found.type) return [];
         return Array.isArray(found.type) ? found.type : [found.type];
       };
-
-      const locBuildingList = locationDoc?.buildings || [];
-      const locBuildingIds = locBuildingList.map((b) => b.buildingId);
-      let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
-      const locBuildingTypes = locBuildingList.map((b) => {
-        const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
-        return found?.type || b.buildingId;
-      });
-
-      const nonConsumableReqs = requiredToolTypes.filter((t) => t !== 'BAIT');
-      for (const reqTool of nonConsumableReqs) {
-        const hasInBuildings = locBuildingTypes.includes(reqTool);
-        const hasInInventory = player.inventory.some((inv) => {
-          const types = getItemTypes(inv.itemId);
-          return types.includes(reqTool) && (inv.count || 1) > 0;
-        });
-        if (!hasInBuildings && !hasInInventory) {
-          return res.status(400).json({ success: false, message: '缺少採集所需工具！' });
-        }
+      const baitEntries = player.inventory.filter((inv) => getItemTypes(inv.itemId).includes('BAIT'));
+      const totalBaitCount = baitEntries.reduce((sum, inv) => sum + (inv.count || 1), 0);
+      if (totalBaitCount < 1) {
+        return res.status(400).json({ success: false, message: '肉餌數量不足！' });
       }
+      maxByBait = totalBaitCount;
+    }
 
-      if (requiredToolTypes.includes('BAIT')) {
-        const requiredBaitQty = 1 * addQty;
-        const baitEntries = player.inventory.filter((inv) => getItemTypes(inv.itemId).includes('BAIT'));
-        const totalBaitCount = baitEntries.reduce((sum, inv) => sum + (inv.count || 1), 0);
+    const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
 
-        if (totalBaitCount < requiredBaitQty) {
-          return res.status(400).json({ success: false, message: '肉餌數量不足！' });
-        }
+    // 計算實際執行次數（受限於精力、肉餌與工具耐久度）
+    const actualQty = Math.max(1, Math.min(addQty, maxByEnergy, maxByBait, maxByTools));
+    const isLimitedByTools = maxByTools < addQty && actualQty === maxByTools;
 
-        let remainingToDeduct = requiredBaitQty;
-        for (const inv of player.inventory) {
-          if (remainingToDeduct <= 0) break;
-          if (getItemTypes(inv.itemId).includes('BAIT')) {
-            const curCount = inv.count || 1;
-            if (curCount <= remainingToDeduct) {
-              inv.count = 0;
-              remainingToDeduct -= curCount;
-            } else {
-              inv.count = curCount - remainingToDeduct;
-              remainingToDeduct = 0;
-            }
+    const baseTotalCost = unitCost * actualQty;
+    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+
+    // 扣除肉餌
+    if (requiredToolTypes.includes('BAIT')) {
+      let remainingToDeduct = 1 * actualQty;
+      for (const inv of player.inventory) {
+        if (remainingToDeduct <= 0) break;
+        const dbI = allDbItems.find((d) => d.itemId === inv.itemId);
+        const types = dbI?.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
+        if (types.includes('BAIT')) {
+          const curCount = inv.count || 1;
+          if (curCount <= remainingToDeduct) {
+            inv.count = 0;
+            remainingToDeduct -= curCount;
+          } else {
+            inv.count = curCount - remainingToDeduct;
+            remainingToDeduct = 0;
           }
         }
-        player.inventory = player.inventory.filter((i) => (i.count || 0) > 0);
       }
+      player.inventory = player.inventory.filter((i) => (i.count || 0) > 0);
     }
 
     const maxEnergy = player.maxEnergy ?? 4320;
@@ -704,10 +792,19 @@ router.post('/player/gather', async (req, res) => {
     applyEnergyConsumption(player, totalCost);
     player.markModified('stats');
 
-    // 依據採集次數、單次獲得量上限與機率進行隨機抽籤
+    // 扣除工具耐久度，耐久度 <= 0 自動自背包刪除實體
+    const { updatedInventory, brokenTools } = applyToolsDurabilityDeduction(
+      player.inventory,
+      selectedTools,
+      totalCost
+    );
+    player.inventory = updatedInventory;
+    player.markModified('inventory');
+
+    // 依據實際採集次數、單次獲得量上限與機率進行隨機抽籤
     const maxYield = Math.max(1, Number(spot.maxYield) || 1);
     const dropChance = typeof spot.chance === 'number' ? spot.chance : 100;
-    const totalRolls = addQty * maxYield;
+    const totalRolls = actualQty * maxYield;
     let gainedQty = 0;
     for (let i = 0; i < totalRolls; i++) {
       if (Math.random() * 100 < dropChance) {
@@ -770,12 +867,45 @@ router.post('/player/gather', async (req, res) => {
       player.markModified('inventory');
     }
 
+    // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
+    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+
+    if (isLimitedByTools) {
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `只執行了${actualQty}次，工具就壞了。`,
+        textEn: `Only executed ${actualQty} times before the tool broke.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
+    for (const bTool of brokenTools) {
+      const dbI = allDbItems.find((d) => d.itemId === bTool.itemId);
+      const toolName = bTool.customName || dbI?.name || bTool.itemId;
+      const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `${toolName}已損壞。`,
+        textEn: `${toolNameEn} has broken.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
     await player.save();
     return res.json({
       success: true,
       source: 'mongodb',
       data: formatPlayerResponse(player),
-      result: { gainedQty, gainedExp: expToAdd },
+      result: { gainedQty, gainedExp: expToAdd, actualQty, requestedQty: addQty },
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/gather:', err);
@@ -806,11 +936,15 @@ router.post('/player/travel', async (req, res) => {
       return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
     }
 
-    const invItemIds = (player.inventory || []).map((i) => i.itemId);
-    let dbItems = await Item.find({ itemId: { $in: invItemIds } });
-    if (!dbItems || dbItems.length === 0) {
-      dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) {
+      allDbItems = initialItems;
     }
+    await settlePlayerInventoryDecay(player, allDbItems);
+
+    const invItemIds = (player.inventory || []).map((i) => i.itemId);
+    let dbItems = allDbItems.filter((i) => invItemIds.includes(i.itemId));
 
     if (isPlayerOverburdened(player, player.inventory, dbItems)) {
       return res.status(400).json({ success: false, message: '背包負重超載，無法移動！' });
@@ -819,6 +953,13 @@ router.post('/player/travel', async (req, res) => {
     let locationDoc = await Location.findOne({ locationId: player.location });
     if (!locationDoc) {
       locationDoc = initialLocations.find((l) => l.locationId === player.location);
+    } else {
+      await settleLocationPlacedItemsDecay(locationDoc, allDbItems);
+    }
+
+    const targetLocDoc = await Location.findOne({ locationId: targetLocationId });
+    if (targetLocDoc) {
+      await settleLocationPlacedItemsDecay(targetLocDoc, allDbItems);
     }
 
     const connection = (locationDoc?.connections || []).find((c) => c.targetLocationId === targetLocationId);
@@ -911,42 +1052,94 @@ router.post('/player/craft', async (req, res) => {
       return found?.type || b.buildingId;
     });
 
-    const cleanInventory = sanitizeInventoryItems(player.inventory);
-    const invItemIds = cleanInventory.map((i) => i.itemId);
-    let dbItems = await Item.find({ itemId: { $in: invItemIds } });
-    if (!dbItems || dbItems.length === 0) {
-      dbItems = initialItems.filter((i) => invItemIds.includes(i.itemId));
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) {
+      allDbItems = initialItems;
     }
+    await settlePlayerInventoryDecay(player, allDbItems);
+    const cleanInventory = player.inventory;
+    const invItemIds = cleanInventory.map((i) => i.itemId);
+    let dbItems = allDbItems.filter((i) => invItemIds.includes(i.itemId));
     const getItemTypes = (targetItemId) => {
       const found = dbItems.find((d) => d.itemId === targetItemId) || initialItems.find((d) => d.itemId === targetItemId);
       if (!found || !found.type) return [];
       return Array.isArray(found.type) ? found.type : [found.type];
     };
 
-    const invToolTypes = cleanInventory.flatMap((inv) => getItemTypes(inv.itemId));
-    const reqTools = recipe.requiredToolTypes || [];
-    const hasTools = reqTools.every((t) => locBuildingTypes.includes(t) || invToolTypes.includes(t));
-    if (!hasTools) {
-      return res.status(400).json({ success: false, message: '缺少合成所需工具！' });
-    }
-
-    const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
-    const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    const baseSingleEnergyCost = recipe.energyCost || 0;
+    const singleEnergyCost = calculateEffectiveEnergyCost(player, baseSingleEnergyCost);
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
-    if (currentEnergy < totalEnergyCost) {
+    if (singleEnergyCost > 0 && currentEnergy < singleEnergyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
     }
 
+    const reqTools = recipe.requiredToolTypes || [];
+    // 依耐久度升序檢查工具需求，並計算工具最大可執行次數（瓶頸最小值）
+    const { maxExecutableQty: maxByTools, selectedTools } = calculateMaxExecutableByTools(
+      cleanInventory,
+      reqTools,
+      singleEnergyCost,
+      allDbItems,
+      locBuildingTypes
+    );
+
+    if (maxByTools === 0) {
+      return res.status(400).json({ success: false, message: '缺少合成所需工具！' });
+    }
+
     const reqItems = recipe.requiredItems || [];
-    let updatedInv = sanitizeInventoryItems(player.inventory);
+    let maxByMaterials = Infinity;
 
     for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
       const req = reqItems[reqIdx];
-      const requiredTotalCount = req.quantity * numCraftQty;
       const selectedId = selectedMaterials[reqIdx];
       if (!selectedId) {
         return res.status(400).json({ success: false, message: '未選擇所需材料！' });
       }
+
+      const matchingIndices = [];
+      cleanInventory.forEach((inv, idx) => {
+        if (inv.itemId === selectedId) {
+          matchingIndices.push(idx);
+        }
+      });
+      const totalAvailable = matchingIndices.reduce((sum, idx) => sum + (cleanInventory[idx].count || 1), 0);
+      const reqQty = req.quantity || 1;
+      const canDo = Math.floor(totalAvailable / reqQty);
+      if (canDo < 1) {
+        return res.status(400).json({ success: false, message: '材料不足或未持有指定材料！' });
+      }
+      if (canDo < maxByMaterials) {
+        maxByMaterials = canDo;
+      }
+
+      if (matchingIndices.length > 0) {
+        const firstMatchingItem = cleanInventory[matchingIndices[0]];
+        const types = getItemTypes(firstMatchingItem.itemId);
+        const matchesItem = req.itemId ? firstMatchingItem.itemId === req.itemId : false;
+        const matchesType = req.type ? types.includes(req.type) : false;
+        if (!matchesItem && !matchesType) {
+          return res.status(400).json({ success: false, message: '所選材料不符合配方需求！' });
+        }
+      }
+    }
+
+    const maxByEnergy = singleEnergyCost > 0 ? Math.floor(currentEnergy / singleEnergyCost) : Infinity;
+
+    // 計算實際執行次數（受限於精力、材料與工具耐久度）
+    const actualCraftQty = Math.max(1, Math.min(numCraftQty, maxByMaterials, maxByEnergy, maxByTools));
+    const isLimitedByTools = maxByTools < numCraftQty && actualCraftQty === maxByTools;
+
+    const baseEnergyCost = baseSingleEnergyCost * actualCraftQty;
+    const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+
+    let updatedInv = sanitizeInventoryItems(player.inventory);
+
+    for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
+      const req = reqItems[reqIdx];
+      const requiredTotalCount = req.quantity * actualCraftQty;
+      const selectedId = selectedMaterials[reqIdx];
 
       const matchingIndices = [];
       updatedInv.forEach((inv, idx) => {
@@ -955,18 +1148,6 @@ router.post('/player/craft', async (req, res) => {
         }
       });
       matchingIndices.sort((a, b) => compareItemDurability(updatedInv[a], updatedInv[b]));
-      const totalAvailable = matchingIndices.reduce((sum, idx) => sum + (updatedInv[idx].count || 1), 0);
-      if (totalAvailable < requiredTotalCount) {
-        return res.status(400).json({ success: false, message: '材料不足或未持有指定材料！' });
-      }
-
-      const firstMatchingItem = updatedInv[matchingIndices[0]];
-      const types = getItemTypes(firstMatchingItem.itemId);
-      const matchesItem = req.itemId ? firstMatchingItem.itemId === req.itemId : false;
-      const matchesType = req.type ? types.includes(req.type) : false;
-      if (!matchesItem && !matchesType) {
-        return res.status(400).json({ success: false, message: '所選材料不符合配方需求！' });
-      }
 
       let remainingDeduct = requiredTotalCount;
       for (const idx of matchingIndices) {
@@ -982,6 +1163,14 @@ router.post('/player/craft', async (req, res) => {
       }
     }
     updatedInv = updatedInv.filter((i) => (i.count || 0) > 0);
+
+    // 扣除背包工具耐久度，若耐久 <= 0 則自背包刪除
+    const { updatedInventory: invAfterTools, brokenTools } = applyToolsDurabilityDeduction(
+      updatedInv,
+      selectedTools,
+      totalEnergyCost
+    );
+    updatedInv = invAfterTools;
 
     let calculatedDurability = -1;
     const firstSelId = selectedMaterials[0];
@@ -1004,9 +1193,11 @@ router.post('/player/craft', async (req, res) => {
       }
     }
 
-    let allDbItems = await Item.find();
     if (!allDbItems || allDbItems.length === 0) {
-      allDbItems = initialItems;
+      allDbItems = await Item.find();
+      if (!allDbItems || allDbItems.length === 0) {
+        allDbItems = initialItems;
+      }
     }
 
     // 通用資料結構方式三：解析 base 材料與 modifier 材料
@@ -1101,7 +1292,7 @@ router.post('/player/craft', async (req, res) => {
     for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
       const out = effectiveOutputs[outIdx];
       const finalItemId = out.itemId;
-      const addQty = (out.quantity || 1) * numCraftQty;
+      const addQty = (out.quantity || 1) * actualCraftQty;
       const isPrimary = (outIdx === 0);
 
       const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
@@ -1123,6 +1314,7 @@ router.post('/player/craft', async (req, res) => {
             durability: finalDurability,
             maxDurability: finalMaxDurability,
             quality: '普通',
+            lastDecayedAt: new Date(),
             ...(customName ? { customName, customNameEn } : {}),
             ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
           });
@@ -1153,7 +1345,7 @@ router.post('/player/craft', async (req, res) => {
     let hasQuestUpdate = false;
     for (const out of effectiveOutputs) {
       const finalItemId = out.itemId;
-      const addQty = (out.quantity || 1) * numCraftQty;
+      const addQty = (out.quantity || 1) * actualCraftQty;
 
       for (const q of updatedQuests) {
         if (q.status !== 'IN_PROGRESS') continue;
@@ -1213,7 +1405,7 @@ router.post('/player/craft', async (req, res) => {
           }
         });
       }
-      const totalExpToAdd = (baseExp + materialBonusExp) * numCraftQty;
+      const totalExpToAdd = (baseExp + materialBonusExp) * actualCraftQty;
       if (totalExpToAdd > 0) {
         const updatedSkill = addLifeSkillExp(currentSkill, totalExpToAdd);
         player.lifeSkills[craftSkill] = {
@@ -1224,8 +1416,46 @@ router.post('/player/craft', async (req, res) => {
       }
     }
 
+    // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
+    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+
+    if (isLimitedByTools) {
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `只執行了${actualCraftQty}次，工具就壞了。`,
+        textEn: `Only executed ${actualCraftQty} times before the tool broke.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
+    for (const bTool of brokenTools) {
+      const dbI = allDbItems.find((d) => d.itemId === bTool.itemId);
+      const toolName = bTool.customName || dbI?.name || bTool.itemId;
+      const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `${toolName}已損壞。`,
+        textEn: `${toolNameEn} has broken.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
     await player.save();
-    return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
+    return res.json({
+      success: true,
+      source: 'mongodb',
+      data: formatPlayerResponse(player),
+      result: { craftQty: actualCraftQty, requestedQty: numCraftQty },
+    });
   } catch (err) {
     console.error('[API Error] POST /api/player/craft:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -1314,6 +1544,11 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到該地點！' });
     }
 
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settleLocationPlacedItemsDecay(location, allDbItems);
+    await settlePlayerInventoryDecay(player, allDbItems);
+
     // 尋找符合 instanceId 或 itemId 的所有地面物品
     const matchingIndices = [];
     (location.placedItems || []).forEach((item, idx) => {
@@ -1360,6 +1595,7 @@ router.post('/location/pickup-item', async (req, res) => {
         customNameEn: pItem.customNameEn || '',
         bonusNutrition: pItem.bonusNutrition ? { ...pItem.bonusNutrition } : undefined,
         triggerQuestId: pItem.triggerQuestId || '',
+        lastDecayedAt: pItem.lastDecayedAt || new Date(),
       });
 
       remainingToPick -= deductCount;
@@ -1388,6 +1624,7 @@ router.post('/location/pickup-item', async (req, res) => {
           customName: pItem.customName || '',
           customNameEn: pItem.customNameEn || '',
           bonusNutrition: pItem.bonusNutrition,
+          lastDecayedAt: pItem.lastDecayedAt,
         }
       );
     }
@@ -1426,6 +1663,11 @@ router.post('/player/drop-item', async (req, res) => {
     if (!location) {
       return res.status(404).json({ success: false, message: '找不到該地點！' });
     }
+
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settlePlayerInventoryDecay(player, allDbItems);
+    await settleLocationPlacedItemsDecay(location, allDbItems);
 
     player.inventory = sanitizeInventoryItems(player.inventory);
 
@@ -1474,6 +1716,7 @@ router.post('/player/drop-item', async (req, res) => {
         customName: invItem.customName || '',
         customNameEn: invItem.customNameEn || '',
         bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
+        lastDecayedAt: invItem.lastDecayedAt || new Date(),
       });
 
       remainingToDrop -= deductCount;

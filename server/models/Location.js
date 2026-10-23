@@ -50,6 +50,7 @@ const PlacedItemSchema = new mongoose.Schema(
       food: { type: Number, default: 0 },
     },
     triggerQuestId: { type: String, default: '' },
+    lastDecayedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
