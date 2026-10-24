@@ -85,6 +85,7 @@ export const translations = {
     overburdened: '負重超載',
     weight: '重量',
     gatherAttempts: '採集次數：',
+    notNeededNow: '現在還不需要這個。',
   },
   'en': {
     brand: 'Aether Immersion',
@@ -172,6 +173,7 @@ export const translations = {
     overburdened: 'Overburdened',
     weight: 'Weight',
     gatherAttempts: 'Attempts:',
+    notNeededNow: "You don't need this right now.",
   },
 };
 

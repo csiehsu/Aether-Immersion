@@ -1063,6 +1063,21 @@ export const useGameStore = create((set, get) => ({
     const currentFood = currentStats.food ?? MAX_FOOD;
     const currentHp = player.hp ?? MAX_HP;
 
+    // 若食用後會導致飽食度或水分超過上限，則無法食用
+    const wouldExceedFood = foodGain > 0 && Math.round((currentFood + foodGain) * 100) / 100 > MAX_FOOD;
+    const wouldExceedWater = waterGain > 0 && Math.round((currentWater + waterGain) * 100) / 100 > MAX_WATER;
+
+    if (wouldExceedFood || wouldExceedWater) {
+      get().addLog(
+        '系統',
+        'System',
+        '現在還不需要這個。',
+        "You don't need this right now.",
+        'system'
+      );
+      return false;
+    }
+
     // Add nutrition values onto player stats (accumulating rather than replacing)
     const newStr = Math.round((currentStr + strGain) * 100) / 100;
     const newSpd = Math.round((currentSpd + spdGain) * 100) / 100;

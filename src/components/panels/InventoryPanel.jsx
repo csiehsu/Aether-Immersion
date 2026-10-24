@@ -3,6 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { QuantitySelector } from '../common/QuantitySelector';
+import { MAX_WATER, MAX_FOOD } from '../../constants/gameConstants';
 import {
   calculateCurrentWeight,
   calculateMaxWeight,
@@ -197,6 +198,17 @@ export const InventoryPanel = () => {
               ? totalLiquidAmount > 1
               : (selectedGroup.totalCount || 1) > 1;
 
+            const currentStats = player?.stats || {};
+            const currentWater = currentStats.water ?? MAX_WATER;
+            const currentFood = currentStats.food ?? MAX_FOOD;
+
+            const qtyToConsume = Math.min(actionQty, maxActionQty);
+            const potentialFoodGain = (totalNutrition.food || 0) * qtyToConsume;
+            const potentialWaterGain = (totalNutrition.water || 0) * qtyToConsume;
+            const wouldExceedFood = potentialFoodGain > 0 && Math.round((currentFood + potentialFoodGain) * 100) / 100 > MAX_FOOD;
+            const wouldExceedWater = potentialWaterGain > 0 && Math.round((currentWater + potentialWaterGain) * 100) / 100 > MAX_WATER;
+            const isOverLimit = (isContainer ? totalLiquidAmount > 0 : hasNutrition) && (wouldExceedFood || wouldExceedWater);
+
             const hasDurability =
               (dbItem?.durability !== undefined && dbItem.durability > 0) ||
               sortedItems.some(
@@ -353,6 +365,12 @@ export const InventoryPanel = () => {
                   ) : null;
                 })()}
 
+                {isOverLimit && (
+                  <div style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: 600, marginTop: '4px' }}>
+                    <span>⚠️ {t.notNeededNow || (language === 'en' ? "You don't need this right now." : '現在還不需要這個。')}</span>
+                  </div>
+                )}
+
                 <div className="detail-action-container">
                   {showQuantitySelector && (
                     <div className="detail-qty-row">
@@ -374,6 +392,7 @@ export const InventoryPanel = () => {
                         className="btn-use-item"
                         disabled={isContainer && totalLiquidAmount <= 0}
                         style={isContainer && totalLiquidAmount <= 0 ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                        title={isOverLimit ? (t.notNeededNow || '現在還不需要這個。') : undefined}
                         onClick={async (e) => {
                           e.stopPropagation();
                           if (isContainer && totalLiquidAmount <= 0) return;
