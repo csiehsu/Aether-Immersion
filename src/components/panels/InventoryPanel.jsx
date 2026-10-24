@@ -140,10 +140,30 @@ export const InventoryPanel = () => {
             const repItem = sortedItems[0] || {};
             const dbItem = items.find((i) => i.itemId === selectedGroup.itemId);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : null;
-            const singleWeight = dbItem?.weight ?? 1;
-            const totalItemWeight = Math.round(singleWeight * (selectedGroup.totalCount || 1) * 10) / 10;
+            const dbItemTypes = Array.isArray(dbItem?.type) ? dbItem.type : (dbItem?.type ? [dbItem.type] : []);
+            const isContainer = dbItemTypes.includes('CONTAINER');
 
-            const baseNutrition = dbItem?.nutrition || {};
+            const repLiquidDbItem = (isContainer && repItem.contents && repItem.contents.amount > 0 && repItem.contents.itemId)
+              ? items.find((i) => i.itemId === repItem.contents.itemId)
+              : null;
+
+            const baseWeight = dbItem?.weight ?? 1;
+            const repLiquidWeight = repLiquidDbItem
+              ? Math.round((repLiquidDbItem.weight ?? 0) * repItem.contents.amount * 100) / 100
+              : 0;
+            const singleActualWeight = Math.round((baseWeight + repLiquidWeight) * 100) / 100;
+            const totalItemWeight = Math.round(sortedItems.reduce((sum, it) => {
+              let itLiquidWeight = 0;
+              if (isContainer && it.contents && it.contents.amount > 0 && it.contents.itemId) {
+                const dbLiquid = items.find((i) => i.itemId === it.contents.itemId);
+                itLiquidWeight = (dbLiquid?.weight ?? 0) * it.contents.amount;
+              }
+              return sum + (baseWeight + itLiquidWeight) * (it.count || 1);
+            }, 0) * 10) / 10;
+
+            const baseNutrition = (isContainer && repLiquidDbItem)
+              ? (repLiquidDbItem.nutrition || {})
+              : (dbItem?.nutrition || {});
             const bonusNutrition = repItem.bonusNutrition || {};
             const totalNutrition = {
               hp: (baseNutrition.hp || 0) + (bonusNutrition.hp || 0),
@@ -167,9 +187,11 @@ export const InventoryPanel = () => {
               totalNutrition.food !== 0
             );
 
-            const hasDurability = sortedItems.some(
-              (it) => it.durability !== undefined && it.durability !== null && it.durability > 0
-            );
+            const hasDurability =
+              (dbItem?.durability !== undefined && dbItem.durability > 0) ||
+              sortedItems.some(
+                (it) => it.durability !== undefined && it.durability !== null && it.durability > 0
+              );
 
             return (
               <div className="inventory-detail-window">
@@ -181,12 +203,9 @@ export const InventoryPanel = () => {
                   </p>
                 )}
 
-                {/* 獨立個體小圖示區（不開放點選，上方進度條呈現耐久度色彩，不顯示數字） */}
-                {(sortedItems.length > 1 || hasDurability) && (
+                {/* 獨立個體小圖示區（不開放點選，僅有耐久度或容器道具顯示個體狀態） */}
+                {(hasDurability || isContainer) && (
                   <div style={{ marginTop: '8px', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '0.74rem', color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}>
-                      {language === 'en' ? 'Individual Items:' : '持有實體狀態：'}
-                    </div>
                     <div
                       style={{
                         display: 'flex',
@@ -202,6 +221,13 @@ export const InventoryPanel = () => {
                         const percent = getItemDurabilityPercent(inst, dbItem);
                         const hasDur = percent >= 0;
                         const durColor = hasDur ? getDurabilityColor(percent) : '#22c55e';
+                        const hasLiquid = Boolean(
+                          isContainer && inst.contents && inst.contents.amount > 0 && inst.contents.itemId
+                        );
+                        const liquidDbItem = hasLiquid ? items.find((i) => i.itemId === inst.contents.itemId) : null;
+                        const displayImageUrl = isContainer
+                          ? (liquidDbItem?.imageUrl || null)
+                          : (dbItem?.imageUrl || null);
 
                         return (
                           <div
@@ -211,8 +237,8 @@ export const InventoryPanel = () => {
                               flexDirection: 'column',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              width: '38px',
-                              height: '46px',
+                              width: '42px',
+                              height: '48px',
                               padding: '3px',
                               background: 'rgba(255, 255, 255, 0.05)',
                               borderRadius: '4px',
@@ -220,9 +246,22 @@ export const InventoryPanel = () => {
                               cursor: 'default',
                               userSelect: 'none',
                             }}
-                            title={hasDur ? (language === 'en' ? 'Durability Status' : '耐久度狀態') : ''}
+                            title={
+                              isContainer
+                                ? (hasLiquid
+                                    ? `${liquidDbItem?.name || inst.contents.itemId} (${inst.contents.amount}/${dbItem?.capacity || 10})`
+                                    : (language === 'en' ? 'Empty Container' : '空容器'))
+                                : (hasDur
+                                    ? (language === 'en' ? 'Durability Status' : '耐久度狀態')
+                                    : '')
+                            }
                           >
-                            {hasDur && (
+                            {isContainer && (
+                              <div style={{ fontSize: '0.65rem', color: '#cbd5e1', marginBottom: '2px', lineHeight: 1 }}>
+                                {inst.contents?.amount ?? 0}/{dbItem?.capacity || 10}
+                              </div>
+                            )}
+                            {!isContainer && hasDur && (
                               <div
                                 style={{
                                   width: '100%',
@@ -252,9 +291,9 @@ export const InventoryPanel = () => {
                                 justifyContent: 'center',
                               }}
                             >
-                              {dbItem?.imageUrl ? (
+                              {displayImageUrl ? (
                                 <img
-                                  src={dbItem.imageUrl}
+                                  src={displayImageUrl}
                                   alt=""
                                   style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                                 />
@@ -271,9 +310,20 @@ export const InventoryPanel = () => {
 
                 <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
                   <span>
-                    ⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleWeight} kg ({language === 'en' ? 'Total' : '總重'}: {totalItemWeight} kg)
+                    ⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleActualWeight} kg{repLiquidWeight > 0 ? ` (${language === 'en' ? 'Base' : '本體'} ${baseWeight} kg + ${language === 'en' ? 'Liquid' : '液體'} ${repLiquidWeight} kg)` : ''}{(selectedGroup.totalCount || 1) > 1 ? ` (${language === 'en' ? 'Total' : '總重'}: ${totalItemWeight} kg)` : ''}
                   </span>
                 </div>
+                {isContainer && (
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
+                    <span>
+                      💧 {language === 'en' ? 'Stored Liquid' : '內存液體'}: {
+                        repLiquidDbItem
+                          ? `${getLocalizedName(repLiquidDbItem, language)} (${repItem.contents?.amount ?? 0}/${dbItem?.capacity || 10})`
+                          : `${language === 'en' ? 'Empty' : '無'} (0/${dbItem?.capacity || 10})`
+                      }
+                    </span>
+                  </div>
+                )}
 
                 {hasNutrition && (() => {
                   const n = totalNutrition;
@@ -308,7 +358,7 @@ export const InventoryPanel = () => {
                     </div>
                   )}
                   <div className="detail-buttons-row">
-                    {hasNutrition && (
+                    {(hasNutrition || isContainer) && (
                       <button
                         type="button"
                         className="btn-use-item"
@@ -317,7 +367,9 @@ export const InventoryPanel = () => {
                           await consumeItem(selectedGroup.itemId, actionQty);
                         }}
                       >
-                        {t.useBtn || (language === 'en' ? 'Use' : '使用')}
+                        {isContainer
+                          ? (language === 'en' ? 'Drink' : '飲用')
+                          : (t.useBtn || (language === 'en' ? 'Use' : '使用'))}
                       </button>
                     )}
                     <button

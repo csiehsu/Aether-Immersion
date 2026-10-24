@@ -41,6 +41,8 @@ import {
   settleItemDecay,
   calculateMaxExecutableByTools,
   applyToolsDurabilityDeduction,
+  calculateLiquidContainerCapacity,
+  fillLiquidContainers,
 } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -182,6 +184,10 @@ const sanitizeInventoryItems = (inventory) => {
       customName: raw.customName || '',
       customNameEn: raw.customNameEn || '',
       bonusNutrition: raw.bonusNutrition ? { ...raw.bonusNutrition } : undefined,
+      contents: raw.contents ? {
+        itemId: raw.contents.itemId || '',
+        amount: Number(raw.contents.amount) || 0,
+      } : undefined,
       lastDecayedAt: raw.lastDecayedAt ? new Date(raw.lastDecayedAt) : new Date(),
     });
   }
@@ -753,11 +759,34 @@ router.post('/player/gather', async (req, res) => {
       maxByBait = totalBaitCount;
     }
 
+    let targetItemDoc = allDbItems.find((i) => i.itemId === itemId);
+    if (!targetItemDoc) {
+      targetItemDoc = await Item.findOne({ itemId }) || initialItems.find((i) => i.itemId === itemId);
+    }
+    const targetItemTypes = Array.isArray(targetItemDoc?.type)
+      ? targetItemDoc.type
+      : (targetItemDoc?.type ? [targetItemDoc.type] : []);
+    const isLiquidResource = targetItemTypes.includes('LIQUID');
+
+    let maxByContainer = Infinity;
+    if (isLiquidResource) {
+      const { totalAvailableCapacity } = calculateLiquidContainerCapacity(
+        player.inventory,
+        itemId,
+        allDbItems
+      );
+      if (totalAvailableCapacity <= 0) {
+        return res.status(400).json({ success: false, message: '無可裝的空容器。' });
+      }
+      maxByContainer = totalAvailableCapacity;
+    }
+
     const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
 
-    // 計算實際執行次數（受限於精力、肉餌與工具耐久度）
-    const actualQty = Math.max(1, Math.min(addQty, maxByEnergy, maxByBait, maxByTools));
+    // 計算實際執行次數（受限於精力、肉餌、工具耐久度與容器可用容量）
+    const actualQty = Math.max(1, Math.min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer));
     const isLimitedByTools = maxByTools < addQty && actualQty === maxByTools;
+    const isLimitedByContainer = isLiquidResource && maxByContainer < addQty && actualQty === maxByContainer;
 
     const baseTotalCost = unitCost * actualQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
@@ -845,26 +874,34 @@ router.post('/player/gather', async (req, res) => {
     }
 
     if (gainedQty > 0) {
-      let targetItemDoc = await Item.findOne({ itemId });
-      if (!targetItemDoc) {
-        targetItemDoc = initialItems.find((i) => i.itemId === itemId);
-      }
-      const itemDurability = (targetItemDoc?.durability !== undefined && targetItemDoc.durability > 0)
-        ? targetItemDoc.durability
-        : -1;
-      const itemMaxDurability = itemDurability > 0 ? itemDurability : -1;
+      if (isLiquidResource) {
+        // 液體資源注入容器實體，不作為散裝道具加入背包
+        player.inventory = fillLiquidContainers(
+          player.inventory,
+          itemId,
+          gainedQty,
+          allDbItems
+        );
+        player.markModified('inventory');
+      } else {
+        const itemDurability = (targetItemDoc?.durability !== undefined && targetItemDoc.durability > 0)
+          ? targetItemDoc.durability
+          : -1;
+        const itemMaxDurability = itemDurability > 0 ? itemDurability : -1;
 
-      player.inventory = addItemsToInventory(
-        player.inventory,
-        itemId,
-        gainedQty,
-        {
-          durability: itemDurability,
-          maxDurability: itemMaxDurability,
-          quality: '普通',
-        }
-      );
-      player.markModified('inventory');
+        player.inventory = addItemsToInventory(
+          player.inventory,
+          itemId,
+          gainedQty,
+          {
+            durability: itemDurability,
+            maxDurability: itemMaxDurability,
+            quality: '普通',
+          },
+          allDbItems
+        );
+        player.markModified('inventory');
+      }
     }
 
     // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
@@ -878,6 +915,19 @@ router.post('/player/gather', async (req, res) => {
         senderEn: 'System',
         text: `只執行了${actualQty}次，工具就壞了。`,
         textEn: `Only executed ${actualQty} times before the tool broke.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
+    if (isLimitedByContainer) {
+      await GameLog.create({
+        time: timeStr,
+        sender: '系統',
+        senderEn: 'System',
+        text: `容器空間有限，只夠裝 ${actualQty} 份。`,
+        textEn: `Container capacity is limited, only enough for ${actualQty} portions.`,
         type: 'system',
         locationId: '',
         targetPlayerId,
@@ -1594,6 +1644,7 @@ router.post('/location/pickup-item', async (req, res) => {
         customName: pItem.customName || '',
         customNameEn: pItem.customNameEn || '',
         bonusNutrition: pItem.bonusNutrition ? { ...pItem.bonusNutrition } : undefined,
+        contents: pItem.contents ? { ...pItem.contents } : undefined,
         triggerQuestId: pItem.triggerQuestId || '',
         lastDecayedAt: pItem.lastDecayedAt || new Date(),
       });
@@ -1624,6 +1675,7 @@ router.post('/location/pickup-item', async (req, res) => {
           customName: pItem.customName || '',
           customNameEn: pItem.customNameEn || '',
           bonusNutrition: pItem.bonusNutrition,
+          contents: pItem.contents,
           lastDecayedAt: pItem.lastDecayedAt,
         }
       );
@@ -1716,6 +1768,7 @@ router.post('/player/drop-item', async (req, res) => {
         customName: invItem.customName || '',
         customNameEn: invItem.customNameEn || '',
         bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
+        contents: invItem.contents ? { ...invItem.contents } : undefined,
         lastDecayedAt: invItem.lastDecayedAt || new Date(),
       });
 

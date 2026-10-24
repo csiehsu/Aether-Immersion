@@ -12,6 +12,7 @@ import {
   getMatchingToolsAscending,
   getItemDurabilityPercent,
   getDurabilityStatusInfo,
+  calculateLiquidContainerCapacity,
 } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
@@ -552,7 +553,18 @@ export const GatherPanel = () => {
                 const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
                 const hasEnergy = currentEnergy >= totalCost;
                 const isComatose = isPlayerComatose(player);
-                const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy;
+                const spotDbItem = items.find((i) => i.itemId === spot.itemId);
+                const spotTypes = Array.isArray(spotDbItem?.type) ? spotDbItem.type : (spotDbItem?.type ? [spotDbItem.type] : []);
+                const isLiquidResource = spotTypes.includes('LIQUID');
+
+                let totalAvailableContainerCap = Infinity;
+                let hasAvailableContainer = true;
+                if (isLiquidResource) {
+                  const capInfo = calculateLiquidContainerCapacity(inventory, spot.itemId, items);
+                  totalAvailableContainerCap = capInfo.totalAvailableCapacity;
+                  hasAvailableContainer = totalAvailableContainerCap > 0;
+                }
+                const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
 
                 const buttonText = isComatose
                   ? (t.comatoseCannotAct || '昏迷中，無法行動')
@@ -560,6 +572,8 @@ export const GatherPanel = () => {
                   ? (t.missingTools || '缺少需求工具')
                   : !hasEnoughBait
                   ? (t.notEnoughBait || '肉餌不足')
+                  : !hasAvailableContainer
+                  ? (language === 'en' ? 'No container available' : '無可裝的空容器')
                   : !hasEnergy
                   ? (t.notEnoughEnergy || '精力不足')
                   : t.gatherBtn;
@@ -583,9 +597,10 @@ export const GatherPanel = () => {
                 const singleCost = calculateEffectiveEnergyCost(player, unitCost);
                 const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
                 const maxByBait = hasBaitRequirement ? totalBaitCount : Infinity;
-                const calculatedMaxGather = (!hasNonConsumableTools || isComatose)
+                const maxByContainer = isLiquidResource ? totalAvailableContainerCap : Infinity;
+                const calculatedMaxGather = (!hasNonConsumableTools || isComatose || !hasAvailableContainer)
                   ? 1
-                  : Math.max(1, Math.min(maxByEnergy, maxByBait));
+                  : Math.max(1, Math.min(maxByEnergy, maxByBait, maxByContainer));
 
                 return (
                   <div className="gather-detail-window">
@@ -595,6 +610,13 @@ export const GatherPanel = () => {
                         {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({roundExp(skillObj.exp)}/{reqExp} EXP)
                       </span>
                     </div>
+
+                    {isLiquidResource && (
+                      <div style={{ margin: '6px 0', fontSize: '0.78rem', color: '#94a3b8' }}>
+                        <span>{language === 'en' ? 'Container Available Space' : '容器可用容量'}：</span>
+                        <span style={{ color: '#ffffff', fontWeight: 600 }}>{totalAvailableContainerCap === Infinity ? 0 : totalAvailableContainerCap}</span>
+                      </div>
+                    )}
 
                     {reqTools.length > 0 && (
                       <div className="gather-tools-requirement" style={{ margin: '8px 0', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>

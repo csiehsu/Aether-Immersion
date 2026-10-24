@@ -27,6 +27,10 @@ const InventoryItemSchema = new mongoose.Schema(
       water: { type: Number, default: 0 },
       food: { type: Number, default: 0 },
     },
+    contents: {
+      itemId: { type: String, default: '' },
+      amount: { type: Number, default: 0 },
+    },
     lastDecayedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -145,7 +149,7 @@ const PlayerSchema = new mongoose.Schema(
     unlockedRecipes: [UnlockedRecipeSchema],
     quests: [PlayerQuestSchema],
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false }
 );
 
 export const Player = mongoose.model('Player', PlayerSchema);

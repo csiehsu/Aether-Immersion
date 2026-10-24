@@ -68,14 +68,14 @@ export const TopHUD = () => {
 
   const [secondsLeft, setSecondsLeft] = useState(0);
 
+  const lastEnergyRecoveredAt = player?.lastEnergyRecoveredAt;
+
   useEffect(() => {
-    if (!player || isFullEnergy) return;
+    if (!lastEnergyRecoveredAt || isFullEnergy) return;
 
     const updateCountdown = () => {
       const now = Date.now();
-      const lastTime = player.lastEnergyRecoveredAt
-        ? new Date(player.lastEnergyRecoveredAt).getTime()
-        : now;
+      const lastTime = new Date(lastEnergyRecoveredAt).getTime();
       const elapsed = now - lastTime;
       if (elapsed >= ENERGY_RECOVERY_INTERVAL_MS) {
         settleEnergyRecovery();
@@ -92,10 +92,10 @@ export const TopHUD = () => {
       clearTimeout(initialTimeout);
       clearInterval(interval);
     };
-  }, [player, isFullEnergy, settleEnergyRecovery]);
+  }, [lastEnergyRecoveredAt, isFullEnergy, settleEnergyRecovery]);
 
   useEffect(() => {
-    if (!player) return;
+    if (!player?._id && !player?.name) return;
     const updateDecay = () => {
       if (settleInventoryDecay) settleInventoryDecay();
       if (settleGroundItemsDecay) settleGroundItemsDecay();
@@ -103,7 +103,7 @@ export const TopHUD = () => {
     updateDecay();
     const interval = setInterval(updateDecay, 10000);
     return () => clearInterval(interval);
-  }, [player, settleInventoryDecay, settleGroundItemsDecay]);
+  }, [player?._id, player?.name, settleInventoryDecay, settleGroundItemsDecay]);
 
   const formatCountdown = (secs) => {
     if (secs <= 0) return '00:00';

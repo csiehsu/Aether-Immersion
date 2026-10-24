@@ -33,6 +33,8 @@ const ItemSchema = new mongoose.Schema(
     type: [{ type: String }],
     durability: { type: Number, default: -1 },
     weight: { type: Number, default: 1 },
+    capacity: { type: Number, default: 0 },
+    allowedContent: { type: String, default: '' },
     smell: [SmellSchema],
     nutrition: { type: NutritionSchema, default: () => ({}) },
   },

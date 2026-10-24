@@ -210,13 +210,32 @@ export const areBonusNutritionsEqual = (bonusA, bonusB) => {
  * @param {Object} itemB
  * @returns {boolean}
  */
-export const canItemsStack = (itemA, itemB) => {
+export const canItemsStack = (itemA, itemB, dbItems = []) => {
   if (!itemA || !itemB) return false;
   const idA = itemA.itemId || itemA.id || '';
   const idB = itemB.itemId || itemB.id || '';
   if (!idA || !idB || idA !== idB) return false;
   if ((itemA.customName || '') !== (itemB.customName || '')) return false;
   if (!areBonusNutritionsEqual(itemA.bonusNutrition, itemB.bonusNutrition)) return false;
+
+  // 容器類道具或帶有實質內容物者不可堆疊，各自為獨立實體
+  const hasSubstantiveContentsA = Boolean(itemA.contents && (itemA.contents.itemId || itemA.contents.amount > 0));
+  const hasSubstantiveContentsB = Boolean(itemB.contents && (itemB.contents.itemId || itemB.contents.amount > 0));
+  if (hasSubstantiveContentsA || hasSubstantiveContentsB) {
+    return false;
+  }
+
+  const isContainerA = Boolean(
+    itemA.isContainer ||
+    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === idA && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
+  );
+  const isContainerB = Boolean(
+    itemB.isContainer ||
+    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === idB && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
+  );
+  if (isContainerA || isContainerB) {
+    return false;
+  }
 
   const durA = itemA.durability !== undefined && itemA.durability !== null && itemA.durability > 0 ? itemA.durability : -1;
   const durB = itemB.durability !== undefined && itemB.durability !== null && itemB.durability > 0 ? itemB.durability : -1;
@@ -611,12 +630,17 @@ export const applyToolsDurabilityDeduction = (
  * @param {Object} itemToAdd
  * @returns {Array<Object>}
  */
-export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
+export const addItemToPlacedItems = (placedItems = [], itemToAdd, dbItems = []) => {
   const updated = (placedItems || []).map((p) => (p && p.toObject ? p.toObject() : { ...p }));
   const addCount = Math.max(1, Number(itemToAdd.count) || 1);
   const isDurabilityItem = itemToAdd.durability !== undefined && itemToAdd.durability !== null && itemToAdd.durability > 0;
+  const isContainerItem = Boolean(
+    itemToAdd.isContainer ||
+    (itemToAdd.contents && (itemToAdd.contents.itemId || itemToAdd.contents.amount > 0)) ||
+    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === itemToAdd.itemId && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
+  );
 
-  if (isDurabilityItem) {
+  if (isDurabilityItem || isContainerItem) {
     for (let k = 0; k < addCount; k++) {
       updated.push({
         instanceId: (k === 0 && itemToAdd.instanceId) ? itemToAdd.instanceId : generateInstanceId(),
@@ -628,6 +652,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
         customName: itemToAdd.customName || '',
         customNameEn: itemToAdd.customNameEn || '',
         bonusNutrition: itemToAdd.bonusNutrition ? { ...itemToAdd.bonusNutrition } : undefined,
+        contents: itemToAdd.contents ? { ...itemToAdd.contents } : undefined,
         triggerQuestId: itemToAdd.triggerQuestId || '',
         lastDecayedAt: itemToAdd.lastDecayedAt ? new Date(itemToAdd.lastDecayedAt).toISOString() : new Date().toISOString(),
       });
@@ -635,7 +660,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
     return updated;
   }
 
-  const matchIdx = updated.findIndex((p) => canItemsStack(p, itemToAdd));
+  const matchIdx = updated.findIndex((p) => canItemsStack(p, itemToAdd, dbItems));
 
   if (matchIdx >= 0) {
     updated[matchIdx].count = (updated[matchIdx].count || 1) + addCount;
@@ -671,17 +696,24 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd) => {
  * @param {string} [options.customNameEn] - 自訂/詞綴英文名稱。
  * @param {Object} [options.bonusNutrition] - 附加營養值物件。
  * @param {Date|string} [options.lastDecayedAt] - 道具時間戳。
+ * @param {Array<Object>} [dbItems=[]] - 物品基礎定義物件陣列。
  * @returns {Array<Object>} 更新後的背包陣列。
  */
-export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}) => {
+export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}, dbItems = []) => {
   const addQty = Math.max(1, Number(count) || 1);
   const updated = [...inventory];
   const isDurabilityItem = options.durability !== undefined && options.durability !== null && options.durability > 0;
+  const isContainerItem = Boolean(
+    options.isContainer ||
+    (options.contents && (options.contents.itemId || options.contents.amount > 0)) ||
+    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === itemId && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
+  );
   const targetItem = {
     itemId,
     customName: options.customName || '',
     customNameEn: options.customNameEn || '',
     bonusNutrition: options.bonusNutrition,
+    contents: options.contents,
     durability: options.durability,
     maxDurability: options.maxDurability,
     quality: options.quality || '普通',
@@ -689,7 +721,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
 
   const itemLastDecayedAt = options.lastDecayedAt ? new Date(options.lastDecayedAt).toISOString() : new Date().toISOString();
 
-  if (isDurabilityItem) {
+  if (isDurabilityItem || isContainerItem) {
     for (let k = 0; k < addQty; k++) {
       updated.push({
         instanceId: (k === 0 && options.instanceId) ? options.instanceId : generateInstanceId(),
@@ -699,6 +731,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
         maxDurability: options.maxDurability !== undefined && options.maxDurability > 0 ? options.maxDurability : options.durability,
         quality: options.quality || '普通',
         lastDecayedAt: itemLastDecayedAt,
+        ...(options.contents ? { contents: { ...options.contents } } : {}),
         ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
         ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
       });
@@ -706,7 +739,7 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
     return updated;
   }
 
-  const existingIdx = updated.findIndex((i) => canItemsStack(i, targetItem));
+  const existingIdx = updated.findIndex((i) => canItemsStack(i, targetItem, dbItems));
 
   if (existingIdx >= 0) {
     const existing = updated[existingIdx];
@@ -820,16 +853,51 @@ export const calculateMaxWeight = (player) => {
 };
 
 /**
- * 計算背包中所有物品的總負重。
+ * 計算單一道具實體的實際重量（若為容器且內存液體，則累加液體重量）。
+ * @param {Object} invItem - 背包或地面道具實體。
+ * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @returns {number} 該物品單個實體的實際重量。
+ */
+export const getItemActualWeight = (invItem, items = []) => {
+  if (!invItem) return 0;
+  const dbItem = (items || []).find((i) => i.itemId === invItem.itemId);
+  const baseWeight = dbItem?.weight ?? 1;
+
+  let liquidWeight = 0;
+  if (invItem.contents && invItem.contents.amount > 0 && invItem.contents.itemId) {
+    const dbLiquid = (items || []).find((i) => i.itemId === invItem.contents.itemId);
+    liquidWeight = (dbLiquid?.weight ?? 0) * invItem.contents.amount;
+  }
+
+  return Math.round((baseWeight + liquidWeight) * 100) / 100;
+};
+
+/**
+ * 計算背包中所有物品的總負重（含容器內存液體）。
  * @param {Array<Object>} [inventory=[]] - 玩家背包陣列。
  * @param {Array<Object>} [items=[]] - 全域道具定義資料。
  * @returns {number} 當前總重量（保留一位小數）。
  */
 export const calculateCurrentWeight = (inventory = [], items = []) => {
+  const dbItemMap = new Map();
+  if (Array.isArray(items)) {
+    for (const i of items) {
+      if (i && i.itemId) dbItemMap.set(i.itemId, i);
+    }
+  }
+
   const total = (inventory || []).reduce((sum, inv) => {
-    const dbItem = (items || []).find((i) => i.itemId === inv.itemId);
-    const w = dbItem?.weight ?? 1;
-    return sum + w * (inv.count || 1);
+    const dbItem = dbItemMap.get(inv.itemId);
+    const baseWeight = dbItem?.weight ?? 1;
+
+    let liquidWeight = 0;
+    if (inv.contents && inv.contents.amount > 0 && inv.contents.itemId) {
+      const dbLiquid = dbItemMap.get(inv.contents.itemId);
+      liquidWeight = (dbLiquid?.weight ?? 0) * inv.contents.amount;
+    }
+
+    const itemTotalWeight = (baseWeight + liquidWeight) * (inv.count || 1);
+    return sum + itemTotalWeight;
   }, 0);
   return Math.round(total * 10) / 10;
 };
@@ -848,3 +916,141 @@ export const isPlayerOverburdened = (player, inventory = [], items = []) => {
 };
 
 
+
+/**
+ * 計算玩家背包中針對特定液體道具的可用容器容量總和。
+ * 規則：
+ * 1. 容器定義之 type 包含 'CONTAINER'。
+ * 2. 容器定義之 allowedContent 允許 'LIQUID'。
+ * 3. 一個容器只能裝一種液體：
+ *    - 若容器已有液體且非目標液體，不可裝載。
+ *    - 若容器為空，或已裝有相同液體且存量 < 上限，則可繼續裝載。
+ *
+ * @param {Array<Object>} [inventory=[]] - 玩家背包。
+ * @param {string} targetLiquidItemId - 採集或注入之液體道具 ID。
+ * @param {Array<Object>} [allDbItems=[]] - 道具原型定義清單。
+ * @returns {{ matchingContainers: Array<Object>, totalAvailableCapacity: number, hasAnyContainers: boolean }}
+ */
+export const calculateLiquidContainerCapacity = (inventory = [], targetLiquidItemId, allDbItems = []) => {
+  if (!Array.isArray(inventory) || !targetLiquidItemId) {
+    return { matchingContainers: [], totalAvailableCapacity: 0, hasAnyContainers: false };
+  }
+
+  const dbItemMap = new Map();
+  if (Array.isArray(allDbItems)) {
+    for (const d of allDbItems) {
+      if (d && d.itemId) dbItemMap.set(d.itemId, d);
+    }
+  }
+
+  const matchingContainers = [];
+  let totalAvailableCapacity = 0;
+  let hasAnyContainers = false;
+
+  for (const inv of inventory) {
+    const dbI = dbItemMap.get(inv.itemId);
+    if (!dbI) continue;
+    const types = Array.isArray(dbI.type) ? dbI.type : (dbI.type ? [dbI.type] : []);
+    if (!types.includes('CONTAINER')) continue;
+
+    const allowed = dbI.allowedContent || 'LIQUID';
+    if (allowed !== 'LIQUID') continue;
+
+    hasAnyContainers = true;
+    const maxCapacity = dbI.capacity || 10;
+    const currentAmount = inv.contents?.amount || 0;
+    const currentLiquid = inv.contents?.itemId || '';
+
+    // 若裝有其他液體，則不可裝此液體
+    if (currentAmount > 0 && currentLiquid && currentLiquid !== targetLiquidItemId) {
+      continue;
+    }
+
+    const availableSpace = Math.max(0, maxCapacity - currentAmount);
+    if (availableSpace > 0) {
+      matchingContainers.push({
+        invItem: inv,
+        availableSpace,
+        maxCapacity,
+        currentAmount,
+      });
+      totalAvailableCapacity += availableSpace;
+    }
+  }
+
+  return { matchingContainers, totalAvailableCapacity, hasAnyContainers };
+};
+
+/**
+ * 將指定數量的液體注入背包中的可用容器中（優先注入已裝有同種液體的容器）。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包。
+ * @param {string} targetLiquidItemId - 液體道具 ID。
+ * @param {number} amountToFill - 欲注入之液體總份數。
+ * @param {Array<Object>} [allDbItems=[]] - 道具原型定義清單。
+ * @returns {Array<Object>} 更新後的背包陣列。
+ */
+export const fillLiquidContainers = (inventory = [], targetLiquidItemId, amountToFill, allDbItems = []) => {
+  if (!Array.isArray(inventory) || amountToFill <= 0) return inventory;
+
+  const dbItemMap = new Map();
+  if (Array.isArray(allDbItems)) {
+    for (const d of allDbItems) {
+      if (d && d.itemId) dbItemMap.set(d.itemId, d);
+    }
+  }
+
+  let remaining = amountToFill;
+
+  // 找出所有可用容器索引
+  const eligibleIndices = [];
+  for (let idx = 0; idx < inventory.length; idx++) {
+    const inv = inventory[idx];
+    const dbI = dbItemMap.get(inv.itemId);
+    if (!dbI) continue;
+    const types = Array.isArray(dbI.type) ? dbI.type : (dbI.type ? [dbI.type] : []);
+    if (!types.includes('CONTAINER')) continue;
+    const allowed = dbI.allowedContent || 'LIQUID';
+    if (allowed !== 'LIQUID') continue;
+
+    const maxCap = dbI.capacity || 10;
+    const curAmount = inv.contents?.amount || 0;
+    const curLiquid = inv.contents?.itemId || '';
+
+    if (curAmount > 0 && curLiquid && curLiquid !== targetLiquidItemId) {
+      continue;
+    }
+
+    if (curAmount < maxCap) {
+      eligibleIndices.push(idx);
+    }
+  }
+
+  // 排序：優先填充已有相同液體的容器（減少半滿水壺），其次為空水壺
+  eligibleIndices.sort((a, b) => {
+    const amountA = inventory[a].contents?.amount || 0;
+    const amountB = inventory[b].contents?.amount || 0;
+    return amountB - amountA;
+  });
+
+  for (const idx of eligibleIndices) {
+    if (remaining <= 0) break;
+    const inv = inventory[idx];
+    const dbI = dbItemMap.get(inv.itemId);
+    const maxCap = dbI?.capacity || 10;
+
+    if (!inv.contents) {
+      inv.contents = { itemId: '', amount: 0 };
+    }
+
+    const curAmount = inv.contents.amount || 0;
+    const space = Math.max(0, maxCap - curAmount);
+    if (space > 0) {
+      const fill = Math.min(space, remaining);
+      inv.contents.itemId = targetLiquidItemId;
+      inv.contents.amount = curAmount + fill;
+      remaining -= fill;
+    }
+  }
+
+  return inventory;
+};

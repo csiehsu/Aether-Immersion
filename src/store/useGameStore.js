@@ -901,19 +901,100 @@ export const useGameStore = create((set, get) => ({
       (i) => i.itemId === invItem.itemId
     );
 
-    const availableCount = invItem.count || 1;
-    const useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
+    const dbItemTypes = Array.isArray(dbItem?.type) ? dbItem.type : (dbItem?.type ? [dbItem.type] : []);
+    const isContainer = dbItemTypes.includes('CONTAINER');
 
-    const nutrition = dbItem?.nutrition || {};
-    const bonus = invItem.bonusNutrition || {};
-    const hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
-    const strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
-    const spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
-    const dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
-    const defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
-    const maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
-    const waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
-    const foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
+        let useCount;
+    let hpGain;
+    let strGain;
+    let spdGain;
+    let dexGain;
+    let defGain;
+    let maxHpGain;
+    let waterGain;
+    let foodGain;
+    let updatedInv = [...inventory];
+    let logActionText;
+    let logActionTextEn;
+
+    if (isContainer) {
+      // 容器飲用邏輯：先檢查容器內裝的液體是什麼，再查找該液體效果增減數值
+      const storedLiquidId = invItem.contents?.itemId;
+      const storedAmount = invItem.contents?.amount || 0;
+
+      if (storedAmount <= 0 || !storedLiquidId) {
+        get().addLog(
+          '道具系統',
+          'Item System',
+          `[${invItem.customName || dbItem?.name || invItem.itemId}] 裡沒有任何液體，無法飲用。`,
+          `[${invItem.customNameEn || dbItem?.nameEn || dbItem?.name || invItem.itemId}] is empty, cannot drink.`,
+          'system'
+        );
+        return false;
+      }
+
+      useCount = Math.min(storedAmount, Math.max(1, Number(qty) || 1));
+      const dbLiquidItem = items.find((i) => i.itemId === storedLiquidId);
+      const nutrition = dbLiquidItem?.nutrition || {};
+      const bonus = invItem.bonusNutrition || {};
+
+      hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
+      strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
+      spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
+      dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
+      defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
+      maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
+      waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
+      foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
+
+      // 扣除容器內存水量，容器本身保留不刪除
+      const newStoredAmount = storedAmount - useCount;
+      updatedInv[invIndex] = {
+        ...invItem,
+        contents: {
+          ...(invItem.contents || {}),
+          amount: newStoredAmount,
+          itemId: newStoredAmount > 0 ? storedLiquidId : '',
+        },
+      };
+
+      const liquidName = dbLiquidItem?.name || storedLiquidId;
+      const liquidNameEn = dbLiquidItem?.nameEn || dbLiquidItem?.name || storedLiquidId;
+      const containerName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
+      const containerNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
+
+      logActionText = `飲用了 [${containerName}] 中的 [${liquidName}] x${useCount}`;
+      logActionTextEn = `Drank [${liquidNameEn}] x${useCount} from [${containerNameEn}]`;
+    } else {
+      // 一般消耗性物品邏輯
+      const availableCount = invItem.count || 1;
+      useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
+
+      const nutrition = dbItem?.nutrition || {};
+      const bonus = invItem.bonusNutrition || {};
+      hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
+      strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
+      spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
+      dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
+      defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
+      maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
+      waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
+      foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
+
+      if (availableCount <= useCount) {
+        updatedInv.splice(invIndex, 1);
+      } else {
+        updatedInv[invIndex] = {
+          ...invItem,
+          count: availableCount - useCount,
+        };
+      }
+
+      const itemName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
+      const itemNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
+      logActionText = `使用了 [${itemName}] x${useCount}`;
+      logActionTextEn = `Used [${itemNameEn}] x${useCount}`;
+    }
 
     // Retrieve baseline current stats from player (stats are baseline, never overwritten by item nutrition)
     const currentStats = player.stats || {};
@@ -939,16 +1020,6 @@ export const useGameStore = create((set, get) => ({
       ? Math.max(0, Math.min(newMaxHp, currentHp + hpGain))
       : Math.min(newMaxHp, currentHp);
 
-    let updatedInv = [...inventory];
-    if (availableCount <= useCount) {
-      updatedInv.splice(invIndex, 1);
-    } else {
-      updatedInv[invIndex] = {
-        ...invItem,
-        count: availableCount - useCount,
-      };
-    }
-
     const newStats = {
       ...currentStats,
       strength: newStr,
@@ -971,9 +1042,6 @@ export const useGameStore = create((set, get) => ({
       },
       inventory: updatedInv,
     }));
-
-    const itemName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
-    const itemNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
 
     const effects = [];
     const effectsEn = [];
@@ -1016,8 +1084,8 @@ export const useGameStore = create((set, get) => ({
     get().addLog(
       '道具系統',
       'Item System',
-      `使用了 [${itemName}] x${useCount}${effectStr}。`,
-      `Used [${itemNameEn}] x${useCount}${effectStrEn}.`,
+      `${logActionText}${effectStr}。`,
+      `${logActionTextEn}${effectStrEn}.`,
       'event'
     );
 
@@ -1079,10 +1147,12 @@ export const useGameStore = create((set, get) => ({
     const itemDur = (boughtDbItem?.durability !== undefined && boughtDbItem.durability > 0)
       ? boughtDbItem.durability
       : -1;
+    const isContainer = boughtItemTypes.includes('CONTAINER') || (boughtDbItem?.capacity > 0);
     const updatedInv = addItemsToInventory(inventory, itemId, buyQty, {
       durability: itemDur,
       maxDurability: itemDur,
-    });
+      ...(isContainer ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
+    }, items);
 
     // 檢查購買工具是否可解鎖對應製作配方
     const currentUnlocked = Array.isArray(player.unlockedRecipes) ? [...player.unlockedRecipes] : [];

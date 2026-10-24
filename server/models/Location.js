@@ -49,6 +49,10 @@ const PlacedItemSchema = new mongoose.Schema(
       water: { type: Number, default: 0 },
       food: { type: Number, default: 0 },
     },
+    contents: {
+      itemId: { type: String, default: '' },
+      amount: { type: Number, default: 0 },
+    },
     triggerQuestId: { type: String, default: '' },
     lastDecayedAt: { type: Date, default: Date.now },
   },
