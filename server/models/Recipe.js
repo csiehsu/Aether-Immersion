@@ -15,6 +15,7 @@ const RecipeSchema = new mongoose.Schema(
     recipeId: { type: String, required: true, unique: true },
     name: { type: String, required: true },
     nameEn: { type: String, default: '' },
+    triggerItem: [{ type: String }],
     outputItems: [ItemRequirementSchema],
     requiredItems: [ItemRequirementSchema],
     requiredToolTypes: [{ type: String }],

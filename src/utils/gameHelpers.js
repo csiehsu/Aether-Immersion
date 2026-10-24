@@ -1054,3 +1054,46 @@ export const fillLiquidContainers = (inventory = [], targetLiquidItemId, amountT
 
   return inventory;
 };
+
+/**
+ * 檢查獲得道具（購買、採集等）時是否解鎖新製作配方。
+ * 比對方式一律依據配方中定義的 triggerItem 是否包含該獲得道具的 itemId。
+ *
+ * @param {Array} currentUnlocked - 玩家目前已解鎖配方陣列（元素可為字串或物件 { recipeId }）。
+ * @param {Array} recipes - 配方資料陣列。
+ * @param {string} acquiredItemId - 所獲得道具的 itemId。
+ * @returns {{ newlyUnlockedRecipes: Array, updatedUnlocked: Array }} 新解鎖的配方陣列與更新後的解鎖清單。
+ */
+export const checkRecipeUnlocks = (currentUnlocked = [], recipes = [], acquiredItemId = '') => {
+  if (!acquiredItemId || !Array.isArray(recipes) || recipes.length === 0) {
+    return {
+      newlyUnlockedRecipes: [],
+      updatedUnlocked: Array.isArray(currentUnlocked) ? [...currentUnlocked] : [],
+    };
+  }
+
+  const updatedUnlocked = Array.isArray(currentUnlocked) ? [...currentUnlocked] : [];
+  const newlyUnlockedRecipes = [];
+
+  for (const recipe of recipes) {
+    const rId = recipe.recipeId || recipe.id;
+    if (!rId) continue;
+
+    const alreadyUnlocked = updatedUnlocked.some((ur) => {
+      return typeof ur === 'string' ? ur === rId : ur?.recipeId === rId;
+    });
+    if (alreadyUnlocked) continue;
+
+    const triggers = Array.isArray(recipe.triggerItem)
+      ? recipe.triggerItem
+      : (recipe.triggerItem ? [recipe.triggerItem] : []);
+
+    if (triggers.includes(acquiredItemId)) {
+      newlyUnlockedRecipes.push(recipe);
+      updatedUnlocked.push({ recipeId: rId });
+    }
+  }
+
+  return { newlyUnlockedRecipes, updatedUnlocked };
+};
+

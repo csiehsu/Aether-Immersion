@@ -43,6 +43,7 @@ import {
   applyToolsDurabilityDeduction,
   calculateLiquidContainerCapacity,
   fillLiquidContainers,
+  checkRecipeUnlocks,
 } from '../../src/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -873,6 +874,7 @@ router.post('/player/gather', async (req, res) => {
       player.markModified('lifeSkills');
     }
 
+    let newlyUnlockedRecipes = [];
     if (gainedQty > 0) {
       if (isLiquidResource) {
         // 液體資源注入容器實體，不作為散裝道具加入背包
@@ -901,6 +903,22 @@ router.post('/player/gather', async (req, res) => {
           allDbItems
         );
         player.markModified('inventory');
+      }
+
+      // 檢查採集獲得資源是否解鎖新配方（比對 recipe.triggerItem）
+      let allDbRecipes = await Recipe.find({});
+      if (!allDbRecipes || allDbRecipes.length === 0) allDbRecipes = initialRecipes;
+
+      const unlockResult = checkRecipeUnlocks(
+        player.unlockedRecipes,
+        allDbRecipes,
+        itemId
+      );
+      newlyUnlockedRecipes = unlockResult.newlyUnlockedRecipes;
+
+      if (newlyUnlockedRecipes.length > 0) {
+        player.unlockedRecipes = unlockResult.updatedUnlocked;
+        player.markModified('unlockedRecipes');
       }
     }
 
@@ -955,7 +973,7 @@ router.post('/player/gather', async (req, res) => {
       success: true,
       source: 'mongodb',
       data: formatPlayerResponse(player),
-      result: { gainedQty, gainedExp: expToAdd, actualQty, requestedQty: addQty },
+      result: { gainedQty, gainedExp: expToAdd, actualQty, requestedQty: addQty, newlyUnlockedRecipes },
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/gather:', err);
@@ -1185,6 +1203,7 @@ router.post('/player/craft', async (req, res) => {
     const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
 
     let updatedInv = sanitizeInventoryItems(player.inventory);
+    let primaryConsumedMaterial = null;
 
     for (let reqIdx = 0; reqIdx < reqItems.length; reqIdx++) {
       const req = reqItems[reqIdx];
@@ -1198,6 +1217,10 @@ router.post('/player/craft', async (req, res) => {
         }
       });
       matchingIndices.sort((a, b) => compareItemDurability(updatedInv[a], updatedInv[b]));
+
+      if (reqIdx === 0 && matchingIndices.length > 0 && !primaryConsumedMaterial) {
+        primaryConsumedMaterial = { ...updatedInv[matchingIndices[0]] };
+      }
 
       let remainingDeduct = requiredTotalCount;
       for (const idx of matchingIndices) {
@@ -1226,14 +1249,12 @@ router.post('/player/craft', async (req, res) => {
     const firstSelId = selectedMaterials[0];
     if (recipe.durabilityFormula) {
       let matDurability = -1;
-      if (firstSelId) {
-        const selectedMatInv = updatedInv.find((i) => i.itemId === firstSelId) || player.inventory.find((i) => i.itemId === firstSelId);
-        if (selectedMatInv) {
-          const matDbItem = dbItems.find((i) => i.itemId === selectedMatInv.itemId) || initialItems.find((i) => i.itemId === selectedMatInv.itemId);
-          matDurability = (selectedMatInv.durability !== undefined && selectedMatInv.durability > 0)
-            ? selectedMatInv.durability
-            : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
-        }
+      const targetMat = primaryConsumedMaterial || (firstSelId ? updatedInv.find((i) => i.itemId === firstSelId) || player.inventory.find((i) => i.itemId === firstSelId) : null);
+      if (targetMat) {
+        const matDbItem = (allDbItems || initialItems).find((i) => i.itemId === targetMat.itemId);
+        matDurability = (targetMat.durability !== undefined && targetMat.durability > 0)
+          ? targetMat.durability
+          : (matDbItem && matDbItem.durability !== undefined && matDbItem.durability > 0 ? matDbItem.durability : -1);
       }
       try {
         const computeFn = new Function('material', `return ${recipe.durabilityFormula};`);

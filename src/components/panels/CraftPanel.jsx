@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo, compareItemDurability } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -21,6 +21,31 @@ export const CraftPanel = () => {
   const performCraft = useGameStore((state) => state.performCraft);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
+
+  // 將背包物品按 itemId 分組並統計總數量，組內各實體依耐久度由低到高排序
+  const groupedInventory = useMemo(() => {
+    const map = new Map();
+    inventory.forEach((inv) => {
+      if (!inv || !inv.itemId) return;
+      const id = inv.itemId;
+      if (!map.has(id)) {
+        map.set(id, {
+          itemId: id,
+          totalCount: 0,
+          items: [],
+        });
+      }
+      const entry = map.get(id);
+      entry.totalCount += (inv.count || 1);
+      entry.items.push(inv);
+    });
+
+    for (const entry of map.values()) {
+      entry.items.sort((a, b) => compareItemDurability(a, b, 'asc'));
+    }
+
+    return Array.from(map.values());
+  }, [inventory]);
 
   const [selectedRecipeId, setSelectedRecipeId] = useState(null);
   const [selectedMaterials, setSelectedMaterials] = useState({});
@@ -70,13 +95,13 @@ export const CraftPanel = () => {
       return true;
     }
     return rec.requiredItems.every((req) => {
-      return inventory.some((inv) => {
-        const dbI = items.find((i) => i.itemId === inv.itemId);
+      return groupedInventory.some((group) => {
+        const dbI = items.find((i) => i.itemId === group.itemId);
         if (!dbI) return false;
-        const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+        const matchesItem = req.itemId ? group.itemId === req.itemId : false;
         const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
         const matchesType = req.type ? types.includes(req.type) : false;
-        return (matchesItem || matchesType) && (inv.count || 1) >= req.quantity;
+        return (matchesItem || matchesType) && group.totalCount >= req.quantity;
       });
     });
   };
@@ -106,21 +131,21 @@ export const CraftPanel = () => {
   if (selectedRecipe && selectedRecipe.requiredItems) {
     selectedRecipe.requiredItems.forEach((req, reqIdx) => {
       const reqTotal = (req.quantity || 1) * craftQty;
-      const eligible = inventory.filter((inv) => {
-        const dbI = items.find((i) => i.itemId === inv.itemId);
+      const eligibleGroups = groupedInventory.filter((group) => {
+        const dbI = items.find((i) => i.itemId === group.itemId);
         if (!dbI) return false;
-        const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+        const matchesItem = req.itemId ? group.itemId === req.itemId : false;
         const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
         const matchesType = req.type ? types.includes(req.type) : false;
-        return (matchesItem || matchesType) && (inv.count || 1) >= reqTotal;
+        return (matchesItem || matchesType) && group.totalCount >= reqTotal;
       });
 
       if (selectedMaterials[reqIdx] !== undefined) {
-        if (selectedMaterials[reqIdx] && eligible.some((e) => e.itemId === selectedMaterials[reqIdx])) {
+        if (selectedMaterials[reqIdx] && eligibleGroups.some((g) => g.itemId === selectedMaterials[reqIdx])) {
           effectiveSelectedMaterials[reqIdx] = selectedMaterials[reqIdx];
         }
-      } else if (eligible.length === 1) {
-        effectiveSelectedMaterials[reqIdx] = eligible[0].itemId;
+      } else if (eligibleGroups.length === 1) {
+        effectiveSelectedMaterials[reqIdx] = eligibleGroups[0].itemId;
       }
     });
   }
@@ -183,9 +208,8 @@ export const CraftPanel = () => {
             const hasSelectedAllMaterials = reqItemsList.length === 0 || reqItemsList.every((req, reqIdx) => {
               const selId = effectiveSelectedMaterials[reqIdx];
               if (!selId) return false;
-              const matchingInv = inventory.filter((i) => i.itemId === selId);
-              const totalCount = matchingInv.reduce((sum, i) => sum + (i.count || 1), 0);
-              return totalCount >= req.quantity * craftQty;
+              const foundGroup = groupedInventory.find((g) => g.itemId === selId);
+              return (foundGroup?.totalCount || 0) >= req.quantity * craftQty;
             });
 
             const isComatose = isPlayerComatose(player);
@@ -196,19 +220,18 @@ export const CraftPanel = () => {
             const materialLimits = reqItemsList.map((req, reqIdx) => {
               const selId = effectiveSelectedMaterials[reqIdx];
               if (selId) {
-                const matchingInv = inventory.filter((i) => i.itemId === selId);
-                const totalCount = matchingInv.reduce((sum, i) => sum + (i.count || 1), 0);
-                return Math.floor(totalCount / (req.quantity || 1));
+                const foundGroup = groupedInventory.find((g) => g.itemId === selId);
+                return Math.floor((foundGroup?.totalCount || 0) / (req.quantity || 1));
               }
-              const eligible = inventory.filter((inv) => {
-                const dbI = items.find((i) => i.itemId === inv.itemId);
+              const eligible = groupedInventory.filter((group) => {
+                const dbI = items.find((i) => i.itemId === group.itemId);
                 if (!dbI) return false;
-                const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+                const matchesItem = req.itemId ? group.itemId === req.itemId : false;
                 const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
                 const matchesType = req.type ? types.includes(req.type) : false;
                 return matchesItem || matchesType;
               });
-              const maxInEligible = eligible.map((inv) => Math.floor((inv.count || 1) / (req.quantity || 1)));
+              const maxInEligible = eligible.map((g) => Math.floor(g.totalCount / (req.quantity || 1)));
               return maxInEligible.length > 0 ? Math.max(...maxInEligible) : 0;
             });
             const maxByMaterials = materialLimits.length > 0 ? Math.min(...materialLimits) : Infinity;
@@ -240,13 +263,13 @@ export const CraftPanel = () => {
                 <div className="recipe-detail-body">
                   {reqItemsList.map((req, reqIdx) => {
                     const reqTotal = req.quantity * craftQty;
-                    const eligibleItems = inventory.filter((inv) => {
-                      const dbI = items.find((i) => i.itemId === inv.itemId);
+                    const eligibleGroups = groupedInventory.filter((group) => {
+                      const dbI = items.find((i) => i.itemId === group.itemId);
                       if (!dbI) return false;
-                      const matchesItem = req.itemId ? inv.itemId === req.itemId : false;
+                      const matchesItem = req.itemId ? group.itemId === req.itemId : false;
                       const types = dbI.type ? (Array.isArray(dbI.type) ? dbI.type : [dbI.type]) : [];
                       const matchesType = req.type ? types.includes(req.type) : false;
-                      return (matchesItem || matchesType) && (inv.count || 1) >= reqTotal;
+                      return (matchesItem || matchesType) && group.totalCount >= reqTotal;
                     });
                     const targetItem = req.itemId ? items.find((it) => it.itemId === req.itemId) : null;
                     const reqLabel = targetItem
@@ -262,11 +285,11 @@ export const CraftPanel = () => {
                           {reqHeading}
                         </span>
                         <div className="material-options-wrapper">
-                          {eligibleItems.length > 0 ? (
-                            eligibleItems.map((inv) => {
-                              const invKey = inv.itemId;
-                              const dbI = items.find((i) => i.itemId === inv.itemId);
-                              const itemName = dbI ? getLocalizedName(dbI, language) : inv.itemId;
+                          {eligibleGroups.length > 0 ? (
+                            eligibleGroups.map((group) => {
+                              const invKey = group.itemId;
+                              const dbI = items.find((i) => i.itemId === group.itemId);
+                              const itemName = dbI ? getLocalizedName(dbI, language) : group.itemId;
                               const isOptionSelected = effectiveSelectedMaterials[reqIdx] === invKey;
 
                               return (
@@ -282,7 +305,7 @@ export const CraftPanel = () => {
                                     }));
                                   }}
                                 >
-                                  {itemName} ({inv.count || 1}/{reqTotal})
+                                  {itemName} ({group.totalCount}/{reqTotal})
                                 </button>
                               );
                             })

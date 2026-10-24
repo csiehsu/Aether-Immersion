@@ -10,6 +10,7 @@ import {
   isPlayerOverburdened,
   compareItemDurability,
   settleItemDecay,
+  checkRecipeUnlocks,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -755,6 +756,20 @@ export const useGameStore = create((set, get) => ({
               `Gathered ${itemNameEn} x${gainedQty}`,
               'system'
             );
+
+            // 檢查採集獲得資源是否觸發新配方解鎖
+            const newlyUnlocked = result.result?.newlyUnlockedRecipes || [];
+            newlyUnlocked.forEach((recipe) => {
+              const recipeNameZh = recipe.name;
+              const recipeNameEn = recipe.nameEn || recipe.name;
+              get().addLog(
+                '配方系統',
+                'Recipe System',
+                `這好像可以做成${recipeNameZh}。`,
+                `It seems this can be made into ${recipeNameEn}.`,
+                'event'
+              );
+            });
           } else {
             get().addLog(
               '系統',
@@ -1154,46 +1169,33 @@ export const useGameStore = create((set, get) => ({
       ...(isContainer ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
     }, items);
 
-    // 檢查購買工具是否可解鎖對應製作配方
+    // 檢查購買道具是否可解鎖對應製作配方（依 recipe.triggerItem 指定道具為準）
     const currentUnlocked = Array.isArray(player.unlockedRecipes) ? [...player.unlockedRecipes] : [];
-    const newlyUnlockedRecipes = [];
-
-    if (boughtItemTypes.length > 0) {
-      for (const recipe of recipes) {
-        const rId = recipe.recipeId || recipe.id;
-        const alreadyUnlocked = currentUnlocked.some((ur) => {
-          return typeof ur === 'string' ? ur === rId : ur?.recipeId === rId;
-        });
-        if (!alreadyUnlocked) {
-          const reqTools = recipe.requiredToolTypes || [];
-          const matchesTool = reqTools.some((t) => boughtItemTypes.includes(t));
-          if (matchesTool) {
-            newlyUnlockedRecipes.push(recipe);
-            currentUnlocked.push({ recipeId: rId });
-          }
-        }
-      }
-    }
+    const { newlyUnlockedRecipes, updatedUnlocked } = checkRecipeUnlocks(
+      currentUnlocked,
+      recipes,
+      itemId
+    );
 
     if (newlyUnlockedRecipes.length > 0) {
-      const namesZh = newlyUnlockedRecipes.map((r) => r.name).join('、');
-      const namesEn = newlyUnlockedRecipes.map((r) => r.nameEn || r.name).join(', ');
-      const toolNameZh = boughtDbItem?.name || itemId;
-      const toolNameEn = boughtDbItem?.nameEn || boughtDbItem?.name || itemId;
-      get().addLog(
-        '配方系統',
-        'Recipe System',
-        `購買了【${toolNameZh}】，領悟了新配方：【${namesZh}】！`,
-        `Purchased [${toolNameEn}], unlocked new recipe(s): [${namesEn}]!`,
-        'event'
-      );
+      newlyUnlockedRecipes.forEach((recipe) => {
+        const recipeNameZh = recipe.name;
+        const recipeNameEn = recipe.nameEn || recipe.name;
+        get().addLog(
+          '配方系統',
+          'Recipe System',
+          `這好像可以做成${recipeNameZh}。`,
+          `It seems this can be made into ${recipeNameEn}.`,
+          'event'
+        );
+      });
     }
 
     set((state) => ({
       player: {
         ...state.player,
         money: newMoney,
-        unlockedRecipes: currentUnlocked,
+        unlockedRecipes: updatedUnlocked,
       },
       inventory: updatedInv,
     }));
@@ -1205,7 +1207,7 @@ export const useGameStore = create((set, get) => ({
         body: JSON.stringify({
           money: newMoney,
           inventory: updatedInv,
-          unlockedRecipes: currentUnlocked,
+          unlockedRecipes: updatedUnlocked,
         }),
       });
       if (res.ok) {
