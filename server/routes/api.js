@@ -344,7 +344,7 @@ const formatPlayerResponse = (playerDoc) => {
     },
   };
   p.money = p.money ?? 0;
-  p.mentor = p.mentor || 'Martha';
+  p.mentor = p.mentor || '';
   p.unlockedRecipes = sanitizeUnlockedRecipes(p.unlockedRecipes);
   p.lastEnergyRecoveredAt = p.lastEnergyRecoveredAt
     ? new Date(p.lastEnergyRecoveredAt).toISOString()
@@ -355,81 +355,6 @@ const formatPlayerResponse = (playerDoc) => {
   return p;
 };
 
-const MENTOR_SHOP_MAP = {
-  Martha: {
-    shopLocationId: 'AZURE_BAY_VARIETY_SHOP',
-    shopName: '雜貨店',
-    shopNameEn: 'Variety Shop',
-  },
-  Garrick: {
-    shopLocationId: 'AZURE_BAY_DINER',
-    shopName: '小吃店',
-    shopNameEn: 'Diner',
-  },
-  Vance: {
-    shopLocationId: 'AZURE_BAY_SEAFOOD_SHOP',
-    shopName: '海產店',
-    shopNameEn: 'Seafood Shop',
-  },
-  Corinne: {
-    shopLocationId: 'AZURE_BAY_TACK_SHOP',
-    shopName: '馬具店',
-    shopNameEn: 'Tack Shop',
-  },
-  Brock: {
-    shopLocationId: 'AZURE_BAY_BROCK_HOME',
-    shopName: '布洛克家',
-    shopNameEn: "Brock's Home",
-  },
-};
-
-/**
- * 確保玩家個人的導師自訂房間已建立，若不存在則動態生成並與導師商店建立雙向路徑連接。
- * @param {string} playerName - 玩家角色名稱。
- * @param {string} mentorName - 選擇的導師名稱（'Martha' | 'Garrick' | 'Vance' | 'Corinne' | 'Brock'）。
- * @returns {Promise<{ newRoomId: string, shopLocationId: string }>} 包含新房間 ID 與關聯商店地點 ID 的物件。
- */
-const ensureCustomRoom = async (playerName, mentorName) => {
-  const shopInfo = MENTOR_SHOP_MAP[mentorName] || MENTOR_SHOP_MAP.Martha;
-  const newRoomId = `${shopInfo.shopLocationId}_${playerName}_ROOM`;
-  const newRoomName = `${shopInfo.shopName}：${playerName}的房間`;
-  const newRoomNameEn = `${shopInfo.shopNameEn}: ${playerName}'s Room`;
-
-  const roomData = {
-    locationId: newRoomId,
-    name: newRoomName,
-    nameEn: newRoomNameEn,
-    description: '小巧精簡的個人房間。',
-    descriptionEn: 'A compact and minimalist personal room.',
-    image: 'https://res.cloudinary.com/duqyw1uhq/image/upload/v1791367142/Room_ffeeyh.png',
-    gatherables: [],
-    connections: [
-      {
-        targetLocationId: shopInfo.shopLocationId,
-        energyCost: 1,
-      },
-    ],
-    npcs: [],
-    hasEvent: false,
-    buildings: [],
-  };
-
-  await Location.findOneAndUpdate(
-    { locationId: newRoomId },
-    roomData,
-    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
-  );
-
-  const shopLoc = await Location.findOne({ locationId: shopInfo.shopLocationId });
-  if (shopLoc) {
-    if (!shopLoc.connections.some((c) => c.targetLocationId === newRoomId)) {
-      shopLoc.connections.push({ targetLocationId: newRoomId, energyCost: 1 });
-      await shopLoc.save();
-    }
-  }
-
-  return { newRoomId, shopLocationId: shopInfo.shopLocationId };
-};
 
 // GET /api/player
 router.get('/player', async (req, res) => {
@@ -441,7 +366,7 @@ router.get('/player', async (req, res) => {
     let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
     if (!player) {
       const defaultName = '冒險者';
-      const defaultMentor = 'Martha';
+      const defaultMentor = '';
 
       player = await Player.create({
         name: defaultName,
@@ -455,8 +380,8 @@ router.get('/player', async (req, res) => {
         energy: MAX_ENERGY,
         maxEnergy: MAX_ENERGY,
         lastEnergyRecoveredAt: new Date(),
-        location: 'AZURE_BAY_PORT',
-        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET'],
+        location: 'AZURE_BAY_MARKET',
+        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_GATE', 'ROCKY_PLAIN', 'AZURE_BAY_VARIETY_SHOP', 'ROCK_WALL'],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
     } else {
@@ -467,24 +392,9 @@ router.get('/player', async (req, res) => {
       let updated = energyUpdated || decayUpdated;
 
       if (player.isCharacterCreated) {
-        const currentMentor = player.mentor || 'Martha';
-        const { newRoomId, shopLocationId } = await ensureCustomRoom(player.name, currentMentor);
-
-        const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('冒險者_ROOM'));
+        const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('ROOM'));
         if (filtered.length !== player.knownLocations.length) {
           player.knownLocations = filtered;
-          updated = true;
-        }
-        if (!player.knownLocations.includes(shopLocationId)) {
-          player.knownLocations.push(shopLocationId);
-          updated = true;
-        }
-        if (!player.knownLocations.includes(newRoomId)) {
-          player.knownLocations.push(newRoomId);
-          updated = true;
-        }
-        if (!player.mentor) {
-          player.mentor = currentMentor;
           updated = true;
         }
       }
@@ -519,9 +429,7 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法建立角色！' });
     }
 
-    const { name, mentor, strength, speed, dexterity, str, spd, dex, stats } = req.body;
-    const validMentors = ['Martha', 'Garrick', 'Vance', 'Corinne', 'Brock'];
-    const selectedMentor = validMentors.includes(mentor) ? mentor : 'Martha';
+    const { name, strength, speed, dexterity, str, spd, dex, stats } = req.body;
     const trimmedName = (name || '').trim();
 
     const nStr = Number(stats?.strength ?? strength ?? str);
@@ -545,20 +453,53 @@ router.post('/player/create-character', async (req, res) => {
     }
 
     try {
-      await Location.deleteMany({ locationId: { $regex: /.*冒險者.*ROOM$/ } });
+      await Location.deleteMany({ locationId: { $regex: /.*ROOM$/ } });
       await Location.deleteMany({ locationId: 'AZURE_BAY_ROOM' });
     } catch (cleanErr) {
       console.error('[Clean Room Error]', cleanErr);
     }
 
-    const { newRoomId, shopLocationId } = await ensureCustomRoom(trimmedName, selectedMentor);
-
     const maxHp = MAX_HP;
     const maxEnergy = MAX_ENERGY;
 
+    const initialInventory = [];
+    for (let i = 0; i < 10; i++) {
+      initialInventory.push({
+        instanceId: generateInstanceId(),
+        itemId: 'item002',
+        count: 1,
+        durability: 1440,
+        maxDurability: 1440,
+        quality: '普通',
+        lastDecayedAt: new Date(),
+      });
+    }
+    initialInventory.push({
+      instanceId: generateInstanceId(),
+      itemId: 'item032',
+      count: 1,
+      durability: -1,
+      maxDurability: -1,
+      quality: '普通',
+      contents: {
+        itemId: 'item018',
+        amount: 10,
+      },
+      lastDecayedAt: new Date(),
+    });
+
+    const defaultKnownLocations = [
+      'AZURE_BAY_PORT',
+      'AZURE_BAY_MARKET',
+      'AZURE_BAY_GATE',
+      'ROCKY_PLAIN',
+      'AZURE_BAY_VARIETY_SHOP',
+      'ROCK_WALL',
+    ];
+
     const characterData = {
       name: trimmedName,
-      mentor: selectedMentor,
+      mentor: '',
       stats: {
         strength: nStr,
         speed: nSpd,
@@ -577,8 +518,9 @@ router.post('/player/create-character', async (req, res) => {
       maxEnergy,
       lastEnergyRecoveredAt: new Date(),
       energySpentAccumulator: 0,
-      location: newRoomId,
-      knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', shopLocationId, newRoomId],
+      location: 'AZURE_BAY_MARKET',
+      knownLocations: defaultKnownLocations,
+      inventory: initialInventory,
     };
 
     let player = await Player.findOne();
@@ -597,7 +539,9 @@ router.post('/player/create-character', async (req, res) => {
       player.energySpentAccumulator = 0;
       player.location = characterData.location;
       player.knownLocations = characterData.knownLocations;
+      player.inventory = characterData.inventory;
       player.markModified('knownLocations');
+      player.markModified('inventory');
       await player.save();
     } else {
       player = await Player.create(characterData);

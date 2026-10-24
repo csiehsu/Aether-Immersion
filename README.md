@@ -213,9 +213,11 @@ AetherImmersion/
 - **傷害計算**：命中時傷害為 `damage = Math.max(1, atkStr - defDef)`。
 - **戰利品結算**：擊敗生物後依據敵方 `drops` 掉落清單隨機產生物品並加入背包。
 
-### 7. 導師制度與個人房間動態生成 (Mentor & Custom Room)
-- 創角時可由 4 位導師中選擇引路人：瑪莎（雜貨店）、加利克（小吃店）、凡斯（海產店）、布洛克（布洛克家）。
-- 系統自動呼叫 `ensureCustomRoom`，為玩家動態建立個人專屬房間（例如 `AZURE_BAY_VARIETY_SHOP_玩家名稱_ROOM`），並與導師商店建立雙向路徑連接。
+### 7. 初始起點與探索地圖 (Starting Location & Exploration)
+- 創角流程專注於角色命名與 30 點三維能力值配置（力量、速度、精巧）。
+- 角色創立後初始位置設為蔚藍灣市集（`AZURE_BAY_MARKET`）。
+- 預設已知探索地點（`knownLocations`）包含：港口（`AZURE_BAY_PORT`）、市集（`AZURE_BAY_MARKET`）、城門（`AZURE_BAY_GATE`）、石原（`ROCKY_PLAIN`）、雜貨店（`AZURE_BAY_VARIETY_SHOP`）與石壁（`ROCK_WALL`）。
+- 角色初始攜帶 10 條烤小魚（`item002`，各 1440 滿耐久）與 1 個粗製水壺（`item032`，內裝滿 10 單位飲用水 `item018`）。
 
 ---
 

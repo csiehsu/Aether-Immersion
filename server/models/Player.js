@@ -139,8 +139,8 @@ const PlayerSchema = new mongoose.Schema(
     lastEnergyRecoveredAt: { type: Date, default: Date.now },
     energySpentAccumulator: { type: Number, default: 0 },
     hpRegenAccumulator: { type: Number, default: 0 },
-    location: { type: String, default: 'AZURE_BAY_PORT' },
-    mentor: { type: String, default: 'Martha' },
+    location: { type: String, default: 'AZURE_BAY_MARKET' },
+    mentor: { type: String, default: '' },
     knownLocations: {
       type: [String],
       default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_GATE', 'ROCKY_PLAIN', 'AZURE_BAY_VARIETY_SHOP', 'ROCK_WALL'],

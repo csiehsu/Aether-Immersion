@@ -250,8 +250,8 @@ export const useGameStore = create((set, get) => ({
           hpRegenAccumulator: Number(dbP.hpRegenAccumulator) || 0,
           statusEffects: Array.isArray(dbP.statusEffects) ? dbP.statusEffects : getStatusEffects(dbP),
           level: dbP.level ?? 1,
-          location: dbP.location || state.player?.location || 'AZURE_BAY_PORT',
-          mentor: dbP.mentor || state.player?.mentor || 'Martha',
+          location: dbP.location || state.player?.location || 'AZURE_BAY_MARKET',
+          mentor: dbP.mentor || state.player?.mentor || '',
           knownLocations: Array.isArray(dbP.knownLocations) ? dbP.knownLocations : (state.player?.knownLocations || []),
           quests: Array.isArray(dbP.quests) ? dbP.quests : (state.player?.quests || []),
           unlockedRecipes: Array.isArray(dbP.unlockedRecipes) ? dbP.unlockedRecipes : (state.player?.unlockedRecipes || []),
@@ -267,15 +267,14 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 建立玩家角色並初始化三維能力值與導師房間。
+   * 建立玩家角色並初始化三維能力值。
    * @param {string} name - 角色名稱。
    * @param {number|Object} str - 力量數值或包含三維能力的物件。
    * @param {number} [spd] - 速度數值。
    * @param {number} [dex] - 靈巧數值。
-   * @param {string} [mentor='Martha'] - 選擇的引路導師名稱。
    * @returns {Promise<boolean>} 建立成功回傳 true，失敗回傳 false。
    */
-  createCharacter: async (name, str, spd, dex, mentor = 'Martha') => {
+  createCharacter: async (name, str, spd, dex) => {
     const strength = typeof str === 'object' ? str.strength : str;
     const speed = typeof str === 'object' ? str.speed : spd;
     const dexVal = typeof str === 'object' ? str.dexterity : (dex ?? 1);
@@ -286,7 +285,6 @@ export const useGameStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          mentor,
           stats: {
             strength,
             speed,
