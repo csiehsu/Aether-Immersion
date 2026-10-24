@@ -919,25 +919,69 @@ export const useGameStore = create((set, get) => ({
     const dbItemTypes = Array.isArray(dbItem?.type) ? dbItem.type : (dbItem?.type ? [dbItem.type] : []);
     const isContainer = dbItemTypes.includes('CONTAINER');
 
-        let useCount;
-    let hpGain;
-    let strGain;
-    let spdGain;
-    let dexGain;
-    let defGain;
-    let maxHpGain;
-    let waterGain;
-    let foodGain;
+    let hpGain = 0;
+    let strGain = 0;
+    let spdGain = 0;
+    let dexGain = 0;
+    let defGain = 0;
+    let maxHpGain = 0;
+    let waterGain = 0;
+    let foodGain = 0;
     let updatedInv = [...inventory];
     let logActionText;
     let logActionTextEn;
 
     if (isContainer) {
       // 容器飲用邏輯：先檢查容器內裝的液體是什麼，再查找該液體效果增減數值
-      const storedLiquidId = invItem.contents?.itemId;
-      const storedAmount = invItem.contents?.amount || 0;
+      const requestedQty = Math.max(1, Number(qty) || 1);
+      let remainingDrink = requestedQty;
+      let totalDrank = 0;
+      let primaryLiquidId = '';
+      let primaryContainerName = '';
+      let primaryContainerNameEn = '';
 
-      if (storedAmount <= 0 || !storedLiquidId) {
+      for (const idx of matchingIndices) {
+        if (remainingDrink <= 0) break;
+        const curContainer = updatedInv[idx];
+        const storedLiquidId = curContainer.contents?.itemId;
+        const storedAmount = curContainer.contents?.amount || 0;
+        if (storedAmount <= 0 || !storedLiquidId) continue;
+
+        if (!primaryLiquidId) {
+          primaryLiquidId = storedLiquidId;
+          primaryContainerName = curContainer.customName || (dbItem ? dbItem.name : curContainer.itemId);
+          primaryContainerNameEn = curContainer.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : curContainer.itemId);
+        }
+
+        const deductDrink = Math.min(storedAmount, remainingDrink);
+        const dbLiquidItem = items.find((i) => i.itemId === storedLiquidId);
+        const nutrition = dbLiquidItem?.nutrition || {};
+        const bonus = curContainer.bonusNutrition || {};
+
+        hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deductDrink;
+        strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deductDrink;
+        spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deductDrink;
+        dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deductDrink;
+        defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deductDrink;
+        maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deductDrink;
+        waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deductDrink;
+        foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deductDrink;
+
+        const newStoredAmount = storedAmount - deductDrink;
+        updatedInv[idx] = {
+          ...curContainer,
+          contents: {
+            ...(curContainer.contents || {}),
+            amount: newStoredAmount,
+            itemId: newStoredAmount > 0 ? storedLiquidId : '',
+          },
+        };
+
+        totalDrank += deductDrink;
+        remainingDrink -= deductDrink;
+      }
+
+      if (totalDrank <= 0) {
         get().addLog(
           '道具系統',
           'Item System',
@@ -948,67 +992,64 @@ export const useGameStore = create((set, get) => ({
         return false;
       }
 
-      useCount = Math.min(storedAmount, Math.max(1, Number(qty) || 1));
-      const dbLiquidItem = items.find((i) => i.itemId === storedLiquidId);
-      const nutrition = dbLiquidItem?.nutrition || {};
-      const bonus = invItem.bonusNutrition || {};
+      const dbLiquidItem = items.find((i) => i.itemId === primaryLiquidId);
+      const liquidName = dbLiquidItem?.name || primaryLiquidId;
+      const liquidNameEn = dbLiquidItem?.nameEn || dbLiquidItem?.name || primaryLiquidId;
 
-      hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
-      strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
-      spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
-      dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
-      defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
-      maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
-      waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
-      foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
-
-      // 扣除容器內存水量，容器本身保留不刪除
-      const newStoredAmount = storedAmount - useCount;
-      updatedInv[invIndex] = {
-        ...invItem,
-        contents: {
-          ...(invItem.contents || {}),
-          amount: newStoredAmount,
-          itemId: newStoredAmount > 0 ? storedLiquidId : '',
-        },
-      };
-
-      const liquidName = dbLiquidItem?.name || storedLiquidId;
-      const liquidNameEn = dbLiquidItem?.nameEn || dbLiquidItem?.name || storedLiquidId;
-      const containerName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
-      const containerNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
-
-      logActionText = `飲用了 [${containerName}] 中的 [${liquidName}] x${useCount}`;
-      logActionTextEn = `Drank [${liquidNameEn}] x${useCount} from [${containerNameEn}]`;
+      logActionText = `飲用了 [${primaryContainerName}] 中的 [${liquidName}] x${totalDrank}`;
+      logActionTextEn = `Drank [${liquidNameEn}] x${totalDrank} from [${primaryContainerNameEn}]`;
     } else {
-      // 一般消耗性物品邏輯
-      const availableCount = invItem.count || 1;
-      useCount = Math.min(availableCount, Math.max(1, Number(qty) || 1));
+      // 一般消耗性物品（食用道具）邏輯：依最低耐久度優先順序依序扣除指定數量
+      const totalAvailable = matchingIndices.reduce(
+        (sum, idx) => sum + (inventory[idx].count || 1),
+        0
+      );
+      const targetQty = Math.max(1, Math.min(Number(qty) || 1, totalAvailable));
 
-      const nutrition = dbItem?.nutrition || {};
-      const bonus = invItem.bonusNutrition || {};
-      hpGain = ((nutrition.hp || 0) + (bonus.hp || 0)) * useCount;
-      strGain = ((nutrition.strength || 0) + (bonus.strength || 0)) * useCount;
-      spdGain = ((nutrition.speed || 0) + (bonus.speed || 0)) * useCount;
-      dexGain = ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * useCount;
-      defGain = ((nutrition.defense || 0) + (bonus.defense || 0)) * useCount;
-      maxHpGain = ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * useCount;
-      waterGain = ((nutrition.water || 0) + (bonus.water || 0)) * useCount;
-      foodGain = ((nutrition.food || 0) + (bonus.food || 0)) * useCount;
+      let remainingToConsume = targetQty;
+      let totalUseCount = 0;
+      const indicesToRemove = new Set();
+      let primaryItem = null;
 
-      if (availableCount <= useCount) {
-        updatedInv.splice(invIndex, 1);
-      } else {
-        updatedInv[invIndex] = {
-          ...invItem,
-          count: availableCount - useCount,
-        };
+      for (const idx of matchingIndices) {
+        if (remainingToConsume <= 0) break;
+        const curItem = updatedInv[idx];
+        if (!primaryItem) {
+          primaryItem = curItem;
+        }
+        const curCount = curItem.count || 1;
+        const deductCount = Math.min(curCount, remainingToConsume);
+
+        const nutrition = dbItem?.nutrition || {};
+        const bonus = curItem.bonusNutrition || {};
+        hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deductCount;
+        strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deductCount;
+        spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deductCount;
+        dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deductCount;
+        defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deductCount;
+        maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deductCount;
+        waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deductCount;
+        foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deductCount;
+
+        totalUseCount += deductCount;
+        remainingToConsume -= deductCount;
+
+        if (curCount <= deductCount) {
+          indicesToRemove.add(idx);
+        } else {
+          updatedInv[idx] = {
+            ...curItem,
+            count: curCount - deductCount,
+          };
+        }
       }
 
-      const itemName = invItem.customName || (dbItem ? dbItem.name : invItem.itemId);
-      const itemNameEn = invItem.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
-      logActionText = `使用了 [${itemName}] x${useCount}`;
-      logActionTextEn = `Used [${itemNameEn}] x${useCount}`;
+      updatedInv = updatedInv.filter((_, idx) => !indicesToRemove.has(idx));
+
+      const itemName = primaryItem?.customName || (dbItem ? dbItem.name : invItem.itemId);
+      const itemNameEn = primaryItem?.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
+      logActionText = `使用了 [${itemName}] x${totalUseCount}`;
+      logActionTextEn = `Used [${itemNameEn}] x${totalUseCount}`;
     }
 
     // Retrieve baseline current stats from player (stats are baseline, never overwritten by item nutrition)

@@ -187,6 +187,16 @@ export const InventoryPanel = () => {
               totalNutrition.food !== 0
             );
 
+            const totalLiquidAmount = isContainer
+              ? sortedItems.reduce((sum, it) => sum + (it.contents?.amount || 0), 0)
+              : 0;
+            const maxActionQty = isContainer
+              ? (totalLiquidAmount > 0 ? totalLiquidAmount : 1)
+              : (selectedGroup.totalCount || 1);
+            const showQuantitySelector = isContainer
+              ? totalLiquidAmount > 1
+              : (selectedGroup.totalCount || 1) > 1;
+
             const hasDurability =
               (dbItem?.durability !== undefined && dbItem.durability > 0) ||
               sortedItems.some(
@@ -344,16 +354,16 @@ export const InventoryPanel = () => {
                 })()}
 
                 <div className="detail-action-container">
-                  {(selectedGroup.totalCount || 1) > 1 && (
+                  {showQuantitySelector && (
                     <div className="detail-qty-row">
                       <span className="detail-qty-label">
                         {language === 'en' ? 'Quantity:' : '選取數量：'}
                       </span>
                       <QuantitySelector
-                        value={actionQty}
+                        value={Math.min(actionQty, maxActionQty)}
                         onChange={setActionQty}
                         min={1}
-                        max={selectedGroup.totalCount || 1}
+                        max={maxActionQty}
                       />
                     </div>
                   )}
@@ -362,9 +372,25 @@ export const InventoryPanel = () => {
                       <button
                         type="button"
                         className="btn-use-item"
+                        disabled={isContainer && totalLiquidAmount <= 0}
+                        style={isContainer && totalLiquidAmount <= 0 ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                         onClick={async (e) => {
                           e.stopPropagation();
-                          await consumeItem(selectedGroup.itemId, actionQty);
+                          if (isContainer && totalLiquidAmount <= 0) return;
+                          const qtyToConsume = Math.min(actionQty, maxActionQty);
+                          const prevTotal = selectedGroup.totalCount || 1;
+                          const success = await consumeItem(selectedGroup.itemId, qtyToConsume);
+                          if (success) {
+                            if (!isContainer) {
+                              if (prevTotal <= qtyToConsume) {
+                                setSelectedItemId(null);
+                              } else {
+                                setActionQty(1);
+                              }
+                            } else {
+                              setActionQty(1);
+                            }
+                          }
                         }}
                       >
                         {isContainer
@@ -389,10 +415,15 @@ export const InventoryPanel = () => {
                       onClick={async (e) => {
                         e.stopPropagation();
                         const currentLocId = player?.location || 'AZURE_BAY_PORT';
-                        const success = await dropItem(currentLocId, selectedGroup.itemId, actionQty);
+                        const dropCount = isContainer
+                          ? Math.min(actionQty, selectedGroup.totalCount || 1)
+                          : actionQty;
+                        const success = await dropItem(currentLocId, selectedGroup.itemId, dropCount);
                         if (success) {
-                          if ((selectedGroup.totalCount || 1) <= actionQty) {
+                          if ((selectedGroup.totalCount || 1) <= dropCount) {
                             setSelectedItemId(null);
+                          } else {
+                            setActionQty(1);
                           }
                         }
                       }}
