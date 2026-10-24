@@ -236,7 +236,7 @@ export const useGameStore = create((set, get) => ({
           stats,
           skills: Array.isArray(dbP.skills) && dbP.skills.length > 0
             ? dbP.skills
-            : [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+            : [{ skillId: 'NORMAL_ATTACK', level: 0 }],
           str: stats.strength,
           spd: stats.speed,
           dex: stats.dexterity,
@@ -256,10 +256,10 @@ export const useGameStore = create((set, get) => ({
           quests: Array.isArray(dbP.quests) ? dbP.quests : (state.player?.quests || []),
           unlockedRecipes: Array.isArray(dbP.unlockedRecipes) ? dbP.unlockedRecipes : (state.player?.unlockedRecipes || []),
           lifeSkills: dbP.lifeSkills || state.player?.lifeSkills || {
-            GATHERING: { level: 1, exp: 0 },
-            FISHING: { level: 1, exp: 0 },
-            MINING: { level: 1, exp: 0 },
-            COOKING: { level: 1, exp: 0 },
+            GATHERING: { level: 0, exp: 0 },
+            FISHING: { level: 0, exp: 0 },
+            MINING: { level: 0, exp: 0 },
+            COOKING: { level: 0, exp: 0 },
           },
         },
       };
@@ -742,41 +742,20 @@ export const useGameStore = create((set, get) => ({
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
           await get().fetchLogs();
-          const gainedQty = result.result?.gainedQty ?? 0;
-          const targetItem = items.find((i) => i.itemId === itemId);
-          const itemNameZh = targetItem?.name || itemId;
-          const itemNameEn = targetItem?.nameEn || itemNameZh;
-          if (gainedQty > 0) {
-            get().addLog(
-              '系統',
-              'System',
-              `採集到${itemNameZh}x${gainedQty}`,
-              `Gathered ${itemNameEn} x${gainedQty}`,
-              'system'
-            );
 
-            // 檢查採集獲得資源是否觸發新配方解鎖
-            const newlyUnlocked = result.result?.newlyUnlockedRecipes || [];
-            newlyUnlocked.forEach((recipe) => {
-              const recipeNameZh = recipe.name;
-              const recipeNameEn = recipe.nameEn || recipe.name;
-              get().addLog(
-                '配方系統',
-                'Recipe System',
-                `這好像可以做成${recipeNameZh}。`,
-                `It seems this can be made into ${recipeNameEn}.`,
-                'event'
-              );
-            });
-          } else {
+          // 檢查採集獲得資源是否觸發新配方解鎖
+          const newlyUnlocked = result.result?.newlyUnlockedRecipes || [];
+          newlyUnlocked.forEach((recipe) => {
+            const recipeNameZh = recipe.name;
+            const recipeNameEn = recipe.nameEn || recipe.name;
             get().addLog(
-              '系統',
-              'System',
-              `未採集到任何${itemNameZh}`,
-              `Failed to gather any ${itemNameEn}`,
-              'system'
+              '配方系統',
+              'Recipe System',
+              `這好像可以做成${recipeNameZh}。`,
+              `It seems this can be made into ${recipeNameEn}.`,
+              'event'
             );
-          }
+          });
         }
       } else {
         const errData = await res.json().catch(() => ({}));

@@ -791,13 +791,57 @@ export const calculateCombatTurn = (attacker = {}, defender = {}) => {
 };
 
 /**
- * 取得生活技能升至下一級所需的經驗值門檻。
- * 規則：每級門檻 = level * 100（例：LV.1 需 100，LV.2 需 200，LV.3 需 300）。
- * @param {number} level - 當前技能等級。
- * @returns {number} 升級所需經驗值。
+ * 生活技能各等級所需的累計總經驗值門檻清單。
+ * Lv0: 0, Lv1: 500, Lv2: 1000, Lv3: 2000, Lv4: 4000, Lv5: 7000
  */
-export const getRequiredExpForNextLevel = (level = 1) => {
-  return Math.max(1, Math.floor(Number(level) || 1)) * 100;
+export const SKILL_EXP_THRESHOLDS = [0, 500, 1000, 2000, 4000, 7000];
+
+/**
+ * 生活技能等級上限（暫定為 5）。
+ */
+export const MAX_SKILL_LEVEL = 5;
+
+/**
+ * 依據累積總經驗值計算當前生活技能等級（0 ~ 5）。
+ * @param {number} totalExp - 當前累積經驗值。
+ * @returns {number} 當前等級。
+ */
+export const calculateSkillLevel = (totalExp = 0) => {
+  const exp = Math.max(0, Number(totalExp) || 0);
+  for (let lvl = MAX_SKILL_LEVEL; lvl >= 0; lvl--) {
+    if (exp >= SKILL_EXP_THRESHOLDS[lvl]) {
+      return lvl;
+    }
+  }
+  return 0;
+};
+
+/**
+ * 取得生活技能升至下一級所需的累計總經驗值門檻。
+ * 若已達等級上限 (5)，回傳上限門檻 (7000)。
+ * @param {number} [level=0] - 當前技能等級。
+ * @returns {number} 升級所需的累計總經驗值。
+ */
+export const getRequiredExpForNextLevel = (level = 0) => {
+  const currentLvl = Math.max(0, Math.floor(Number(level) || 0));
+  if (currentLvl >= MAX_SKILL_LEVEL) {
+    return SKILL_EXP_THRESHOLDS[MAX_SKILL_LEVEL];
+  }
+  return SKILL_EXP_THRESHOLDS[currentLvl + 1];
+};
+
+/**
+ * 計算生活技能等級加成後的最終成功率（百分比 0 ~ 100）。
+ * 每 1 級增加 5% 成功率加成（Lv0 +0%、Lv1 +5%，以此類推），上限為 100%。
+ * @param {number} [baseRate=100] - 基礎成功率。
+ * @param {number} [skillLevel=0] - 相關生活技能等級。
+ * @returns {number} 最終成功率整數百分比。
+ */
+export const calculateSuccessRate = (baseRate = 100, skillLevel = 0) => {
+  const base = typeof baseRate === 'number' && !isNaN(baseRate) ? baseRate : 100;
+  const level = Math.max(0, Math.floor(Number(skillLevel) || 0));
+  const bonus = level * 5;
+  return Math.min(100, Math.max(0, Math.round(base + bonus)));
 };
 
 /**
@@ -810,32 +854,26 @@ export const roundExp = (val) => {
 };
 
 /**
- * 累加生活技能經驗值，並處理升級與溢出經驗值結算（支援小數點經驗值）。
+ * 累加生活技能經驗值，並處理升級與等級上限判定。
+ * 累積經驗超過 7000 時仍可持續獲得經驗，但不會提升等級（上限為 5）。
  * @param {{ level: number, exp: number }} skillObj - 技能資料物件。
  * @param {number} expToAdd - 獲得的經驗值點數。
  * @returns {{ level: number, exp: number, leveledUp: boolean, levelsGained: number }} 更新後的技能狀態。
  */
 export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
-  let currentLevel = Math.max(1, Number(skillObj?.level) || 1);
   const rawCurrentExp = Math.max(0, Number(skillObj?.exp) || 0);
   const rawExpToAdd = Math.max(0, Number(expToAdd) || 0);
-  let currentExp = roundExp(rawCurrentExp + rawExpToAdd);
-  let levelsGained = 0;
+  const totalExp = roundExp(rawCurrentExp + rawExpToAdd);
 
-  while (true) {
-    const reqExp = getRequiredExpForNextLevel(currentLevel);
-    if (roundExp(currentExp - reqExp) >= 0) {
-      currentExp = roundExp(currentExp - reqExp);
-      currentLevel += 1;
-      levelsGained += 1;
-    } else {
-      break;
-    }
-  }
+  const oldLevel = typeof skillObj?.level === 'number'
+    ? skillObj.level
+    : calculateSkillLevel(rawCurrentExp);
+  const newLevel = calculateSkillLevel(totalExp);
+  const levelsGained = Math.max(0, newLevel - oldLevel);
 
   return {
-    level: currentLevel,
-    exp: roundExp(currentExp),
+    level: newLevel,
+    exp: totalExp,
     leveledUp: levelsGained > 0,
     levelsGained,
   };

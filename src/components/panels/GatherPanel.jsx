@@ -13,6 +13,7 @@ import {
   getItemDurabilityPercent,
   getDurabilityStatusInfo,
   calculateLiquidContainerCapacity,
+  calculateSuccessRate,
 } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
@@ -585,14 +586,18 @@ export const GatherPanel = () => {
                       ? 'FISHING'
                       : 'GATHERING')
                 );
-                const skillObj = player?.lifeSkills?.[spotSkill] || { level: 1, exp: 0 };
+                const skillObj = player?.lifeSkills?.[spotSkill] || { level: 0, exp: 0 };
+                const currentLevel = skillObj.level ?? 0;
+                const isMax = currentLevel >= 5;
                 const skillNames = {
                   GATHERING: { name: language === 'en' ? 'Gathering' : '採集', icon: '🌿' },
                   FISHING: { name: language === 'en' ? 'Fishing' : '釣魚', icon: '🎣' },
                   MINING: { name: language === 'en' ? 'Mining' : '挖礦', icon: '⛏️' },
                 };
                 const currentSkillInfo = skillNames[spotSkill] || { name: language === 'en' ? 'Gathering' : '採集', icon: '🌿' };
-                const reqExp = getRequiredExpForNextLevel(skillObj.level);
+                const reqExp = getRequiredExpForNextLevel(currentLevel);
+                const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
+                const finalSuccessRate = calculateSuccessRate(baseChance, currentLevel);
 
                 const singleCost = calculateEffectiveEnergyCost(player, unitCost);
                 const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
@@ -607,7 +612,7 @@ export const GatherPanel = () => {
                     <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span />
                       <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
-                        {currentSkillInfo.icon} {currentSkillInfo.name} LV.{skillObj.level} ({roundExp(skillObj.exp)}/{reqExp} EXP)
+                        {currentSkillInfo.icon} {currentSkillInfo.name} LV.{currentLevel}{isMax ? ' (MAX)' : ''} ({roundExp(skillObj.exp)}{isMax ? '' : `/${reqExp}`} EXP)
                       </span>
                     </div>
 
@@ -701,15 +706,21 @@ export const GatherPanel = () => {
                         />
                       </div>
                       <div className="detail-buttons-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <span className="gather-cost">
-                          {t.costEnergy}: -{totalCost}
-                          {totalCost < baseTotalCost && (
-                            <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
-                          )}
-                          {totalCost > baseTotalCost && (
-                            <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
-                          )}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span className="gather-cost">
+                            {t.costEnergy}: -{totalCost}
+                            {totalCost < baseTotalCost && (
+                              <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
+                            )}
+                            {totalCost > baseTotalCost && (
+                              <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
+                            )}
+                          </span>
+                          <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                            {language === 'en' ? 'Success Rate:' : '成功率：'}
+                            <strong style={{ color: '#38bdf8', marginLeft: '4px' }}>{finalSuccessRate}%</strong>
+                          </span>
+                        </div>
                         <button
                           type="button"
                           className="btn-gather"

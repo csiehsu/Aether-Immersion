@@ -34,6 +34,8 @@ import {
 import {
   addLifeSkillExp,
   roundExp,
+  calculateSkillLevel,
+  calculateSuccessRate,
   addItemToPlacedItems,
   addItemsToInventory,
   isPlayerOverburdened,
@@ -324,22 +326,22 @@ const formatPlayerResponse = (playerDoc) => {
   p.dex = dexVal;
   p.skills = Array.isArray(p.skills) && p.skills.length > 0
     ? p.skills
-    : [{ skillId: 'NORMAL_ATTACK', level: 1 }];
+    : [{ skillId: 'NORMAL_ATTACK', level: 0 }];
   p.lifeSkills = {
     GATHERING: {
-      level: p.lifeSkills?.GATHERING?.level || 1,
+      level: calculateSkillLevel(p.lifeSkills?.GATHERING?.exp || 0),
       exp: roundExp(p.lifeSkills?.GATHERING?.exp || 0),
     },
     FISHING: {
-      level: p.lifeSkills?.FISHING?.level || 1,
+      level: calculateSkillLevel(p.lifeSkills?.FISHING?.exp || 0),
       exp: roundExp(p.lifeSkills?.FISHING?.exp || 0),
     },
     MINING: {
-      level: p.lifeSkills?.MINING?.level || 1,
+      level: calculateSkillLevel(p.lifeSkills?.MINING?.exp || 0),
       exp: roundExp(p.lifeSkills?.MINING?.exp || 0),
     },
     COOKING: {
-      level: p.lifeSkills?.COOKING?.level || 1,
+      level: calculateSkillLevel(p.lifeSkills?.COOKING?.exp || 0),
       exp: roundExp(p.lifeSkills?.COOKING?.exp || 0),
     },
   };
@@ -373,7 +375,13 @@ router.get('/player', async (req, res) => {
         mentor: defaultMentor,
         isCharacterCreated: false,
         stats: { ...DEFAULT_INITIAL_STATS },
-        skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+        skills: [{ skillId: 'NORMAL_ATTACK', level: 0 }],
+        lifeSkills: {
+          GATHERING: { level: 0, exp: 0 },
+          FISHING: { level: 0, exp: 0 },
+          MINING: { level: 0, exp: 0 },
+          COOKING: { level: 0, exp: 0 },
+        },
         level: 1,
         hp: MAX_HP,
         money: 0,
@@ -399,15 +407,32 @@ router.get('/player', async (req, res) => {
         }
       }
 
-      if (!player.lifeSkills || !player.lifeSkills.GATHERING) {
+      if (!player.lifeSkills) {
         player.lifeSkills = {
-          GATHERING: { level: 1, exp: 0 },
-          FISHING: { level: 1, exp: 0 },
-          MINING: { level: 1, exp: 0 },
-          COOKING: { level: 1, exp: 0 },
+          GATHERING: { level: 0, exp: 0 },
+          FISHING: { level: 0, exp: 0 },
+          MINING: { level: 0, exp: 0 },
+          COOKING: { level: 0, exp: 0 },
         };
         player.markModified('lifeSkills');
         updated = true;
+      } else {
+        ['GATHERING', 'FISHING', 'MINING', 'COOKING'].forEach((key) => {
+          if (!player.lifeSkills[key]) {
+            player.lifeSkills[key] = { level: 0, exp: 0 };
+            player.markModified('lifeSkills');
+            updated = true;
+          } else {
+            const currentExp = roundExp(player.lifeSkills[key].exp || 0);
+            const correctLevel = calculateSkillLevel(currentExp);
+            if (player.lifeSkills[key].level !== correctLevel || player.lifeSkills[key].exp !== currentExp) {
+              player.lifeSkills[key].level = correctLevel;
+              player.lifeSkills[key].exp = currentExp;
+              player.markModified('lifeSkills');
+              updated = true;
+            }
+          }
+        });
       }
 
       if (updated) {
@@ -509,7 +534,13 @@ router.post('/player/create-character', async (req, res) => {
         water: MAX_WATER,
         food: MAX_FOOD,
       },
-      skills: [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+      skills: [{ skillId: 'NORMAL_ATTACK', level: 0 }],
+      lifeSkills: {
+        GATHERING: { level: 0, exp: 0 },
+        FISHING: { level: 0, exp: 0 },
+        MINING: { level: 0, exp: 0 },
+        COOKING: { level: 0, exp: 0 },
+      },
       level: 1,
       isCharacterCreated: true,
       hp: maxHp,
@@ -529,6 +560,7 @@ router.post('/player/create-character', async (req, res) => {
       player.mentor = characterData.mentor;
       player.stats = characterData.stats;
       player.skills = characterData.skills;
+      player.lifeSkills = characterData.lifeSkills;
       player.level = characterData.level;
       player.isCharacterCreated = characterData.isCharacterCreated;
       player.hp = characterData.hp;
@@ -598,10 +630,17 @@ router.put('/player', async (req, res) => {
         delete updateData.stats;
       }
       if (updateData.lifeSkills) {
-        player.lifeSkills = {
+        const merged = {
           ...player.lifeSkills?.toObject(),
           ...updateData.lifeSkills,
         };
+        ['GATHERING', 'FISHING', 'MINING', 'COOKING'].forEach((k) => {
+          if (merged[k]) {
+            merged[k].exp = roundExp(merged[k].exp || 0);
+            merged[k].level = calculateSkillLevel(merged[k].exp);
+          }
+        });
+        player.lifeSkills = merged;
         player.markModified('lifeSkills');
         delete updateData.lifeSkills;
       }
@@ -775,18 +814,7 @@ router.post('/player/gather', async (req, res) => {
     player.inventory = updatedInventory;
     player.markModified('inventory');
 
-    // 依據實際採集次數、單次獲得量上限與機率進行隨機抽籤
-    const maxYield = Math.max(1, Number(spot.maxYield) || 1);
-    const dropChance = typeof spot.chance === 'number' ? spot.chance : 100;
-    const totalRolls = actualQty * maxYield;
-    let gainedQty = 0;
-    for (let i = 0; i < totalRolls; i++) {
-      if (Math.random() * 100 < dropChance) {
-        gainedQty += 1;
-      }
-    }
-
-    // 結算生活技能經驗（採集、釣魚、挖礦）：經驗隨獲得量等比成長
+    // 結算生活技能經驗（採集、釣魚、挖礦）與成功率加成
     const spotSkill = spot.skillType || (
       requiredToolTypes.includes('MINING_TOOL')
         ? 'MINING'
@@ -794,6 +822,23 @@ router.post('/player/gather', async (req, res) => {
           ? 'FISHING'
           : 'GATHERING')
     );
+    const currentSkillObj = player.lifeSkills?.[spotSkill] || { level: 0, exp: 0 };
+    const currentSkillLevel = currentSkillObj.level ?? 0;
+    const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
+    const finalSuccessRate = calculateSuccessRate(baseChance, currentSkillLevel);
+
+    // 依據實際採集次數、單次獲得量上限與最終成功率進行抽籤判定
+    const maxYield = Math.max(1, Number(spot.maxYield) || 1);
+    let successQty = 0;
+    let failQty = 0;
+    for (let i = 0; i < actualQty; i++) {
+      if (Math.random() * 100 < finalSuccessRate) {
+        successQty += 1;
+      } else {
+        failQty += 1;
+      }
+    }
+    const gainedQty = successQty * maxYield;
 
     const expPerUnit = (typeof spot.expPerUnit === 'number')
       ? spot.expPerUnit
@@ -803,13 +848,13 @@ router.post('/player/gather', async (req, res) => {
     if (spotSkill && expToAdd > 0) {
       if (!player.lifeSkills) {
         player.lifeSkills = {
-          GATHERING: { level: 1, exp: 0 },
-          FISHING: { level: 1, exp: 0 },
-          MINING: { level: 1, exp: 0 },
-          COOKING: { level: 1, exp: 0 },
+          GATHERING: { level: 0, exp: 0 },
+          FISHING: { level: 0, exp: 0 },
+          MINING: { level: 0, exp: 0 },
+          COOKING: { level: 0, exp: 0 },
         };
       }
-      const currentSkill = player.lifeSkills[spotSkill] || { level: 1, exp: 0 };
+      const currentSkill = player.lifeSkills[spotSkill] || { level: 0, exp: 0 };
       const updatedSkill = addLifeSkillExp(currentSkill, expToAdd);
       player.lifeSkills[spotSkill] = {
         level: updatedSkill.level,
@@ -869,6 +914,20 @@ router.post('/player/gather', async (req, res) => {
     // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+
+    const targetItemName = targetItemDoc?.name || spot.itemId;
+    const targetItemNameEn = targetItemDoc?.nameEn || targetItemDoc?.name || spot.itemId;
+
+    await GameLog.create({
+      time: timeStr,
+      sender: '系統',
+      senderEn: 'System',
+      text: `採集${targetItemName}${actualQty}次，失敗${failQty}次。`,
+      textEn: `Gathered ${targetItemNameEn} ${actualQty} times, failed ${failQty} times.`,
+      type: 'system',
+      locationId: '',
+      targetPlayerId,
+    });
 
     if (isLimitedByTools) {
       await GameLog.create({
@@ -1304,44 +1363,63 @@ router.post('/player/craft', async (req, res) => {
         };
       });
 
-    for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
-      const out = effectiveOutputs[outIdx];
-      const finalItemId = out.itemId;
-      const addQty = (out.quantity || 1) * actualCraftQty;
-      const isPrimary = (outIdx === 0);
+    // 依據生活技能等級計算最終成功率（每級+5%），並隨機抽籤判定成功與失敗次數
+    const craftSkill = recipe.skillType || 'COOKING';
+    const currentCraftSkillObj = player.lifeSkills?.[craftSkill] || { level: 0, exp: 0 };
+    const currentCraftSkillLevel = currentCraftSkillObj.level ?? 0;
+    const baseSuccessRate = recipe.baseSuccessRate !== undefined ? Number(recipe.baseSuccessRate) : 75;
+    const finalSuccessRate = calculateSuccessRate(baseSuccessRate, currentCraftSkillLevel);
 
-      const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
-      const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
-      const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
-      const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
+    let successCraftQty = 0;
+    let failCraftQty = 0;
+    for (let i = 0; i < actualCraftQty; i++) {
+      if (Math.random() * 100 < finalSuccessRate) {
+        successCraftQty += 1;
+      } else {
+        failCraftQty += 1;
+      }
+    }
 
-      const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
-      const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
-      const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+    if (successCraftQty > 0) {
+      for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
+        const out = effectiveOutputs[outIdx];
+        const finalItemId = out.itemId;
+        const addQty = (out.quantity || 1) * successCraftQty;
+        const isPrimary = (outIdx === 0);
 
-      if (finalDurability > 0) {
-        // 耐久度道具一律獨立計算，不進行堆疊，每次批量製作各自生成獨立實體
-        for (let k = 0; k < addQty; k++) {
-          updatedInv.push({
-            instanceId: generateInstanceId(),
-            itemId: finalItemId,
-            count: 1,
-            durability: finalDurability,
-            maxDurability: finalMaxDurability,
+        const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
+        const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
+        const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
+        const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
+
+        const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
+        const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
+        const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+
+        if (finalDurability > 0) {
+          // 耐久度道具一律獨立計算，不進行堆疊，每次批量製作各自生成獨立實體
+          for (let k = 0; k < addQty; k++) {
+            updatedInv.push({
+              instanceId: generateInstanceId(),
+              itemId: finalItemId,
+              count: 1,
+              durability: finalDurability,
+              maxDurability: finalMaxDurability,
+              quality: '普通',
+              lastDecayedAt: new Date(),
+              ...(customName ? { customName, customNameEn } : {}),
+              ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
+            });
+          }
+        } else {
+          // 無耐久度道具維持一般堆疊邏輯
+          updatedInv = addItemsToInventory(updatedInv, finalItemId, addQty, {
+            customName,
+            customNameEn,
+            bonusNutrition: finalBonusNutrition,
             quality: '普通',
-            lastDecayedAt: new Date(),
-            ...(customName ? { customName, customNameEn } : {}),
-            ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
           });
         }
-      } else {
-        // 無耐久度道具維持一般堆疊邏輯
-        updatedInv = addItemsToInventory(updatedInv, finalItemId, addQty, {
-          customName,
-          customNameEn,
-          bonusNutrition: finalBonusNutrition,
-          quality: '普通',
-        });
       }
     }
 
@@ -1358,29 +1436,31 @@ router.post('/player/craft', async (req, res) => {
     }) : [];
 
     let hasQuestUpdate = false;
-    for (const out of effectiveOutputs) {
-      const finalItemId = out.itemId;
-      const addQty = (out.quantity || 1) * actualCraftQty;
+    if (successCraftQty > 0) {
+      for (const out of effectiveOutputs) {
+        const finalItemId = out.itemId;
+        const addQty = (out.quantity || 1) * successCraftQty;
 
-      for (const q of updatedQuests) {
-        if (q.status !== 'IN_PROGRESS') continue;
-        const qDef = (dbQuests || []).find((def) => def.questId === q.questId);
-        if (!qDef) continue;
-        (qDef.objectives || []).forEach((obj, objIdx) => {
-          if (obj.type === 'CRAFT' && obj.targetId === finalItemId) {
-            let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
-            if (!prog) {
-              prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
-              q.progress = q.progress || [];
-              q.progress.push(prog);
+        for (const q of updatedQuests) {
+          if (q.status !== 'IN_PROGRESS') continue;
+          const qDef = (dbQuests || []).find((def) => def.questId === q.questId);
+          if (!qDef) continue;
+          (qDef.objectives || []).forEach((obj, objIdx) => {
+            if (obj.type === 'CRAFT' && obj.targetId === finalItemId) {
+              let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
+              if (!prog) {
+                prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
+                q.progress = q.progress || [];
+                q.progress.push(prog);
+              }
+              prog.currentCount = (prog.currentCount || 0) + addQty;
+              if (prog.currentCount >= (obj.requiredCount || 1)) {
+                prog.isCompleted = true;
+              }
+              hasQuestUpdate = true;
             }
-            prog.currentCount = (prog.currentCount || 0) + addQty;
-            if (prog.currentCount >= (obj.requiredCount || 1)) {
-              prog.isCompleted = true;
-            }
-            hasQuestUpdate = true;
-          }
-        });
+          });
+        }
       }
     }
 
@@ -1400,17 +1480,16 @@ router.post('/player/craft', async (req, res) => {
     }
 
     // 結算生活技能經驗（料理）
-    const craftSkill = recipe.skillType || 'COOKING';
     if (craftSkill) {
       if (!player.lifeSkills) {
         player.lifeSkills = {
-          GATHERING: { level: 1, exp: 0 },
-          FISHING: { level: 1, exp: 0 },
-          MINING: { level: 1, exp: 0 },
-          COOKING: { level: 1, exp: 0 },
+          GATHERING: { level: 0, exp: 0 },
+          FISHING: { level: 0, exp: 0 },
+          MINING: { level: 0, exp: 0 },
+          COOKING: { level: 0, exp: 0 },
         };
       }
-      const currentSkill = player.lifeSkills[craftSkill] || { level: 1, exp: 0 };
+      const currentSkill = player.lifeSkills[craftSkill] || { level: 0, exp: 0 };
       const baseExp = Number(recipe.baseExp) || 0;
       let materialBonusExp = 0;
       if (recipe.ingredientExp && typeof recipe.ingredientExp === 'object') {
@@ -1420,7 +1499,7 @@ router.post('/player/craft', async (req, res) => {
           }
         });
       }
-      const totalExpToAdd = (baseExp + materialBonusExp) * actualCraftQty;
+      const totalExpToAdd = (baseExp + materialBonusExp) * successCraftQty;
       if (totalExpToAdd > 0) {
         const updatedSkill = addLifeSkillExp(currentSkill, totalExpToAdd);
         player.lifeSkills[craftSkill] = {
@@ -1434,6 +1513,20 @@ router.post('/player/craft', async (req, res) => {
     // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
     const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+
+    const recipeName = recipe.name || '道具';
+    const recipeNameEn = recipe.nameEn || recipeName;
+
+    await GameLog.create({
+      time: timeStr,
+      sender: '系統',
+      senderEn: 'System',
+      text: `製作${recipeName}${actualCraftQty}次，失敗${failCraftQty}次。`,
+      textEn: `Crafted ${recipeNameEn} ${actualCraftQty} times, failed ${failCraftQty} times.`,
+      type: 'system',
+      locationId: '',
+      targetPlayerId,
+    });
 
     if (isLimitedByTools) {
       await GameLog.create({
@@ -1469,7 +1562,7 @@ router.post('/player/craft', async (req, res) => {
       success: true,
       source: 'mongodb',
       data: formatPlayerResponse(player),
-      result: { craftQty: actualCraftQty, requestedQty: numCraftQty },
+      result: { craftQty: actualCraftQty, successQty: successCraftQty, failQty: failCraftQty, requestedQty: numCraftQty },
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/craft:', err);

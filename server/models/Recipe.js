@@ -24,6 +24,7 @@ const RecipeSchema = new mongoose.Schema(
     outputs: { type: mongoose.Schema.Types.Mixed, default: {} },
     modifiers: { type: mongoose.Schema.Types.Mixed, default: {} },
     baseExp: { type: Number, default: 0 },
+    baseSuccessRate: { type: Number, default: 75 },
     ingredientExp: { type: mongoose.Schema.Types.Mixed, default: {} },
     skillType: { type: String, default: 'COOKING' },
   },

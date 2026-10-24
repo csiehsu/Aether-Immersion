@@ -8,6 +8,8 @@ import {
   calculateMaxWeight,
   isPlayerOverburdened,
   roundExp,
+  SKILL_EXP_THRESHOLDS,
+  MAX_SKILL_LEVEL,
 } from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
@@ -240,24 +242,31 @@ export const TopHUD = () => {
                       { key: 'MINING', icon: '⛏️', nameZh: '挖礦', nameEn: 'Mining' },
                       { key: 'COOKING', icon: '🍳', nameZh: '料理', nameEn: 'Cooking' },
                     ].map((s) => {
-                      const skillData = player?.lifeSkills?.[s.key] || { level: 1, exp: 0 };
-                      const reqExp = getRequiredExpForNextLevel(skillData.level);
-                      const percent = Math.min(100, Math.max(0, (skillData.exp / reqExp) * 100));
+                      const skillData = player?.lifeSkills?.[s.key] || { level: 0, exp: 0 };
+                      const currentLevel = skillData.level ?? 0;
+                      const isMax = currentLevel >= MAX_SKILL_LEVEL;
+                      const reqExp = getRequiredExpForNextLevel(currentLevel);
+                      const prevExp = SKILL_EXP_THRESHOLDS[currentLevel] || 0;
+                      const percent = isMax
+                        ? 100
+                        : Math.min(100, Math.max(0, ((skillData.exp - prevExp) / (reqExp - prevExp)) * 100));
                       const skillName = language === 'en' ? s.nameEn : s.nameZh;
 
                       return (
                         <div key={s.key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
                             <span style={{ color: '#e2e8f0', fontWeight: 500 }}>
-                              {s.icon} {skillName} <strong style={{ color: '#38bdf8' }}>LV.{skillData.level}</strong>
+                              {s.icon} {skillName} <strong style={{ color: '#38bdf8' }}>LV.{currentLevel}{isMax ? ' (MAX)' : ''}</strong>
                             </span>
                             <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
-                              {roundExp(skillData.exp)} / {reqExp}
+                              {isMax ? roundExp(skillData.exp) : `${roundExp(skillData.exp)} / ${reqExp}`}
                             </span>
                           </div>
-                          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
-                            <div style={{ width: `${percent}%`, height: '100%', background: '#38bdf8', transition: 'width 0.3s ease' }}></div>
-                          </div>
+                          {!isMax && (
+                            <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                              <div style={{ width: `${percent}%`, height: '100%', background: '#38bdf8', transition: 'width 0.3s ease' }}></div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

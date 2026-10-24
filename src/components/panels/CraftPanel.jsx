@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo, compareItemDurability } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo, compareItemDurability, calculateSuccessRate } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -245,9 +245,13 @@ export const CraftPanel = () => {
             const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
 
             const craftSkill = rec.skillType || 'COOKING';
-            const skillObj = player?.lifeSkills?.[craftSkill] || { level: 1, exp: 0 };
-            const reqExp = getRequiredExpForNextLevel(skillObj.level);
+            const skillObj = player?.lifeSkills?.[craftSkill] || { level: 0, exp: 0 };
+            const currentLevel = skillObj.level ?? 0;
+            const isMax = currentLevel >= 5;
+            const reqExp = getRequiredExpForNextLevel(currentLevel);
             const skillName = craftSkill === 'COOKING' ? (language === 'en' ? 'Cooking' : '料理') : craftSkill;
+            const baseSuccessRate = rec.baseSuccessRate !== undefined ? Number(rec.baseSuccessRate) : 75;
+            const finalSuccessRate = calculateSuccessRate(baseSuccessRate, currentLevel);
 
             return (
               <div className="recipe-detail-window">
@@ -256,7 +260,7 @@ export const CraftPanel = () => {
                     <span className="recipe-level">{t.reqLevel} LV.{rec.level}</span>
                   ) : <span />}
                   <span style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 500 }}>
-                    🍳 {skillName} LV.{skillObj.level} ({roundExp(skillObj.exp)}/{reqExp} EXP)
+                    🍳 {skillName} LV.{currentLevel}{isMax ? ' (MAX)' : ''} ({roundExp(skillObj.exp)}{isMax ? '' : `/${reqExp}`} EXP)
                   </span>
                 </div>
 
@@ -520,6 +524,13 @@ export const CraftPanel = () => {
                       </span>
                     </div>
                   ) : null}
+
+                  <div className="recipe-detail-row">
+                    <span className="recipe-detail-label">{language === 'en' ? 'Success Rate:' : '成功率：'}</span>
+                    <span className="recipe-detail-val" style={{ color: '#38bdf8', fontWeight: 600 }}>
+                      {finalSuccessRate}%
+                    </span>
+                  </div>
                 </div>
 
                 <div className="recipe-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>

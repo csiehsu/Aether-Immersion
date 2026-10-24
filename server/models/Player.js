@@ -52,7 +52,7 @@ const StatsSchema = new mongoose.Schema(
 const PlayerSkillSchema = new mongoose.Schema(
   {
     skillId: { type: String, default: 'NORMAL_ATTACK' },
-    level: { type: Number, default: 1 },
+    level: { type: Number, default: 0 },
   },
   { _id: false }
 );
@@ -90,7 +90,7 @@ const UnlockedRecipeSchema = new mongoose.Schema(
 
 const LifeSkillEntrySchema = new mongoose.Schema(
   {
-    level: { type: Number, default: 1 },
+    level: { type: Number, default: 0 },
     exp: { type: Number, default: 0 },
   },
   { _id: false }
@@ -98,10 +98,10 @@ const LifeSkillEntrySchema = new mongoose.Schema(
 
 const LifeSkillsSchema = new mongoose.Schema(
   {
-    GATHERING: { type: LifeSkillEntrySchema, default: () => ({ level: 1, exp: 0 }) },
-    FISHING: { type: LifeSkillEntrySchema, default: () => ({ level: 1, exp: 0 }) },
-    MINING: { type: LifeSkillEntrySchema, default: () => ({ level: 1, exp: 0 }) },
-    COOKING: { type: LifeSkillEntrySchema, default: () => ({ level: 1, exp: 0 }) },
+    GATHERING: { type: LifeSkillEntrySchema, default: () => ({ level: 0, exp: 0 }) },
+    FISHING: { type: LifeSkillEntrySchema, default: () => ({ level: 0, exp: 0 }) },
+    MINING: { type: LifeSkillEntrySchema, default: () => ({ level: 0, exp: 0 }) },
+    COOKING: { type: LifeSkillEntrySchema, default: () => ({ level: 0, exp: 0 }) },
   },
   { _id: false }
 );
@@ -120,15 +120,15 @@ const PlayerSchema = new mongoose.Schema(
     },
     skills: {
       type: [PlayerSkillSchema],
-      default: () => [{ skillId: 'NORMAL_ATTACK', level: 1 }],
+      default: () => [{ skillId: 'NORMAL_ATTACK', level: 0 }],
     },
     lifeSkills: {
       type: LifeSkillsSchema,
       default: () => ({
-        GATHERING: { level: 1, exp: 0 },
-        FISHING: { level: 1, exp: 0 },
-        MINING: { level: 1, exp: 0 },
-        COOKING: { level: 1, exp: 0 },
+        GATHERING: { level: 0, exp: 0 },
+        FISHING: { level: 0, exp: 0 },
+        MINING: { level: 0, exp: 0 },
+        COOKING: { level: 0, exp: 0 },
       }),
     },
     level: { type: Number, default: 1 },
