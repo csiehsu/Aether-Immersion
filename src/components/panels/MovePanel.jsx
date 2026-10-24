@@ -69,7 +69,7 @@ export const MovePanel = () => {
           const isDisabled = isCurrent || isComatose || isOverburdened;
           const connection = (currentLocation?.connections || []).find((c) => c.targetLocationId === loc.locationId);
           const baseCost = connection?.energyCost ?? 1;
-          const cost = calculateEffectiveEnergyCost(player, baseCost);
+          const cost = calculateEffectiveEnergyCost(player, baseCost, 'TRAVEL');
 
           const buttonLabel = isCurrent
             ? t.currentLocation
@@ -87,11 +87,10 @@ export const MovePanel = () => {
                   {!isCurrent && (
                     <span className="location-cost" style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                       ⚡ {cost}
-                      {cost < baseCost && (
-                        <span style={{ color: '#10b981', marginLeft: '3px' }}>(-10%)</span>
-                      )}
-                      {cost > baseCost && (
-                        <span style={{ color: '#ef4444', marginLeft: '3px' }}>(+20%)</span>
+                      {cost !== baseCost && (
+                        <span style={{ color: cost < baseCost ? '#10b981' : '#ef4444', marginLeft: '3px' }}>
+                          ({cost < baseCost ? '' : '+'}{Math.round(((cost - baseCost) / baseCost) * 100)}%)
+                        </span>
                       )}
                     </span>
                   )}

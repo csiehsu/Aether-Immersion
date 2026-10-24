@@ -214,7 +214,7 @@ export const CraftPanel = () => {
 
             const isComatose = isPlayerComatose(player);
             const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
-            const singleEnergyCost = calculateEffectiveEnergyCost(player, rec.energyCost || 0);
+            const singleEnergyCost = calculateEffectiveEnergyCost(player, rec.energyCost || 0, 'CRAFT');
             const maxByEnergy = singleEnergyCost > 0 ? Math.floor(currentEnergy / singleEnergyCost) : Infinity;
 
             const materialLimits = reqItemsList.map((req, reqIdx) => {
@@ -240,7 +240,7 @@ export const CraftPanel = () => {
               : Math.max(1, Math.min(maxByEnergy, maxByMaterials));
 
             const baseEnergyCost = (rec.energyCost || 0) * craftQty;
-            const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+            const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'CRAFT');
             const hasEnergy = currentEnergy >= totalEnergyCost;
             const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
 
@@ -515,11 +515,10 @@ export const CraftPanel = () => {
                       <span className="recipe-detail-label">{language === 'en' ? 'Energy Cost:' : '精力消耗：'}</span>
                       <span className="recipe-detail-val">
                         {totalEnergyCost}
-                        {totalEnergyCost < baseEnergyCost && (
-                          <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '6px' }}>(-10%)</span>
-                        )}
-                        {totalEnergyCost > baseEnergyCost && (
-                          <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '6px' }}>(+20%)</span>
+                        {totalEnergyCost !== baseEnergyCost && (
+                          <span style={{ color: totalEnergyCost < baseEnergyCost ? '#10b981' : '#ef4444', fontSize: '0.75rem', marginLeft: '6px' }}>
+                            ({totalEnergyCost < baseEnergyCost ? '' : '+'}{Math.round(((totalEnergyCost - baseEnergyCost) / baseEnergyCost) * 100)}%)
+                          </span>
                         )}
                       </span>
                     </div>

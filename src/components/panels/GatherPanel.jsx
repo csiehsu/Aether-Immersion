@@ -520,7 +520,7 @@ export const GatherPanel = () => {
                 if (!spot) return null;
                 const unitCost = spot.cost ?? 1;
                 const baseTotalCost = unitCost * gatherQty;
-                const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+                const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
                 const reqTools = spot.requiredToolTypes || [];
 
                 const getItemTypes = (targetItemId) => {
@@ -599,7 +599,7 @@ export const GatherPanel = () => {
                 const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
                 const finalSuccessRate = calculateSuccessRate(baseChance, currentLevel);
 
-                const singleCost = calculateEffectiveEnergyCost(player, unitCost);
+                const singleCost = calculateEffectiveEnergyCost(player, unitCost, 'GATHER');
                 const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
                 const maxByBait = hasBaitRequirement ? totalBaitCount : Infinity;
                 const maxByContainer = isLiquidResource ? totalAvailableContainerCap : Infinity;
@@ -709,11 +709,10 @@ export const GatherPanel = () => {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <span className="gather-cost">
                             {t.costEnergy}: -{totalCost}
-                            {totalCost < baseTotalCost && (
-                              <span style={{ color: '#10b981', fontSize: '0.75rem', marginLeft: '4px' }}>(-10%)</span>
-                            )}
-                            {totalCost > baseTotalCost && (
-                              <span style={{ color: '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>(+20%)</span>
+                            {totalCost !== baseTotalCost && (
+                              <span style={{ color: totalCost < baseTotalCost ? '#10b981' : '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>
+                                ({totalCost < baseTotalCost ? '' : '+'}{Math.round(((totalCost - baseTotalCost) / baseTotalCost) * 100)}%)
+                              </span>
                             )}
                           </span>
                           <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>

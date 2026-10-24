@@ -29,8 +29,9 @@ import {
   MAX_FOOD,
   MAX_HP,
   MAX_ENERGY,
+  TOTAL_CREATION_STATS,
   DEFAULT_INITIAL_STATS,
-} from '../../src/constants/gameConstants.js';
+} from '../../shared/constants/gameConstants.js';
 import {
   addLifeSkillExp,
   roundExp,
@@ -46,7 +47,7 @@ import {
   calculateLiquidContainerCapacity,
   fillLiquidContainers,
   checkRecipeUnlocks,
-} from '../../src/utils/gameHelpers.js';
+} from '../../shared/utils/gameHelpers.js';
 
 const router = express.Router();
 
@@ -100,6 +101,20 @@ collectionRoutes.forEach(({ path, model, initialData }) => {
     }
   });
 });
+
+/**
+ * 依據請求 Header (x-player-id)、Query 或 Body 取得對應玩家實體，未指定時安全 Fallback。
+ * @param {express.Request} req - Express Request 物件。
+ * @returns {Promise<Object|null>} 玩家 Mongoose 文件物件。
+ */
+const getPlayerFromReq = async (req) => {
+  const pId = req.headers?.['x-player-id'] || req.query?.playerId || req.body?.playerId;
+  if (pId && mongoose.isValidObjectId(pId)) {
+    const player = await Player.findById(pId);
+    if (player) return player;
+  }
+  return await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+};
 
 /**
  * 結算玩家背包道具腐敗狀態，若有道具扣至 <= 0 則自動刪除並記錄系統提示訊息。
@@ -365,7 +380,7 @@ router.get('/player', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線，無法載入玩家資料！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       const defaultName = '冒險者';
       const defaultMentor = '';
@@ -398,14 +413,6 @@ router.get('/player', async (req, res) => {
       if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
       const decayUpdated = await settlePlayerInventoryDecay(player, allDbItems);
       let updated = energyUpdated || decayUpdated;
-
-      if (player.isCharacterCreated) {
-        const filtered = player.knownLocations.filter((l) => l !== 'AZURE_BAY_ROOM' && !l.includes('ROOM'));
-        if (filtered.length !== player.knownLocations.length) {
-          player.knownLocations = filtered;
-          updated = true;
-        }
-      }
 
       if (!player.lifeSkills) {
         player.lifeSkills = {
@@ -473,15 +480,8 @@ router.post('/player/create-character', async (req, res) => {
       return res.status(400).json({ success: false, message: '每項能力值最低必須為 1！' });
     }
 
-    if (nStr + nSpd + nDex !== 30) {
-      return res.status(400).json({ success: false, message: '三項能力值總和必須精確等於 30！' });
-    }
-
-    try {
-      await Location.deleteMany({ locationId: { $regex: /.*ROOM$/ } });
-      await Location.deleteMany({ locationId: 'AZURE_BAY_ROOM' });
-    } catch (cleanErr) {
-      console.error('[Clean Room Error]', cleanErr);
+    if (nStr + nSpd + nDex !== TOTAL_CREATION_STATS) {
+      return res.status(400).json({ success: false, message: `三項能力值總和必須精確等於 ${TOTAL_CREATION_STATS}！` });
     }
 
     const maxHp = MAX_HP;
@@ -554,7 +554,7 @@ router.post('/player/create-character', async (req, res) => {
       inventory: initialInventory,
     };
 
-    let player = await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (player) {
       player.name = characterData.name;
       player.mentor = characterData.mentor;
@@ -598,7 +598,7 @@ router.put('/player', async (req, res) => {
     if (updateData.unlockedRecipes) {
       updateData.unlockedRecipes = sanitizeUnlockedRecipes(updateData.unlockedRecipes);
     }
-    let player = await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (player) {
       settleEnergyRecovery(player);
 
@@ -663,6 +663,403 @@ router.put('/player', async (req, res) => {
   }
 });
 
+// POST /api/player/heartbeat
+router.post('/player/heartbeat', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const player = await getPlayerFromReq(req);
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    const energyUpdated = settleEnergyRecovery(player);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    const decayUpdated = await settlePlayerInventoryDecay(player, allDbItems);
+
+    if (energyUpdated || decayUpdated) {
+      player.markModified('inventory');
+      await player.save();
+    }
+
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      energyUpdated,
+      decayUpdated,
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/heartbeat:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/buy
+router.post('/player/buy', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { npcId, itemId, qty = 1 } = req.body;
+    const buyQty = Math.max(1, Number(qty) || 1);
+
+    const player = await getPlayerFromReq(req);
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    settleEnergyRecovery(player);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settlePlayerInventoryDecay(player, allDbItems);
+
+    let npc = await Npc.findOne({ npcId });
+    if (!npc) {
+      npc = initialNpcs.find((n) => n.npcId === npcId);
+    }
+    if (!npc) {
+      return res.status(404).json({ success: false, message: '找不到指定的 NPC！' });
+    }
+
+    const goodie = (npc.goodies || []).find((g) => g.itemId === itemId);
+    if (!goodie) {
+      return res.status(400).json({ success: false, message: '該商人未販售此道具！' });
+    }
+
+    const unitPrice = Math.max(0, Number(goodie.price) || 0);
+    const totalCost = unitPrice * buyQty;
+    const currentMoney = player.money ?? 0;
+    if (currentMoney < totalCost) {
+      return res.status(400).json({ success: false, message: '金錢不足！' });
+    }
+
+    const boughtDbItem = allDbItems.find((i) => i.itemId === itemId);
+    const boughtItemTypes = boughtDbItem && boughtDbItem.type
+      ? (Array.isArray(boughtDbItem.type) ? boughtDbItem.type : [boughtDbItem.type])
+      : [];
+
+    const itemDur = (boughtDbItem?.durability !== undefined && boughtDbItem.durability > 0)
+      ? boughtDbItem.durability
+      : -1;
+    const isContainer = boughtItemTypes.includes('CONTAINER') || (boughtDbItem?.capacity > 0);
+
+    player.money = currentMoney - totalCost;
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    player.inventory = addItemsToInventory(
+      player.inventory,
+      itemId,
+      buyQty,
+      {
+        durability: itemDur,
+        maxDurability: itemDur,
+        ...(isContainer ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
+      },
+      allDbItems
+    );
+    player.markModified('inventory');
+
+    let allDbRecipes = await Recipe.find();
+    if (!allDbRecipes || allDbRecipes.length === 0) allDbRecipes = initialRecipes;
+    const { newlyUnlockedRecipes, updatedUnlocked } = checkRecipeUnlocks(
+      player.unlockedRecipes || [],
+      allDbRecipes,
+      itemId
+    );
+
+    if (newlyUnlockedRecipes.length > 0) {
+      player.unlockedRecipes = updatedUnlocked;
+      player.markModified('unlockedRecipes');
+    }
+
+    await player.save();
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      newlyUnlockedRecipes,
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/buy:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/sell
+router.post('/player/sell', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { npcId, itemId, qty = 1, price } = req.body;
+    const sellQty = Math.max(1, Number(qty) || 1);
+
+    const player = await getPlayerFromReq(req);
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    settleEnergyRecovery(player);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settlePlayerInventoryDecay(player, allDbItems);
+
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    const existingIdx = player.inventory.findIndex((i) => i.itemId === itemId);
+    if (existingIdx < 0) {
+      return res.status(400).json({ success: false, message: '背包中無此道具！' });
+    }
+
+    const currentOwned = player.inventory[existingIdx].count || 1;
+    if (currentOwned < sellQty) {
+      return res.status(400).json({ success: false, message: '持有道具數量不足！' });
+    }
+
+    let unitPrice = 0;
+    let npc = await Npc.findOne({ npcId });
+    if (!npc) npc = initialNpcs.find((n) => n.npcId === npcId);
+    if (npc) {
+      const pEntry = (npc.purchase || []).find((p) => p.itemId === itemId);
+      if (pEntry) {
+        unitPrice = Math.max(0, Number(pEntry.price) || 0);
+      }
+    }
+    if (unitPrice === 0 && price !== undefined) {
+      unitPrice = Math.max(0, Number(price) || 0);
+    }
+
+    const totalGain = unitPrice * sellQty;
+    player.money = (player.money ?? 0) + totalGain;
+
+    if (currentOwned <= sellQty) {
+      player.inventory.splice(existingIdx, 1);
+    } else {
+      player.inventory[existingIdx].count = currentOwned - sellQty;
+    }
+    player.markModified('inventory');
+
+    await player.save();
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/sell:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/player/consume
+router.post('/player/consume', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { instanceId, itemId, qty = 1 } = req.body;
+    const targetQty = Math.max(1, Number(qty) || 1);
+
+    const player = await getPlayerFromReq(req);
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家資料！' });
+    }
+
+    settleEnergyRecovery(player);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    await settlePlayerInventoryDecay(player, allDbItems);
+
+    player.inventory = sanitizeInventoryItems(player.inventory);
+
+    const invIndex = player.inventory.findIndex(
+      (i) => (instanceId && i.instanceId === instanceId) || i.itemId === itemId
+    );
+    if (invIndex < 0) {
+      return res.status(400).json({ success: false, message: '背包中找不到該物品！' });
+    }
+
+    const invItem = player.inventory[invIndex];
+    const targetItemId = invItem.itemId;
+    const dbItem = allDbItems.find((d) => d.itemId === targetItemId);
+
+    const itemTypes = dbItem?.type
+      ? (Array.isArray(dbItem.type) ? dbItem.type : [dbItem.type])
+      : [];
+    const isContainer = itemTypes.includes('CONTAINER') || (dbItem?.capacity > 0);
+
+    let hpGain = 0;
+    let strGain = 0;
+    let spdGain = 0;
+    let dexGain = 0;
+    let defGain = 0;
+    let maxHpGain = 0;
+    let waterGain = 0;
+    let foodGain = 0;
+    let logActionText = '';
+    let logActionTextEn = '';
+
+    if (isContainer) {
+      const storedLiquidId = invItem.contents?.itemId || '';
+      const storedAmount = Number(invItem.contents?.amount) || 0;
+      if (!storedLiquidId || storedAmount <= 0) {
+        return res.status(400).json({ success: false, message: '容器內沒有液體可供飲用！' });
+      }
+
+      const deductDrink = Math.min(storedAmount, targetQty);
+      const dbLiquidItem = allDbItems.find((i) => i.itemId === storedLiquidId);
+      const nutrition = dbLiquidItem?.nutrition || {};
+      const bonus = invItem.bonusNutrition || {};
+
+      hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deductDrink;
+      strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deductDrink;
+      spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deductDrink;
+      dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deductDrink;
+      defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deductDrink;
+      maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deductDrink;
+      waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deductDrink;
+      foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deductDrink;
+
+      const newStoredAmount = storedAmount - deductDrink;
+      invItem.contents = {
+        itemId: newStoredAmount > 0 ? storedLiquidId : '',
+        amount: newStoredAmount,
+      };
+
+      const liquidName = dbLiquidItem?.name || storedLiquidId;
+      const liquidNameEn = dbLiquidItem?.nameEn || dbLiquidItem?.name || storedLiquidId;
+      const containerName = invItem.customName || dbItem?.name || invItem.itemId;
+      const containerNameEn = invItem.customNameEn || dbItem?.nameEn || dbItem?.name || invItem.itemId;
+      logActionText = `飲用了 [${containerName}] 中的 [${liquidName}] x${deductDrink}`;
+      logActionTextEn = `Drank [${liquidNameEn}] x${deductDrink} from [${containerNameEn}]`;
+    } else {
+      const matching = player.inventory
+        .map((item, idx) => ({ item, idx }))
+        .filter(({ item }) => item.itemId === targetItemId)
+        .sort((a, b) => compareItemDurability(a.item, b.item, 'asc'));
+
+      let remaining = targetQty;
+      let totalUsed = 0;
+      const toRemove = [];
+
+      for (const { item, idx } of matching) {
+        if (remaining <= 0) break;
+        const curCount = item.count || 1;
+        const deduct = Math.min(curCount, remaining);
+
+        const nutrition = dbItem?.nutrition || {};
+        const bonus = item.bonusNutrition || {};
+        hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deduct;
+        strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deduct;
+        spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deduct;
+        dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deduct;
+        defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deduct;
+        maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deduct;
+        waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deduct;
+        foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deduct;
+
+        totalUsed += deduct;
+        remaining -= deduct;
+
+        if (curCount <= deduct) {
+          toRemove.push(idx);
+        } else {
+          item.count = curCount - deduct;
+        }
+      }
+
+      player.inventory = player.inventory.filter((_, idx) => !toRemove.includes(idx));
+
+      const itemName = invItem.customName || dbItem?.name || invItem.itemId;
+      const itemNameEn = invItem.customNameEn || dbItem?.nameEn || dbItem?.name || invItem.itemId;
+      logActionText = `使用了 [${itemName}] x${totalUsed}`;
+      logActionTextEn = `Used [${itemNameEn}] x${totalUsed}`;
+    }
+
+    const currentStats = player.stats || {};
+    const currentWater = currentStats.water ?? MAX_WATER;
+    const currentFood = currentStats.food ?? MAX_FOOD;
+    const wouldExceedFood = foodGain > 0 && Math.round((currentFood + foodGain) * 100) / 100 > MAX_FOOD;
+    const wouldExceedWater = waterGain > 0 && Math.round((currentWater + waterGain) * 100) / 100 > MAX_WATER;
+
+    if (wouldExceedFood || wouldExceedWater) {
+      return res.status(400).json({ success: false, message: '現在還不需要這個。' });
+    }
+
+    const newStr = Math.round(((currentStats.strength ?? 1) + strGain) * 100) / 100;
+    const newSpd = Math.round(((currentStats.speed ?? 1) + spdGain) * 100) / 100;
+    const newDex = Math.round(((currentStats.dexterity ?? 1) + dexGain) * 100) / 100;
+    const newDef = Math.round(((currentStats.defense ?? 0) + defGain) * 100) / 100;
+    const newMaxHp = Math.round(((currentStats.maxHp ?? MAX_HP) + maxHpGain) * 100) / 100;
+    const newWater = Math.max(0, Math.min(MAX_WATER, Math.round((currentWater + waterGain) * 100) / 100));
+    const newFood = Math.max(0, Math.min(MAX_FOOD, Math.round((currentFood + foodGain) * 100) / 100));
+    const currentHp = player.hp ?? MAX_HP;
+    const newHp = hpGain !== 0
+      ? Math.max(0, Math.min(newMaxHp, currentHp + hpGain))
+      : Math.min(newMaxHp, currentHp);
+
+    player.stats = {
+      strength: newStr,
+      speed: newSpd,
+      dexterity: newDex,
+      defense: newDef,
+      maxHp: newMaxHp,
+      water: newWater,
+      food: newFood,
+    };
+    player.hp = newHp;
+    player.markModified('stats');
+    player.markModified('inventory');
+
+    await player.save();
+
+    const effects = [];
+    const effectsEn = [];
+    if (hpGain !== 0) {
+      effects.push(`HP ${hpGain > 0 ? `+${hpGain}` : hpGain}`);
+      effectsEn.push(`${hpGain > 0 ? `+${hpGain}` : hpGain} HP`);
+    }
+    if (strGain !== 0) {
+      effects.push(`力量 +${strGain}`);
+      effectsEn.push(`+${strGain} STR`);
+    }
+    if (spdGain !== 0) {
+      effects.push(`速度 +${spdGain}`);
+      effectsEn.push(`+${spdGain} SPD`);
+    }
+    if (dexGain !== 0) {
+      effects.push(`精巧 +${dexGain}`);
+      effectsEn.push(`+${dexGain} DEX`);
+    }
+    if (defGain !== 0) {
+      effects.push(`防禦 +${defGain}`);
+      effectsEn.push(`+${defGain} DEF`);
+    }
+    if (maxHpGain !== 0) {
+      effects.push(`最大HP +${maxHpGain}`);
+      effectsEn.push(`+${maxHpGain} MaxHP`);
+    }
+    if (waterGain !== 0) {
+      effects.push(`水分 ${waterGain > 0 ? `+${waterGain}` : waterGain}`);
+      effectsEn.push(`${waterGain > 0 ? `+${waterGain}` : waterGain} Water`);
+    }
+    if (foodGain !== 0) {
+      effects.push(`飽食 ${foodGain > 0 ? `+${foodGain}` : foodGain}`);
+      effectsEn.push(`${foodGain > 0 ? `+${foodGain}` : foodGain} Food`);
+    }
+
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      logActionText,
+      logActionTextEn,
+      effectStr: effects.length > 0 ? ` (${effects.join(', ')})` : '',
+      effectStrEn: effectsEn.length > 0 ? ` (${effectsEn.join(', ')})` : '',
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/player/consume:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/player/gather
 router.post('/player/gather', async (req, res) => {
   try {
@@ -673,7 +1070,7 @@ router.post('/player/gather', async (req, res) => {
     const { itemId, qty = 1 } = req.body;
     const addQty = Math.max(1, Number(qty) || 1);
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家角色！' });
     }
@@ -700,7 +1097,7 @@ router.post('/player/gather', async (req, res) => {
     const requiredToolTypes = spot.requiredToolTypes || [];
 
     const unitCost = spot.cost ?? 1;
-    const singleCost = calculateEffectiveEnergyCost(player, unitCost);
+    const singleCost = calculateEffectiveEnergyCost(player, unitCost, 'GATHER');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (singleCost > 0 && currentEnergy < singleCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
@@ -773,7 +1170,7 @@ router.post('/player/gather', async (req, res) => {
     const isLimitedByContainer = isLiquidResource && maxByContainer < addQty && actualQty === maxByContainer;
 
     const baseTotalCost = unitCost * actualQty;
-    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
 
     // 扣除肉餌
     if (requiredToolTypes.includes('BAIT')) {
@@ -996,7 +1393,7 @@ router.post('/player/travel', async (req, res) => {
       return res.status(400).json({ success: false, message: '請指定目標地點！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家角色！' });
     }
@@ -1039,7 +1436,7 @@ router.post('/player/travel', async (req, res) => {
     }
 
     const baseEnergyCost = connection.energyCost ?? 1;
-    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'TRAVEL');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < energyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
@@ -1084,7 +1481,7 @@ router.post('/player/craft', async (req, res) => {
 
     const numCraftQty = Math.max(1, Number(craftQty) || 1);
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家角色！' });
     }
@@ -1139,7 +1536,7 @@ router.post('/player/craft', async (req, res) => {
     };
 
     const baseSingleEnergyCost = recipe.energyCost || 0;
-    const singleEnergyCost = calculateEffectiveEnergyCost(player, baseSingleEnergyCost);
+    const singleEnergyCost = calculateEffectiveEnergyCost(player, baseSingleEnergyCost, 'CRAFT');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (singleEnergyCost > 0 && currentEnergy < singleEnergyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
@@ -1203,7 +1600,7 @@ router.post('/player/craft', async (req, res) => {
     const isLimitedByTools = maxByTools < numCraftQty && actualCraftQty === maxByTools;
 
     const baseEnergyCost = baseSingleEnergyCost * actualCraftQty;
-    const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'CRAFT');
 
     let updatedInv = sanitizeInventoryItems(player.inventory);
     let primaryConsumedMaterial = null;
@@ -1423,20 +1820,21 @@ router.post('/player/craft', async (req, res) => {
       }
     }
 
-    let dbQuests = await Quest.find();
-    if (!dbQuests || dbQuests.length === 0) {
-      dbQuests = initialQuests;
-    }
-    let updatedQuests = player.quests ? player.quests.map((q) => {
-      const qObj = q.toObject ? q.toObject() : { ...q };
-      return {
-        ...qObj,
-        progress: qObj.progress ? qObj.progress.map((p) => ({ ...p })) : [],
-      };
-    }) : [];
-
     let hasQuestUpdate = false;
-    if (successCraftQty > 0) {
+    let updatedQuests = [];
+    if (player.quests && player.quests.length > 0 && successCraftQty > 0) {
+      let dbQuests = await Quest.find();
+      if (!dbQuests || dbQuests.length === 0) {
+        dbQuests = initialQuests;
+      }
+      updatedQuests = player.quests.map((q) => {
+        const qObj = q.toObject ? q.toObject() : { ...q };
+        return {
+          ...qObj,
+          progress: qObj.progress ? qObj.progress.map((p) => ({ ...p })) : [],
+        };
+      });
+
       for (const out of effectiveOutputs) {
         const finalItemId = out.itemId;
         const addQty = (out.quantity || 1) * successCraftQty;
@@ -1640,7 +2038,7 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(400).json({ success: false, message: '缺少必要參數！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
@@ -1760,7 +2158,7 @@ router.post('/player/drop-item', async (req, res) => {
       return res.status(400).json({ success: false, message: '缺少必要參數！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
@@ -1874,7 +2272,7 @@ router.post('/quest/accept', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到該任務！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
@@ -1943,7 +2341,7 @@ router.post('/quest/submit', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到該任務！' });
     }
 
-    let player = await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+    let player = await getPlayerFromReq(req);
     if (!player) {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }

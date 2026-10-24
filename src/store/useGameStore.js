@@ -8,18 +8,14 @@ import {
   getStatusEffects,
   calculateEffectiveEnergyCost,
   isPlayerOverburdened,
-  compareItemDurability,
   settleItemDecay,
-  checkRecipeUnlocks,
+  isDecayItem,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
   MAX_FOOD,
   MAX_HP,
-  MAX_ENERGY,
   DEFAULT_INITIAL_STATS,
-  ENERGY_RECOVERY_INTERVAL_MS,
-  ENERGY_RECOVERY_AMOUNT,
   ENERGY_DRAIN_CYCLE,
   ENERGY_HP_REGEN_CYCLE,
 } from '../constants/gameConstants';
@@ -420,7 +416,7 @@ export const useGameStore = create((set, get) => ({
         get().fetchQuests(),
       ]);
 
-      const res = await fetch(`${API_BASE}/player`);
+      const res = await fetch(`${API_BASE}/player`, { headers: { 'x-player-id': get().player?._id || '' } });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
         return;
@@ -563,7 +559,7 @@ export const useGameStore = create((set, get) => ({
     const currentLoc = locations.find((l) => l.locationId === player.location);
     const connection = currentLoc?.connections?.find((c) => c.targetLocationId === targetLocId);
     const baseCost = connection?.energyCost ?? 1;
-    const cost = calculateEffectiveEnergyCost(player, baseCost);
+    const cost = calculateEffectiveEnergyCost(player, baseCost, 'TRAVEL');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
 
     if (currentEnergy < cost) {
@@ -597,7 +593,7 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/player/travel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-player-id': player._id || '' },
         body: JSON.stringify({ targetLocationId: targetLocId }),
       });
       if (res.ok) {
@@ -644,7 +640,7 @@ export const useGameStore = create((set, get) => ({
 
     const addQty = Math.max(1, Number(qty) || 1);
     const baseTotalCost = cost * addQty;
-    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost);
+    const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
 
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < totalCost) {
@@ -734,7 +730,7 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/player/gather`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-player-id': player._id || '' },
         body: JSON.stringify({ cost: totalCost, itemId, qty: addQty }),
       });
       if (res.ok) {
@@ -819,7 +815,7 @@ export const useGameStore = create((set, get) => ({
     }
 
     const baseEnergyCost = (recipe.energyCost || 0) * numCraftQty;
-    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost);
+    const energyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'CRAFT');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < energyCost) {
       return false;
@@ -828,7 +824,7 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/player/craft`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-player-id': player._id || '' },
         body: JSON.stringify({
           recipeId: recipe.recipeId || recipe.id,
           selectedMaterials,
@@ -867,302 +863,48 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 使用成功回傳 true，未找到道具或失敗回傳 false。
    */
   consumeItem: async (inventoryItemId, qty = 1) => {
-    get().settleInventoryDecay();
-    const { player, inventory, items } = get();
+    const { player } = get();
     if (!player || !inventoryItemId) return false;
 
-    const matchingIndices = [];
-    inventory.forEach((item, idx) => {
-      if (item.instanceId === inventoryItemId || item.itemId === inventoryItemId) {
-        matchingIndices.push(idx);
-      }
-    });
-    if (matchingIndices.length === 0) return false;
-
-    // 依最低耐久度優先排序，相同耐久度維持原順序
-    matchingIndices.sort((idxA, idxB) => {
-      const cmp = compareItemDurability(inventory[idxA], inventory[idxB]);
-      if (cmp !== 0) return cmp;
-      return idxA - idxB;
-    });
-
-    const invIndex = matchingIndices[0];
-
-    const invItem = inventory[invIndex];
-    const dbItem = items.find(
-      (i) => i.itemId === invItem.itemId
-    );
-
-    const dbItemTypes = Array.isArray(dbItem?.type) ? dbItem.type : (dbItem?.type ? [dbItem.type] : []);
-    const isContainer = dbItemTypes.includes('CONTAINER');
-
-    let hpGain = 0;
-    let strGain = 0;
-    let spdGain = 0;
-    let dexGain = 0;
-    let defGain = 0;
-    let maxHpGain = 0;
-    let waterGain = 0;
-    let foodGain = 0;
-    let updatedInv = [...inventory];
-    let logActionText;
-    let logActionTextEn;
-
-    if (isContainer) {
-      // 容器飲用邏輯：先檢查容器內裝的液體是什麼，再查找該液體效果增減數值
-      const requestedQty = Math.max(1, Number(qty) || 1);
-      let remainingDrink = requestedQty;
-      let totalDrank = 0;
-      let primaryLiquidId = '';
-      let primaryContainerName = '';
-      let primaryContainerNameEn = '';
-
-      for (const idx of matchingIndices) {
-        if (remainingDrink <= 0) break;
-        const curContainer = updatedInv[idx];
-        const storedLiquidId = curContainer.contents?.itemId;
-        const storedAmount = curContainer.contents?.amount || 0;
-        if (storedAmount <= 0 || !storedLiquidId) continue;
-
-        if (!primaryLiquidId) {
-          primaryLiquidId = storedLiquidId;
-          primaryContainerName = curContainer.customName || (dbItem ? dbItem.name : curContainer.itemId);
-          primaryContainerNameEn = curContainer.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : curContainer.itemId);
-        }
-
-        const deductDrink = Math.min(storedAmount, remainingDrink);
-        const dbLiquidItem = items.find((i) => i.itemId === storedLiquidId);
-        const nutrition = dbLiquidItem?.nutrition || {};
-        const bonus = curContainer.bonusNutrition || {};
-
-        hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deductDrink;
-        strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deductDrink;
-        spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deductDrink;
-        dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deductDrink;
-        defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deductDrink;
-        maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deductDrink;
-        waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deductDrink;
-        foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deductDrink;
-
-        const newStoredAmount = storedAmount - deductDrink;
-        updatedInv[idx] = {
-          ...curContainer,
-          contents: {
-            ...(curContainer.contents || {}),
-            amount: newStoredAmount,
-            itemId: newStoredAmount > 0 ? storedLiquidId : '',
-          },
-        };
-
-        totalDrank += deductDrink;
-        remainingDrink -= deductDrink;
-      }
-
-      if (totalDrank <= 0) {
-        get().addLog(
-          '道具系統',
-          'Item System',
-          `[${invItem.customName || dbItem?.name || invItem.itemId}] 裡沒有任何液體，無法飲用。`,
-          `[${invItem.customNameEn || dbItem?.nameEn || dbItem?.name || invItem.itemId}] is empty, cannot drink.`,
-          'system'
-        );
-        return false;
-      }
-
-      const dbLiquidItem = items.find((i) => i.itemId === primaryLiquidId);
-      const liquidName = dbLiquidItem?.name || primaryLiquidId;
-      const liquidNameEn = dbLiquidItem?.nameEn || dbLiquidItem?.name || primaryLiquidId;
-
-      logActionText = `飲用了 [${primaryContainerName}] 中的 [${liquidName}] x${totalDrank}`;
-      logActionTextEn = `Drank [${liquidNameEn}] x${totalDrank} from [${primaryContainerNameEn}]`;
-    } else {
-      // 一般消耗性物品（食用道具）邏輯：依最低耐久度優先順序依序扣除指定數量
-      const totalAvailable = matchingIndices.reduce(
-        (sum, idx) => sum + (inventory[idx].count || 1),
-        0
-      );
-      const targetQty = Math.max(1, Math.min(Number(qty) || 1, totalAvailable));
-
-      let remainingToConsume = targetQty;
-      let totalUseCount = 0;
-      const indicesToRemove = new Set();
-      let primaryItem = null;
-
-      for (const idx of matchingIndices) {
-        if (remainingToConsume <= 0) break;
-        const curItem = updatedInv[idx];
-        if (!primaryItem) {
-          primaryItem = curItem;
-        }
-        const curCount = curItem.count || 1;
-        const deductCount = Math.min(curCount, remainingToConsume);
-
-        const nutrition = dbItem?.nutrition || {};
-        const bonus = curItem.bonusNutrition || {};
-        hpGain += ((nutrition.hp || 0) + (bonus.hp || 0)) * deductCount;
-        strGain += ((nutrition.strength || 0) + (bonus.strength || 0)) * deductCount;
-        spdGain += ((nutrition.speed || 0) + (bonus.speed || 0)) * deductCount;
-        dexGain += ((nutrition.dexterity || 0) + (bonus.dexterity || 0)) * deductCount;
-        defGain += ((nutrition.defense || 0) + (bonus.defense || 0)) * deductCount;
-        maxHpGain += ((nutrition.maxHp || 0) + (bonus.maxHp || 0)) * deductCount;
-        waterGain += ((nutrition.water || 0) + (bonus.water || 0)) * deductCount;
-        foodGain += ((nutrition.food || 0) + (bonus.food || 0)) * deductCount;
-
-        totalUseCount += deductCount;
-        remainingToConsume -= deductCount;
-
-        if (curCount <= deductCount) {
-          indicesToRemove.add(idx);
-        } else {
-          updatedInv[idx] = {
-            ...curItem,
-            count: curCount - deductCount,
-          };
-        }
-      }
-
-      updatedInv = updatedInv.filter((_, idx) => !indicesToRemove.has(idx));
-
-      const itemName = primaryItem?.customName || (dbItem ? dbItem.name : invItem.itemId);
-      const itemNameEn = primaryItem?.customNameEn || (dbItem ? (dbItem.nameEn || dbItem.name) : invItem.itemId);
-      logActionText = `使用了 [${itemName}] x${totalUseCount}`;
-      logActionTextEn = `Used [${itemNameEn}] x${totalUseCount}`;
-    }
-
-    // Retrieve baseline current stats from player (stats are baseline, never overwritten by item nutrition)
-    const currentStats = player.stats || {};
-    const currentStr = currentStats.strength ?? player.str ?? 1;
-    const currentSpd = currentStats.speed ?? player.spd ?? 1;
-    const currentDex = currentStats.dexterity ?? player.dex ?? 1;
-    const currentDef = currentStats.defense ?? 0;
-    const currentMaxHp = currentStats.maxHp ?? player.maxHp ?? MAX_HP;
-    const currentWater = currentStats.water ?? MAX_WATER;
-    const currentFood = currentStats.food ?? MAX_FOOD;
-    const currentHp = player.hp ?? MAX_HP;
-
-    // 若食用後會導致飽食度或水分超過上限，則無法食用
-    const wouldExceedFood = foodGain > 0 && Math.round((currentFood + foodGain) * 100) / 100 > MAX_FOOD;
-    const wouldExceedWater = waterGain > 0 && Math.round((currentWater + waterGain) * 100) / 100 > MAX_WATER;
-
-    if (wouldExceedFood || wouldExceedWater) {
-      get().addLog(
-        '系統',
-        'System',
-        '現在還不需要這個。',
-        "You don't need this right now.",
-        'system'
-      );
-      return false;
-    }
-
-    // Add nutrition values onto player stats (accumulating rather than replacing)
-    const newStr = Math.round((currentStr + strGain) * 100) / 100;
-    const newSpd = Math.round((currentSpd + spdGain) * 100) / 100;
-    const newDex = Math.round((currentDex + dexGain) * 100) / 100;
-    const newDef = Math.round((currentDef + defGain) * 100) / 100;
-    const newMaxHp = Math.round((currentMaxHp + maxHpGain) * 100) / 100;
-    const newWater = Math.max(0, Math.min(MAX_WATER, Math.round((currentWater + waterGain) * 100) / 100));
-    const newFood = Math.max(0, Math.min(MAX_FOOD, Math.round((currentFood + foodGain) * 100) / 100));
-
-    const newHp = hpGain !== 0
-      ? Math.max(0, Math.min(newMaxHp, currentHp + hpGain))
-      : Math.min(newMaxHp, currentHp);
-
-    const newStats = {
-      ...currentStats,
-      strength: newStr,
-      speed: newSpd,
-      dexterity: newDex,
-      defense: newDef,
-      maxHp: newMaxHp,
-      water: newWater,
-      food: newFood,
-    };
-
-    set((state) => ({
-      player: {
-        ...state.player,
-        hp: newHp,
-        str: newStr,
-        spd: newSpd,
-        dex: newDex,
-        stats: newStats,
-      },
-      inventory: updatedInv,
-    }));
-
-    const effects = [];
-    const effectsEn = [];
-    if (hpGain !== 0) {
-      effects.push(`HP ${hpGain > 0 ? `+${hpGain}` : hpGain}`);
-      effectsEn.push(`${hpGain > 0 ? `+${hpGain}` : hpGain} HP`);
-    }
-    if (strGain !== 0) {
-      effects.push(`力量 +${strGain}`);
-      effectsEn.push(`+${strGain} STR`);
-    }
-    if (spdGain !== 0) {
-      effects.push(`速度 +${spdGain}`);
-      effectsEn.push(`+${spdGain} SPD`);
-    }
-    if (dexGain !== 0) {
-      effects.push(`精巧 +${dexGain}`);
-      effectsEn.push(`+${dexGain} DEX`);
-    }
-    if (defGain !== 0) {
-      effects.push(`防禦 +${defGain}`);
-      effectsEn.push(`+${defGain} DEF`);
-    }
-    if (maxHpGain !== 0) {
-      effects.push(`最大HP +${maxHpGain}`);
-      effectsEn.push(`+${maxHpGain} MaxHP`);
-    }
-    if (waterGain !== 0) {
-      effects.push(`水分 ${waterGain > 0 ? `+${waterGain}` : waterGain}`);
-      effectsEn.push(`${waterGain > 0 ? `+${waterGain}` : waterGain} Water`);
-    }
-    if (foodGain !== 0) {
-      effects.push(`飽食 ${foodGain > 0 ? `+${foodGain}` : foodGain}`);
-      effectsEn.push(`${foodGain > 0 ? `+${foodGain}` : foodGain} Food`);
-    }
-
-    const effectStr = effects.length > 0 ? ` (${effects.join(', ')})` : '';
-    const effectStrEn = effectsEn.length > 0 ? ` (${effectsEn.join(', ')})` : '';
-
-    get().addLog(
-      '道具系統',
-      'Item System',
-      `${logActionText}${effectStr}。`,
-      `${logActionTextEn}${effectStrEn}.`,
-      'event'
-    );
-
     try {
-      const res = await fetch(`${API_BASE}/player`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API_BASE}/player/consume`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': player._id || '',
+        },
         body: JSON.stringify({
-          hp: newHp,
-          str: newStr,
-          spd: newSpd,
-          dex: newDex,
-          stats: newStats,
-          inventory: updatedInv,
+          instanceId: inventoryItemId,
+          itemId: inventoryItemId,
+          qty: Math.max(1, Number(qty) || 1),
         }),
       });
-      if (!res.ok) {
-        set({ mongoStatus: 'offline', isDisconnected: true });
-      } else {
+
+      if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          if (result.logActionText) {
+            get().addLog(
+              '道具系統',
+              'Item System',
+              `${result.logActionText}${result.effectStr || ''}。`,
+              `${result.logActionTextEn || result.logActionText}${result.effectStrEn || ''}.`,
+              'event'
+            );
+          }
+          return true;
         }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        const msg = err.message || '現在還不需要這個。';
+        get().addLog('系統', 'System', msg, msg, 'system');
       }
-    } catch {
-      set({ mongoStatus: 'offline', isDisconnected: true });
+    } catch (err) {
+      console.error('[Consume Error]', err);
     }
 
-    return true;
+    return false;
   },
 
   /**
@@ -1174,88 +916,54 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 購買成功回傳 true，金錢不足或無效參數回傳 false。
    */
   performBuy: async (npc, itemId, price, qty = 1) => {
-    const { player, inventory, items, recipes } = get();
+    const { player } = get();
     if (!player || !npc || !itemId) return false;
 
     const buyQty = Math.max(1, Number(qty) || 1);
-    const unitPrice = Math.max(0, Number(price) || 0);
-    const totalCost = unitPrice * buyQty;
-
-    const currentMoney = player.money ?? 0;
-    if (currentMoney < totalCost) {
-      return false;
-    }
-
-    const boughtDbItem = items.find((i) => i.itemId === itemId);
-    const boughtItemTypes = boughtDbItem && boughtDbItem.type
-      ? (Array.isArray(boughtDbItem.type) ? boughtDbItem.type : [boughtDbItem.type])
-      : [];
-
-    const newMoney = currentMoney - totalCost;
-    const itemDur = (boughtDbItem?.durability !== undefined && boughtDbItem.durability > 0)
-      ? boughtDbItem.durability
-      : -1;
-    const isContainer = boughtItemTypes.includes('CONTAINER') || (boughtDbItem?.capacity > 0);
-    const updatedInv = addItemsToInventory(inventory, itemId, buyQty, {
-      durability: itemDur,
-      maxDurability: itemDur,
-      ...(isContainer ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
-    }, items);
-
-    // 檢查購買道具是否可解鎖對應製作配方（依 recipe.triggerItem 指定道具為準）
-    const currentUnlocked = Array.isArray(player.unlockedRecipes) ? [...player.unlockedRecipes] : [];
-    const { newlyUnlockedRecipes, updatedUnlocked } = checkRecipeUnlocks(
-      currentUnlocked,
-      recipes,
-      itemId
-    );
-
-    if (newlyUnlockedRecipes.length > 0) {
-      newlyUnlockedRecipes.forEach((recipe) => {
-        const recipeNameZh = recipe.name;
-        const recipeNameEn = recipe.nameEn || recipe.name;
-        get().addLog(
-          '配方系統',
-          'Recipe System',
-          `這好像可以做成${recipeNameZh}。`,
-          `It seems this can be made into ${recipeNameEn}.`,
-          'event'
-        );
-      });
-    }
-
-    set((state) => ({
-      player: {
-        ...state.player,
-        money: newMoney,
-        unlockedRecipes: updatedUnlocked,
-      },
-      inventory: updatedInv,
-    }));
 
     try {
-      const res = await fetch(`${API_BASE}/player`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API_BASE}/player/buy`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': player._id || '',
+        },
         body: JSON.stringify({
-          money: newMoney,
-          inventory: updatedInv,
-          unlockedRecipes: updatedUnlocked,
+          npcId: npc.npcId,
+          itemId,
+          qty: buyQty,
         }),
       });
+
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          if (result.newlyUnlockedRecipes && result.newlyUnlockedRecipes.length > 0) {
+            result.newlyUnlockedRecipes.forEach((recipe) => {
+              const recipeNameZh = recipe.name;
+              const recipeNameEn = recipe.nameEn || recipe.name;
+              get().addLog(
+                '配方系統',
+                'Recipe System',
+                `這好像可以做成${recipeNameZh}。`,
+                `It seems this can be made into ${recipeNameEn}.`,
+                'event'
+              );
+            });
+          }
+          return true;
         }
       } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
+        const err = await res.json().catch(() => ({}));
+        const msg = err.message || '購買失敗！';
+        get().addLog('系統', 'System', msg, msg, 'system');
       }
     } catch (err) {
       console.error('[Buy Sync Error]', err);
     }
 
-    return true;
+    return false;
   },
 
   /**
@@ -1267,66 +975,42 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 出售成功回傳 true，持有數量不足回傳 false。
    */
   performSell: async (npc, itemId, price, qty = 1) => {
-    const { player, inventory } = get();
+    const { player } = get();
     if (!player || !npc || !itemId) return false;
 
     const sellQty = Math.max(1, Number(qty) || 1);
-    const unitPrice = Math.max(0, Number(price) || 0);
-    const totalGain = unitPrice * sellQty;
-
-    const existingIdx = inventory.findIndex((i) => i.itemId === itemId);
-    if (existingIdx < 0) {
-      return false;
-    }
-
-    const currentOwned = inventory[existingIdx].count || 1;
-    if (currentOwned < sellQty) {
-      return false;
-    }
-
-    const currentMoney = player.money ?? 0;
-    const newMoney = currentMoney + totalGain;
-
-    let updatedInv = [...inventory];
-    if (currentOwned <= sellQty) {
-      updatedInv.splice(existingIdx, 1);
-    } else {
-      updatedInv[existingIdx] = {
-        ...updatedInv[existingIdx],
-        count: currentOwned - sellQty,
-      };
-    }
-
-    set((state) => ({
-      player: {
-        ...state.player,
-        money: newMoney,
-      },
-      inventory: updatedInv,
-    }));
 
     try {
-      const res = await fetch(`${API_BASE}/player`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(`${API_BASE}/player/sell`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': player._id || '',
+        },
         body: JSON.stringify({
-          money: newMoney,
-          inventory: updatedInv,
+          npcId: npc.npcId,
+          itemId,
+          price,
+          qty: sellQty,
         }),
       });
+
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          return true;
         }
       } else {
-        set({ mongoStatus: 'offline', isDisconnected: true });
+        const err = await res.json().catch(() => ({}));
+        const msg = err.message || '出售失敗！';
+        get().addLog('系統', 'System', msg, msg, 'system');
       }
     } catch (err) {
       console.error('[Sell Sync Error]', err);
     }
 
-    return true;
+    return false;
   },
 
   /**
@@ -1340,7 +1024,7 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/location/pickup-item`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-player-id': get().player?._id || '' },
         body: JSON.stringify({ locationId, instanceId, count }),
       });
       if (res.ok) {
@@ -1374,7 +1058,7 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/player/drop-item`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-player-id': get().player?._id || '' },
         body: JSON.stringify({ locationId, itemKey, count }),
       });
       if (res.ok) {
@@ -1687,103 +1371,58 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 結算並恢復精力（每 15 分鐘恢復 15 點精力，上限為 maxEnergy）。
-   * 同步更新 Zustand state 與後端資料庫。
+   * 觸發後端定時心跳：在伺服器端權威結算精力恢復與道具腐敗，並即時寫入 DB 與同步 Zustand 狀態。
    */
-  settleEnergyRecovery: () => {
+  triggerHeartbeat: async () => {
     const { player } = get();
     if (!player) return;
-    const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
-    const currentEnergy = Math.round((player.energy ?? maxEnergy) * 10) / 10;
-    const now = Date.now();
-    const lastRecoveredTime = player.lastEnergyRecoveredAt
-      ? new Date(player.lastEnergyRecoveredAt).getTime()
-      : now;
 
-    const INTERVAL_MS = ENERGY_RECOVERY_INTERVAL_MS;
-    const RECOVERY_AMOUNT = ENERGY_RECOVERY_AMOUNT;
-    const elapsed = now - lastRecoveredTime;
-
-    if (elapsed < INTERVAL_MS) return;
-
-    const intervals = Math.floor(elapsed / INTERVAL_MS);
-    if (intervals <= 0) return;
-
-    if (currentEnergy >= maxEnergy) {
-      set((state) => ({
-        player: {
-          ...state.player,
-          lastEnergyRecoveredAt: new Date(now).toISOString(),
+    try {
+      const res = await fetch(`${API_BASE}/player/heartbeat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': player._id || '',
         },
-      }));
-      return;
-    }
+      });
 
-    const addedEnergy = intervals * RECOVERY_AMOUNT;
-    const newEnergy = Math.min(maxEnergy, Math.round((currentEnergy + addedEnergy) * 10) / 10);
-    const newLastRecoveredAt = newEnergy >= maxEnergy
-      ? new Date(now).toISOString()
-      : new Date(lastRecoveredTime + intervals * INTERVAL_MS).toISOString();
-
-    set((state) => ({
-      player: {
-        ...state.player,
-        energy: newEnergy,
-        lastEnergyRecoveredAt: newLastRecoveredAt,
-      },
-    }));
-
-    fetch(`${API_BASE}/player`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        energy: newEnergy,
-        lastEnergyRecoveredAt: newLastRecoveredAt,
-      }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (result?.success && result.data) {
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.data) {
           get().applyPlayerData(result.data);
         }
-      })
-      .catch((err) => {
-        console.error('[Energy Recovery Sync Error]', err);
-      });
+      }
+    } catch (err) {
+      console.error('[Heartbeat Error]', err);
+    }
+  },
+
+  /**
+   * 結算並恢復精力（每 15 分鐘恢復 15 點精力，上限為 maxEnergy）。
+   * 調用後端心跳端點，由後端權威計算並即時寫入資料庫。
+   */
+  settleEnergyRecovery: () => {
+    get().triggerHeartbeat();
   },
 
   /**
    * 結算背包道具腐敗狀態。
-   * 每 1 分鐘 -1 耐久度，扣至 <= 0 自動刪除，並輸出提示文字「道具名稱已腐敗。」。
+   * 調用後端心跳端點，由後端權威扣除耐久度並即時寫入資料庫。
    */
   settleInventoryDecay: () => {
     const { inventory, items } = get();
     if (!inventory || inventory.length === 0) return;
-    const { updatedItems, rottedItems, isChanged } = settleItemDecay(inventory, items, { isPlayer: true });
-    if (!isChanged) return;
+    const now = Date.now();
+    const hasDecayDue = inventory.some((item) => {
+      if (!item || !item.lastDecayedAt) return false;
+      const isDecay = isDecayItem(item, items.find((i) => i.itemId === item.itemId));
+      if (!isDecay) return false;
+      return (now - new Date(item.lastDecayedAt).getTime()) >= 60000;
+    });
 
-    set({ inventory: updatedItems });
-
-    for (const rotted of rottedItems) {
-      get().addLog('系統', 'System', `${rotted.name}已腐敗。`, `${rotted.nameEn} has rotted.`, 'system');
+    if (hasDecayDue) {
+      get().triggerHeartbeat();
     }
-
-    fetch(`${API_BASE}/player`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        inventory: updatedItems,
-      }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (result?.success && result.data) {
-          get().applyPlayerData(result.data);
-        }
-      })
-      .catch((err) => {
-        console.error('[Decay Sync Error]', err);
-      });
   },
 
   /**

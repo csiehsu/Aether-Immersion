@@ -5,7 +5,7 @@ import {
   MAX_HP,
   MAX_ENERGY,
   DEFAULT_INITIAL_STATS,
-} from '../../src/constants/gameConstants.js';
+} from '../../shared/constants/gameConstants.js';
 
 const InventoryItemSchema = new mongoose.Schema(
   {

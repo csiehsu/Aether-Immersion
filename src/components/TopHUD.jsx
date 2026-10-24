@@ -104,8 +104,20 @@ export const TopHUD = () => {
     };
     updateDecay();
     const interval = setInterval(updateDecay, 10000);
-    return () => clearInterval(interval);
-  }, [player?._id, player?.name, settleInventoryDecay, settleGroundItemsDecay]);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        updateDecay();
+        if (settleEnergyRecovery) settleEnergyRecovery();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [player?._id, player?.name, settleInventoryDecay, settleGroundItemsDecay, settleEnergyRecovery]);
 
   const formatCountdown = (secs) => {
     if (secs <= 0) return '00:00';

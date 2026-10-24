@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import portBg from '../assets/images/background/Port.png';
 import { useGameStore } from '../store/useGameStore';
+import { TOTAL_CREATION_STATS } from '../utils/gameHelpers';
 
 /**
  * 角色創立視圖元件。
- * 負責新玩家的角色命名、初始能力值（力量、速度、精巧共 30 點）分配驗證與提交。
+ * 負責新玩家的角色命名、初始能力值（力量、速度、精巧共 10 點）分配驗證與提交。
  * @returns {JSX.Element}
  */
 export const CharacterCreationView = () => {
@@ -17,7 +18,7 @@ export const CharacterCreationView = () => {
   const [speed, setSpeed] = useState(1);
   const [dexterity, setDexterity] = useState(1);
 
-  const TOTAL_POINTS = 30;
+  const TOTAL_POINTS = TOTAL_CREATION_STATS;
   const currentSum = strength + speed + dexterity;
   const remainingPoints = TOTAL_POINTS - currentSum;
 
@@ -93,8 +94,8 @@ export const CharacterCreationView = () => {
           <h2 className="char-title">{language === 'en' ? 'Create Character' : '創立角色'}</h2>
           <p className="char-subtitle">
             {language === 'en'
-              ? 'Enter character name and allocate 30 attribute points.'
-              : '請輸入角色名稱並分配 30 點初始能力值。'}
+              ? `Enter character name and allocate ${TOTAL_POINTS} attribute points.`
+              : `請輸入角色名稱並分配 ${TOTAL_POINTS} 點初始能力值。`}
           </p>
         </div>
 
@@ -126,7 +127,7 @@ export const CharacterCreationView = () => {
                 <div className="stat-text">
                   <span className="stat-name">{language === 'en' ? 'Strength' : '力量'}</span>
                   <span className="stat-desc">
-                    {language === 'en' ? 'Affects physical attack power and labor work speed' : '影響物理攻擊力、勞力型工作速度'}
+                    {language === 'en' ? 'Affects physical attack power and gathering work speed' : '影響物理攻擊力、採集類工作速度'}
                   </span>
                 </div>
               </div>
@@ -147,7 +148,7 @@ export const CharacterCreationView = () => {
                 <div className="stat-text">
                   <span className="stat-name">{language === 'en' ? 'Speed' : '速度'}</span>
                   <span className="stat-desc">
-                    {language === 'en' ? 'Affects combat turn order and movement speed' : '影響戰鬥的行動順序、移動速度'}
+                    {language === 'en' ? 'Affects combat turn order, evasion rate, and movement speed' : '影響戰鬥的行動順序與閃避率、移動速度'}
                   </span>
                 </div>
               </div>
@@ -169,8 +170,8 @@ export const CharacterCreationView = () => {
                   <span className="stat-name">{language === 'en' ? 'Dexterity' : '精巧'}</span>
                   <span className="stat-desc">
                     {language === 'en'
-                      ? 'Affects indirect combat actions (traps, etc.) success rate and technical work speed'
-                      : '影響間接戰鬥行為（如陷阱等）成功率、技術型工作速度'}
+                      ? 'Affects combat hit rate and crafting work speed'
+                      : '影響戰鬥的命中率、製造類工作速度'}
                   </span>
                 </div>
               </div>
