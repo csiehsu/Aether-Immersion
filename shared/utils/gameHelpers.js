@@ -27,6 +27,7 @@ import {
   STATUS_BUFF_MULTIPLIER,
   STATUS_DEBUFF_MULTIPLIER,
   ENERGY_HP_REGEN_CYCLE,
+  PERMANENT_DURABILITY,
 } from '../constants/gameConstants.js';
 
 import {
@@ -48,6 +49,7 @@ export {
   STATUS_BUFF_MULTIPLIER,
   STATUS_DEBUFF_MULTIPLIER,
   ENERGY_HP_REGEN_CYCLE,
+  PERMANENT_DURABILITY,
   calculateEffectiveEnergyCost,
   calculateStatEnergyDiscount,
 };
@@ -253,13 +255,44 @@ export const getDurabilityColor = (percent) => {
 };
 
 /**
- * 計算道具的當前耐久度百分比 (0-100)。
- * 若無耐久度則回傳 -1。
+ * 判斷指定道具實體或基礎定義是否為永久免損耗道具。
+ * 規則：道具實體或基礎定義之 durability 等於 PERMANENT_DURABILITY (-1)。
  * @param {Object} item - 道具實體物件。
  * @param {Object} [dbItem] - 物品基礎定義物件。
- * @returns {number} 0 到 100 之間的數值，無耐久度則為 -1。
+ * @returns {boolean} 是否為永久免損耗道具。
+ */
+export const isPermanentItem = (item, dbItem) => {
+  if (!item && !dbItem) return false;
+  const dur = (item?.durability !== undefined && item?.durability !== null)
+    ? Number(item.durability)
+    : ((dbItem?.durability !== undefined && dbItem?.durability !== null) ? Number(dbItem.durability) : PERMANENT_DURABILITY);
+  return dur === PERMANENT_DURABILITY;
+};
+
+/**
+ * 判斷指定工具實體是否具備可用性（耐久度 > 0 或為永久免損耗工具）。
+ * @param {Object} item - 工具實體物件。
+ * @param {Object} [dbItem] - 物品基礎定義物件。
+ * @returns {boolean} 工具是否可用。
+ */
+export const isToolUsable = (item, dbItem) => {
+  if (!item && !dbItem) return false;
+  if (isPermanentItem(item, dbItem)) return true;
+  const dur = (item?.durability !== undefined && item?.durability !== null)
+    ? Number(item.durability)
+    : ((dbItem?.durability !== undefined && dbItem?.durability !== null) ? Number(dbItem.durability) : 0);
+  return dur > 0;
+};
+
+/**
+ * 計算道具的當前耐久度百分比 (0-100)。
+ * 規則：若為永久免損耗道具或無有效耐久度則回傳 -1。
+ * @param {Object} item - 道具實體物件。
+ * @param {Object} [dbItem] - 物品基礎定義物件。
+ * @returns {number} 0 到 100 之間的數值，永久道具或無耐久度則為 -1。
  */
 export const getItemDurabilityPercent = (item, dbItem) => {
+  if (isPermanentItem(item, dbItem)) return PERMANENT_DURABILITY;
   const curDur = (item?.durability !== undefined && item?.durability !== null && item.durability > 0)
     ? item.durability
     : -1;
@@ -275,15 +308,27 @@ export const getItemDurabilityPercent = (item, dbItem) => {
 /**
  * 依耐久度百分比取得道具狀態文字與顏色樣式。
  * 規則：
+ * - 永久免損耗 (-1 / PERMANENT_DURABILITY)：已具備 (Available) 綠色
  * - 91% 以上（綠色）：穩固 (Sturdy)
  * - 31% - 90%（黃色）：普通 (Decent)
  * - 30% 以下（紅色）：破舊 (Worn)
  *
- * @param {number} percent - 耐久度百分比 (0-100)。
+ * @param {number} percent - 耐久度百分比 (0-100)，永久道具為 -1。
  * @param {string} [language='zh-TW'] - 語系代碼 ('zh-TW' 或 'en')。
  * @returns {{ text: string, color: string, badgeStyle: { background: string, color: string, border: string } }}
  */
 export const getDurabilityStatusInfo = (percent, language = 'zh-TW') => {
+  if (percent === PERMANENT_DURABILITY || percent === -1) {
+    return {
+      text: language === 'en' ? 'Available' : '已具備',
+      color: '#4ade80',
+      badgeStyle: {
+        background: 'rgba(34, 197, 94, 0.15)',
+        color: '#4ade80',
+        border: '1px solid rgba(34, 197, 94, 0.3)',
+      },
+    };
+  }
   if (percent <= 30) {
     return {
       text: language === 'en' ? 'Worn' : '破舊',
@@ -319,20 +364,27 @@ export const getDurabilityStatusInfo = (percent, language = 'zh-TW') => {
 
 /**
  * 比較兩道具之耐久度，依指定排序方式排序（耐久度相同時維持原順序）。
+ * 排序規則：
+ * - 'asc'（升序，消耗優先）：有限耐久度由低到高排在最前面，永久免損耗道具 (-1) 排在最後面。
+ * - 'desc'（降序，優選優先）：永久免損耗道具視同無窮大耐久排在最前，其次為有限耐久度由高到低。
  * @param {Object} a - 道具 A。
  * @param {Object} b - 道具 B。
  * @param {'asc'|'desc'|boolean} [order='asc'] - 排序方式：'asc'（預設，最低耐久優先）或 'desc'（最高耐久優先）。
  * @returns {number}
  */
 export const compareItemDurability = (a, b, order = 'asc') => {
+  const isAPerm = isPermanentItem(a);
+  const isBPerm = isPermanentItem(b);
+  if (isAPerm && isBPerm) return 0;
+  if (!isAPerm && isBPerm) return order === 'desc' || order === false ? 1 : -1;
+  if (isAPerm && !isBPerm) return order === 'desc' || order === false ? -1 : 1;
+
   const durA = (a?.durability !== undefined && a?.durability !== null && a.durability > 0) ? a.durability : -1;
   const durB = (b?.durability !== undefined && b?.durability !== null && b.durability > 0) ? b.durability : -1;
   if (durA > 0 && durB > 0) {
     const isDesc = order === 'desc' || order === false;
     return isDesc ? durB - durA : durA - durB;
   }
-  if (durA > 0 && durB <= 0) return -1;
-  if (durA <= 0 && durB > 0) return 1;
   return 0;
 };
 
@@ -451,7 +503,7 @@ export const settleItemDecay = (items = [], allDbItems = [], options = {}) => {
 };
 
 /**
- * 取得背包中符合特定工具類型的所有可用工具實體（durability > 0），並依耐久度升序排序（最低耐久者優先）。
+ * 取得背包中符合特定工具類型的所有可用工具實體（耐久度 > 0 或永久免損耗工具），並依耐久度升序排序（最低耐久者優先，永久工具排在最後）。
  * @param {Array<Object>} [inventory=[]] - 玩家背包清單。
  * @param {string} toolType - 所需工具類型。
  * @param {Array<Object>} [allDbItems=[]] - 物品基礎定義清單。
@@ -474,14 +526,13 @@ export const getMatchingToolsAscending = (inventory = [], toolType, allDbItems =
     const types = Array.isArray(rawTypes) ? rawTypes : (rawTypes ? [rawTypes] : []);
     if (!types.includes(toolType)) continue;
 
-    // 檢查耐久度：實體或基礎定義有耐久度，且當前耐久 > 0
-    const dur = item.durability !== undefined && item.durability !== null ? Number(item.durability) : -1;
-    if (dur > 0) {
+    // 檢查耐久度：實體或基礎定義為可用工具（耐久 > 0 或為永久免損耗工具）
+    if (isToolUsable(item, dbItem)) {
       matching.push(item);
     }
   }
 
-  // 依耐久度升序排序（最低耐久度者排第一位）
+  // 依耐久度升序排序（最低耐久度者排第一位，永久免損耗工具排在最後）
   matching.sort((a, b) => compareItemDurability(a, b, 'asc'));
   return matching;
 };
@@ -490,8 +541,9 @@ export const getMatchingToolsAscending = (inventory = [], toolType, allDbItems =
  * 計算單一工具在單次精力消耗下最大可執行的次數。
  * 規則：
  * 1. 若單次精力消耗 <= 0，工具不限制次數 (Infinity)。
- * 2. 若工具耐久度不足以執行 1 次 (0 < durability < singleCost)，無論玩家選擇幾次，都只執行 1 次，接著毀壞。
- * 3. 若耐久度 >= singleCost，可執行 Math.ceil(durability / singleCost) 次（最後一次即使剩餘耐久不足 1 次精力，亦允許執行最後 1 次後損毀）。
+ * 2. 若為永久免損耗工具 (durability === -1)，工具不限制次數 (Infinity)。
+ * 3. 若工具耐久度不足以執行 1 次 (0 < durability < singleCost)，無論玩家選擇幾次，都只執行 1 次，接著毀壞。
+ * 4. 若耐久度 >= singleCost，可執行 Math.ceil(durability / singleCost) 次（最後一次即使剩餘耐久不足 1 次精力，亦允許執行最後 1 次後損毀）。
  *
  * @param {Object} tool - 工具實體物件。
  * @param {number} singleCost - 單次行動實際精力消耗。
@@ -499,6 +551,7 @@ export const getMatchingToolsAscending = (inventory = [], toolType, allDbItems =
  */
 export const calculateToolMaxExecutions = (tool, singleCost) => {
   if (typeof singleCost !== 'number' || singleCost <= 0) return Infinity;
+  if (isPermanentItem(tool)) return Infinity;
   const dur = Number(tool?.durability) || 0;
   if (dur <= 0) return 0;
   return Math.max(1, Math.ceil(dur / singleCost));
@@ -583,6 +636,11 @@ export const applyToolsDurabilityDeduction = (
   const updatedDurabilityMap = new Map();
 
   for (const tool of toolList) {
+    // 永久免損耗工具不扣除耐久度
+    if (isPermanentItem(tool)) {
+      continue;
+    }
+
     const curDur = Number(tool.durability) || 0;
     const newDur = Math.round((curDur - totalEnergyCost) * 100) / 100;
 

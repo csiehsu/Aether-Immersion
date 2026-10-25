@@ -41,6 +41,9 @@ export const STATUS_DEBUFF_MULTIPLIER = 1.2; // 飢渴虛弱狀態行動精力�
 export const STAT_ENERGY_DISCOUNT_PER_POINT = 0.01; // 每 1 點能力節省 1% 精力
 export const STAT_ENERGY_MIN_MULTIPLIER = 0.5; // 最低倍率 0.5（最高節省 50%）
 
+// 耐久度相關常數
+export const PERMANENT_DURABILITY = -1; // 永久免損耗道具/設施的哨兵值耐久度 (-1)
+
 export const GAME_CONSTANTS = Object.freeze({
   MAX_WATER,
   MAX_FOOD,
@@ -60,6 +63,7 @@ export const GAME_CONSTANTS = Object.freeze({
   STATUS_DEBUFF_MULTIPLIER,
   STAT_ENERGY_DISCOUNT_PER_POINT,
   STAT_ENERGY_MIN_MULTIPLIER,
+  PERMANENT_DURABILITY,
 });
 
 export default GAME_CONSTANTS;

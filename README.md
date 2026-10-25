@@ -134,7 +134,7 @@ AetherImmersion/
   - 採集類型包含液體（`LIQUID`）的資源時，透過 `calculateLiquidContainerCapacity` 尋找背包中允許裝載該液體的容器（`CONTAINER`，空容器或已裝同種液體者）。
   - 採集成功後調用 `fillLiquidContainers` 直接將液體注入容器 `contents`，不生成背包散裝物品；若背包無可用容器容量則阻止採集並報錯。
 - **生活技能加成**：採集、釣魚、挖礦依生活技能等級每級提供 +5% 成功率加成（`calculateSuccessRate`）；成功後透過 `addLifeSkillExp` 累加生活技能經驗。
-- **工具耐久扣除與損毀**：依耐久度升序選取工具並扣除耐久度；耐久度歸零自動損壞銷毀並記錄系統日誌。
+- **工具耐久扣除與損毀**：依耐久度升序選取工具並扣除耐久度；耐久度歸零自動損壞銷毀並記錄系統日誌；永久免損耗工具（`durability: -1` / `PERMANENT_DURABILITY`，如平底鍋）透過 `isPermanentItem` 豁免扣損，並透過 `isToolUsable` 判定可用性。
 - **素材解鎖配方**：採集獲得產物時自動比對 `recipe.triggerItem` 解鎖新製作配方。
 
 ### 6. 物品製作、材料修飾與配方機制 (Crafting & Modifiers System)
@@ -414,7 +414,7 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/player/craft')`, `triggerRecipeUnlocks()`
   - 核心輔助：`shared/utils/gameHelpers.js` -> `calculateMaxExecutableByTools()`, `compareItemDurability()`, `applyToolsDurabilityDeduction()`, `calculateSuccessRate()`, `addLifeSkillExp()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **配方權限與環境設施驗證**：檢查配方是否位於玩家 `player.unlockedRecipes` 中；檢查當前場景建築設施（如加熱設施 `HEATING`、烹飪設施 `COOKING`）或背包工具是否滿足 `requiredToolTypes`。
+  1. **配方權限與環境設施驗證**：檢查配方是否位於玩家 `player.unlockedRecipes` 中；檢查當前場景建築設施（如加熱設施 `HEATING`、烹飪設施 `COOKING`）或背包工具是否滿足 `requiredToolTypes`；背包工具透過 `isToolUsable` 判定可用性（相容消耗型耐久度工具與永久免損耗工具如平底鍋）。
   2. **原料損耗優選順序**：透過 `compareItemDurability` 優先消耗背包中耐久度最低（即最接近腐壞）的材料實體。
   3. **耐久度公式計算**：若配方定義了動態計算公式 `durabilityFormula`（例如由主材料的剩餘耐久折算產物耐久），以主消耗材料代入函式計算生成物的實際耐久度。
   4. **修飾詞與客製化前綴**：配方支援基底材料（base）與修飾材料（modifier）。當投入修飾素材時，依據 `recipe.modifiers` 自動生成客製化前綴（如 `[修飾前綴]・[產物名稱]`）與額外營養加成 `bonusNutrition`。

@@ -75,14 +75,8 @@ export const CraftPanel = () => {
       return true;
     }
 
-    const invToolTypes = inventory.flatMap((inv) => {
-      const dbI = items.find((i) => i.itemId === inv.itemId);
-      if (!dbI || !dbI.type) return [];
-      return Array.isArray(dbI.type) ? dbI.type : [dbI.type];
-    });
-
     return rec.requiredToolTypes.every(
-      (t) => locBuildingTypes.includes(t) || invToolTypes.includes(t)
+      (t) => locBuildingTypes.includes(t) || getMatchingToolsAscending(inventory, t, items).length > 0
     );
   };
 

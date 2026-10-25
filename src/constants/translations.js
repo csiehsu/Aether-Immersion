@@ -186,7 +186,7 @@ export const TOOL_TYPE_LABELS = {
     TABLE: '工作檯',
     HEATING: '加熱工具',
     PAN: '平底鍋',
-    SMOKER_BOX: '煙燻箱',
+    ROASTING_BOX: '烘肉箱',
     CUTTING: '切割工具',
     FIRE: '營火',
     LIGHT: '照明設備',
@@ -200,7 +200,7 @@ export const TOOL_TYPE_LABELS = {
     TABLE: 'Work Table',
     HEATING: 'Heating Tool',
     PAN: 'Frying Pan',
-    SMOKER_BOX: 'Smoker Box',
+    ROASTING_BOX: 'Roasting Box',
     CUTTING: 'Cutting Tool',
     FIRE: 'Campfire',
     LIGHT: 'Light Source',
@@ -225,6 +225,7 @@ export const MATERIAL_TYPE_LABELS = {
     FOOD: '食物',
     QUEST_ITEM: '任務道具',
     BOAT_VOUCHER: '船票',
+    ROASTING_BOX: '烘肉箱',
   },
   'en': {
     FLOUR: 'Flour',
@@ -242,6 +243,7 @@ export const MATERIAL_TYPE_LABELS = {
     FOOD: 'Food',
     QUEST_ITEM: 'Quest Item',
     BOAT_VOUCHER: 'Boat Voucher',
+    ROASTING_BOX: 'Roasting Box',
   },
 };
 

@@ -539,11 +539,6 @@ export const GatherPanel = () => {
                   return dbB ? dbB.type : b.buildingId;
                 });
 
-                const invToolTypes = inventory.flatMap((inv) => {
-                  if ((inv.count || 1) <= 0) return [];
-                  return getItemTypes(inv.itemId);
-                });
-
                 const hasBaitRequirement = reqTools.includes('BAIT');
                 const baitEntries = inventory.filter((inv) => getItemTypes(inv.itemId).includes('BAIT'));
                 const totalBaitCount = baitEntries.reduce((sum, inv) => sum + (inv.count || 1), 0);
@@ -552,7 +547,7 @@ export const GatherPanel = () => {
 
                 const nonConsumableReqs = reqTools.filter((t) => t !== 'BAIT');
                 const hasNonConsumableTools = nonConsumableReqs.every(
-                  (t) => locBuildingTypes.includes(t) || invToolTypes.includes(t)
+                  (t) => locBuildingTypes.includes(t) || getMatchingToolsAscending(inventory, t, items).length > 0
                 );
 
                 const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
