@@ -5,6 +5,7 @@ import {
   isPlayerOverburdened,
   calculateCurrentWeight,
   calculateMaxWeight,
+  checkTravelRequirements,
 } from '../../utils/gameHelpers';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
@@ -66,8 +67,11 @@ export const MovePanel = () => {
       <div className="location-list">
         {availableLocations.map((loc) => {
           const isCurrent = player?.location === loc.locationId;
-          const isDisabled = isCurrent || isComatose || isOverburdened;
           const connection = (currentLocation?.connections || []).find((c) => c.targetLocationId === loc.locationId);
+          const travelCheck = checkTravelRequirements(connection, inventory, items);
+          const hasRequiredItem = travelCheck.canTravel;
+          const isMissingItem = !isCurrent && !hasRequiredItem;
+          const isDisabled = isCurrent || isComatose || isOverburdened || !hasRequiredItem;
           const baseCost = connection?.energyCost ?? 1;
           const cost = calculateEffectiveEnergyCost(player, baseCost, 'TRAVEL');
 
@@ -77,6 +81,8 @@ export const MovePanel = () => {
             ? (t.comatose || '昏迷中')
             : isOverburdened
             ? (t.overburdened || (language === 'en' ? 'Overburdened' : '負重超載'))
+            : isMissingItem
+            ? (language === 'en' ? `Need ${travelCheck.requiredItemNameEn || 'Item'}` : `需要${travelCheck.requiredItemName || '道具'}`)
             : t.goToLocation;
 
           return (
@@ -99,7 +105,7 @@ export const MovePanel = () => {
               </div>
               <button
                 type="button"
-                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''}`}
+                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''} ${isMissingItem ? 'btn-missing-item' : ''}`}
                 disabled={isDisabled}
                 onClick={(e) => {
                   e.stopPropagation();

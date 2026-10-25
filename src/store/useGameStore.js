@@ -10,6 +10,7 @@ import {
   isPlayerOverburdened,
   settleItemDecay,
   isDecayItem,
+  checkTravelRequirements,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -578,6 +579,11 @@ export const useGameStore = create((set, get) => ({
 
     const currentLoc = locations.find((l) => l.locationId === player.location);
     const connection = currentLoc?.connections?.find((c) => c.targetLocationId === targetLocId);
+    const travelCheck = checkTravelRequirements(connection, inventory, items);
+    if (!travelCheck.canTravel) {
+      get().addLog('系統', 'System', travelCheck.messageZh, travelCheck.messageEn, 'system');
+      return;
+    }
     const baseCost = connection?.energyCost ?? 1;
     const cost = calculateEffectiveEnergyCost(player, baseCost, 'TRAVEL');
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;

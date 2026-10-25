@@ -47,6 +47,7 @@ import {
   calculateLiquidContainerCapacity,
   fillLiquidContainers,
   checkRecipeUnlocks,
+  checkTravelRequirements,
 } from '../../shared/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -512,7 +513,16 @@ router.get('/player', async (req, res) => {
         maxEnergy: MAX_ENERGY,
         lastEnergyRecoveredAt: new Date(),
         location: 'AZURE_BAY_MARKET',
-        knownLocations: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_GATE', 'ROCKY_PLAIN', 'AZURE_BAY_VARIETY_SHOP', 'ROCK_WALL'],
+        knownLocations: [
+          'AZURE_BAY_PORT',
+          'AZURE_BAY_MARKET',
+          'AZURE_BAY_GATE',
+          'ROCKY_PLAIN',
+          'AZURE_BAY_VARIETY_SHOP',
+          'ROCK_WALL',
+          'ROCK_WALL_CAVE',
+          'AZURE_BAY_OFFSHORE',
+        ],
       });
       console.log('[MongoDB] Created initial player record in MongoDB.');
     } else {
@@ -628,6 +638,8 @@ router.post('/player/create-character', async (req, res) => {
       'ROCKY_PLAIN',
       'AZURE_BAY_VARIETY_SHOP',
       'ROCK_WALL',
+      'ROCK_WALL_CAVE',
+      'AZURE_BAY_OFFSHORE',
     ];
 
     const characterData = {
@@ -1489,6 +1501,29 @@ router.post('/player/travel', async (req, res) => {
     const connection = (locationDoc?.connections || []).find((c) => c.targetLocationId === targetLocationId);
     if (!connection) {
       return res.status(400).json({ success: false, message: '當前地點無法直接前往該目標地點！' });
+    }
+
+    // 檢查路徑道具需求（驗證道具具備與 isToolUsable 可用性）
+    const travelCheck = checkTravelRequirements(connection, player.inventory, allDbItems);
+    if (!travelCheck.canTravel) {
+      return res.status(400).json({ success: false, message: travelCheck.messageZh });
+    }
+
+    // 若設定 consumeOnTravel，扣除 1 個通行道具
+    if (connection.consumeOnTravel && travelCheck.matchedItem) {
+      const targetInstId = travelCheck.matchedItem.instanceId;
+      const targetItemId = travelCheck.matchedItem.itemId;
+      const itemIdx = player.inventory.findIndex(
+        (i) => (targetInstId ? i.instanceId === targetInstId : i.itemId === targetItemId)
+      );
+      if (itemIdx !== -1) {
+        if ((player.inventory[itemIdx].count || 1) > 1) {
+          player.inventory[itemIdx].count -= 1;
+        } else {
+          player.inventory.splice(itemIdx, 1);
+        }
+        player.markModified('inventory');
+      }
     }
 
     const baseEnergyCost = connection.energyCost ?? 1;

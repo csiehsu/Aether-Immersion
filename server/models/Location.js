@@ -17,6 +17,9 @@ const ConnectionSchema = new mongoose.Schema(
   {
     targetLocationId: { type: String, required: true },
     energyCost: { type: Number, default: 1 },
+    requiredItemId: { type: String, default: '' },
+    requiredItemType: { type: String, default: '' },
+    consumeOnTravel: { type: Boolean, default: false },
   },
   { _id: false }
 );

@@ -143,7 +143,16 @@ const PlayerSchema = new mongoose.Schema(
     mentor: { type: String, default: '' },
     knownLocations: {
       type: [String],
-      default: ['AZURE_BAY_PORT', 'AZURE_BAY_MARKET', 'AZURE_BAY_GATE', 'ROCKY_PLAIN', 'AZURE_BAY_VARIETY_SHOP', 'ROCK_WALL'],
+      default: [
+        'AZURE_BAY_PORT',
+        'AZURE_BAY_MARKET',
+        'AZURE_BAY_GATE',
+        'ROCKY_PLAIN',
+        'AZURE_BAY_VARIETY_SHOP',
+        'ROCK_WALL',
+        'ROCK_WALL_CAVE',
+        'AZURE_BAY_OFFSHORE',
+      ],
     },
     inventory: [InventoryItemSchema],
     unlockedRecipes: [UnlockedRecipeSchema],

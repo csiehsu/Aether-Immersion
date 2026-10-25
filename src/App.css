@@ -1035,7 +1035,7 @@
 
 .btn-craft:disabled,
 .btn-gather:disabled,
-.btn-move:disabled:not(.btn-active):not(.btn-overburdened) {
+.btn-move:disabled:not(.btn-active):not(.btn-overburdened):not(.btn-missing-item) {
   background: #334155 !important;
   color: #64748b !important;
   cursor: not-allowed !important;
@@ -1247,7 +1247,9 @@
 }
 
 .btn-move.btn-overburdened,
-.btn-move.btn-overburdened:disabled {
+.btn-move.btn-overburdened:disabled,
+.btn-move.btn-missing-item,
+.btn-move.btn-missing-item:disabled {
   background: rgba(239, 68, 68, 0.15) !important;
   color: #ef4444 !important;
   border: 1px solid rgba(239, 68, 68, 0.4) !important;

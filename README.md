@@ -194,7 +194,7 @@ AetherImmersion/
 ### 12. 初始起點與探索地圖 (Starting Location & Exploration)
 - 創角流程配置 10 點三維能力值（力量、速度、精巧），完成角色命名。
 - 角色創立後初始位置設為蔚藍灣市集（`AZURE_BAY_MARKET`）。
-- 預設已知探索地點（`knownLocations`）包含：港口、市集、城門、石原、雜貨店與石壁。
+- 預設已知探索地點（`knownLocations`）包含：港口、市集、城門、石原、雜貨店、石壁、石壁洞穴（`ROCK_WALL_CAVE`）與近海海域（`AZURE_BAY_OFFSHORE`）。
 - 角色初始攜帶 10 份滿耐久的熟食口糧與 1 個盛裝滿飲用水的隨身液體容器。
 
 ### 13. 多人連線與身分識別隔離系統 (Multiplayer Identity & Session Isolation)
@@ -242,7 +242,7 @@ sequenceDiagram
      - **精巧 (dexterity)**：影響戰鬥的命中率、製造類工作速度。
   2. **角色預設狀態**：生命值 `hp=100 / maxHp=100`、精力值 `energy=4320 / maxEnergy=4320`、水分 `water=120`、飽食度 `food=120`、金錢 `money=0`。
   3. **初始物品發放**：初始背包包含 10 份滿耐久的熟食口糧（具備獨立 `instanceId` 與 `lastDecayedAt` 時間戳）以及 1 個預先裝滿飲用水的隨身液體容器。
-  4. **探索起點與初始地點**：預設出生起點為蔚藍灣市集（`AZURE_BAY_MARKET`），預設已知地點包含港口、市集、城門、石原、雜貨店與石壁。
+  4. **探索起點與初始地點**：預設出生起點為蔚藍灣市集（`AZURE_BAY_MARKET`），預設已知地點包含港口、市集、城門、石原、雜貨店、石壁、石壁洞穴與近海海域。
 
 ---
 
@@ -258,8 +258,9 @@ sequenceDiagram
     participant Helper as energyHelper / gameHelpers
 
     Player->>View: 點擊相鄰且已探索的地點「前往」按鈕
-    View->>Helper: isPlayerComatose / isPlayerOverburdened / calculateEffectiveEnergyCost
+    View->>Helper: isPlayerComatose / isPlayerOverburdened / checkTravelRequirements (isToolUsable) / calculateEffectiveEnergyCost
     View->>Store: changeLocation(targetLocId)
+    Store->>Helper: checkTravelRequirements (未滿足則日誌提示並中斷)
     Store->>Helper: calculateEnergyConsumption(player, cost)
     Store->>Store: 樂觀更新當前地點、扣除精力、計算飽食/水分扣除與回血
     Store->>API: POST /api/player/travel { targetLocationId }
@@ -267,9 +268,10 @@ sequenceDiagram
     API->>Helper: isPlayerComatose 判定昏迷狀態
     API->>Helper: settlePlayerInventoryDecay / settleLocationPlacedItemsDecay 結算腐敗
     API->>Helper: isPlayerOverburdened 判定負重超載
+    API->>Helper: checkTravelRequirements 權威校驗通行道具可用性 (isToolUsable)
     API->>Helper: calculateEffectiveEnergyCost 折算狀態加成精力消耗
     API->>Helper: applyEnergyConsumption 扣除精力並結算水分/飽食扣減與回血
-    API->>API: 更新 player.location 與 player.knownLocations
+    API->>API: 若 consumeOnTravel 扣除通行道具；更新 player.location 與 player.knownLocations
     API-->>Store: 回傳最新玩家資料
     Store->>Store: applyPlayerData(data)
 ```
@@ -278,12 +280,13 @@ sequenceDiagram
   - 前端視圖：`src/components/panels/MovePanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `changeLocation(targetLocId)`
   - 後端路由：`server/routes/api.js` -> `router.post('/player/travel')`
-  - 核心輔助：`server/utils/energyHelper.js` 與 `src/utils/gameHelpers.js` -> `calculateEffectiveEnergyCost()`, `applyEnergyConsumption()`, `calculateEnergyConsumption()`, `isPlayerComatose()`, `isPlayerOverburdened()`
+  - 核心輔助：`server/utils/energyHelper.js` 與 `src/utils/gameHelpers.js` -> `calculateEffectiveEnergyCost()`, `applyEnergyConsumption()`, `calculateEnergyConsumption()`, `isPlayerComatose()`, `isPlayerOverburdened()`, `checkTravelRequirements()`, `isToolUsable()`
 - **關鍵功能與運作機制**：
   1. **通行資格檢驗**：
      - 目標地點必須與當前地點存在於場景定義的 `connections` 路徑連線中。
      - 目標地點必須存在於玩家的已知地點清單 `player.knownLocations` 中。
      - 若角色處於昏迷（水分、飽食或 HP `<= 0`）或負重超載（背包總重 `>` 負重上限），禁止移動。
+     - **路徑特定道具檢驗**：若路徑定義了特定道具需求（`requiredItemId` 或 `requiredItemType`），玩家背包中必須具備相應道具且通過 `isToolUsable` 檢驗（可用耐久度 > 0 或為永久免損耗道具）。未滿足時前端標註需求徽章並禁用前往按鈕，後端同步進行 400 安全攔截；若定義了 `consumeOnTravel`，則於通行成功時扣除 1 份通行道具。
   2. **動態精力折算**：透過 `calculateEffectiveEnergyCost` 依玩家飽食/水分狀態（充沛飽足 -10%、飢渴虛弱 +20%）計算實際消耗精力。
   3. **生存數值累加扣減**：呼叫 `applyEnergyConsumption`，每累計消耗 15 點精力扣除 1 點水分與 1 點飽食度；若處於充沛飽足狀態，每累計消耗 10 點精力恢復 1 點 HP。
   4. **地點探索記錄**：若目標地點為首次造訪，自動加入玩家的 `knownLocations` 清單並儲存至資料庫。

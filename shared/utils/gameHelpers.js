@@ -675,6 +675,117 @@ export const applyToolsDurabilityDeduction = (
 };
 
 /**
+ * 檢查路徑連線的通行道具需求（驗證背包是否具備且符合 isToolUsable）。
+ * 支援透過 requiredItemId 指定特定道具，或透過 requiredItemType 指定特定道具類型。
+ *
+ * @param {Object} [connection] - 路徑連線物件（包含 requiredItemId, requiredItemType, consumeOnTravel 等）。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包清單。
+ * @param {Array<Object>} [allDbItems=[]] - 物品基礎定義清單。
+ * @returns {{
+ *   canTravel: boolean,
+ *   requiredItemId?: string,
+ *   requiredItemType?: string,
+ *   requiredItemName?: string,
+ *   requiredItemNameEn?: string,
+ *   consumeOnTravel: boolean,
+ *   matchedItem?: Object|null,
+ *   messageZh?: string,
+ *   messageEn?: string
+ * }} 檢驗結果物件。
+ */
+export const checkTravelRequirements = (connection, inventory = [], allDbItems = []) => {
+  if (!connection) {
+    return { canTravel: true, consumeOnTravel: false };
+  }
+
+  const reqItemId = connection.requiredItemId || '';
+  const reqItemType = connection.requiredItemType || '';
+  const consumeOnTravel = Boolean(connection.consumeOnTravel);
+
+  // 無任何道具需求限制
+  if (!reqItemId && !reqItemType) {
+    return { canTravel: true, consumeOnTravel: false };
+  }
+
+  const dbItemMap = new Map();
+  if (Array.isArray(allDbItems)) {
+    for (const d of allDbItems) {
+      if (d && d.itemId) dbItemMap.set(d.itemId, d);
+    }
+  }
+
+  // 1. 指定特定物品 ID 檢查
+  if (reqItemId) {
+    const dbReqItem = dbItemMap.get(reqItemId);
+    const reqName = dbReqItem?.name || reqItemId;
+    const reqNameEn = dbReqItem?.nameEn || dbReqItem?.name || reqItemId;
+
+    // 搜尋背包中符合該 itemId 且數量 > 0 且具備可用性 (isToolUsable) 的道具
+    const matchedItem = (inventory || []).find((inv) => {
+      if (!inv || inv.itemId !== reqItemId) return false;
+      if ((inv.count || 1) <= 0) return false;
+      const dbI = dbItemMap.get(inv.itemId);
+      return isToolUsable(inv, dbI);
+    });
+
+    if (!matchedItem) {
+      return {
+        canTravel: false,
+        requiredItemId: reqItemId,
+        requiredItemName: reqName,
+        requiredItemNameEn: reqNameEn,
+        consumeOnTravel,
+        messageZh: `前往該地點需要持有【${reqName}】！`,
+        messageEn: `Traveling to this location requires [${reqNameEn}]!`,
+      };
+    }
+
+    return {
+      canTravel: true,
+      requiredItemId: reqItemId,
+      requiredItemName: reqName,
+      requiredItemNameEn: reqNameEn,
+      consumeOnTravel,
+      matchedItem,
+    };
+  }
+
+  // 2. 指定物品類型檢查
+  if (reqItemType) {
+    const matchedTypeItem = (inventory || []).find((inv) => {
+      if (!inv || (inv.count || 1) <= 0) return false;
+      const dbI = dbItemMap.get(inv.itemId);
+      const rawTypes = dbI?.type || inv.type;
+      const types = Array.isArray(rawTypes) ? rawTypes : (rawTypes ? [rawTypes] : []);
+      if (!types.includes(reqItemType)) return false;
+      return isToolUsable(inv, dbI);
+    });
+
+    if (!matchedTypeItem) {
+      return {
+        canTravel: false,
+        requiredItemType: reqItemType,
+        consumeOnTravel,
+        messageZh: `前往該地點需要具備相關道具！`,
+        messageEn: `Traveling to this location requires a suitable item!`,
+      };
+    }
+
+    const dbMatched = dbItemMap.get(matchedTypeItem.itemId);
+    return {
+      canTravel: true,
+      requiredItemType: reqItemType,
+      requiredItemName: dbMatched?.name || matchedTypeItem.itemId,
+      requiredItemNameEn: dbMatched?.nameEn || dbMatched?.name || matchedTypeItem.itemId,
+      consumeOnTravel,
+      matchedItem: matchedTypeItem,
+    };
+  }
+
+  return { canTravel: true, consumeOnTravel: false };
+};
+
+/**
  * 依堆疊規則將道具新增至地面放置物清單 (placedItems)。
  * 若完全符合堆疊條件則合併數量，否則新增獨立實體。耐久度道具一律為獨立實體。
  * @param {Array<Object>} [placedItems=[]]
