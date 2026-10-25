@@ -24,6 +24,7 @@ const ConnectionSchema = new mongoose.Schema(
 const LocationBuildingSchema = new mongoose.Schema(
   {
     buildingId: { type: String, required: true },
+    currentDurability: { type: Number },
     lifespan: { type: Number, default: 0 },
   },
   { _id: false }

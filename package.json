@@ -7,6 +7,7 @@
     "dev": "vite",
     "server": "node server/index.js",
     "dev:full": "concurrently \"vite\" \"node server/index.js\"",
+    "seed:sync": "node server/scripts/syncSeedsToDb.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

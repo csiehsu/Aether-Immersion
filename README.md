@@ -139,6 +139,14 @@ AetherImmersion/
 
 ### 6. 物品製作、材料修飾與配方機制 (Crafting & Modifiers System)
 - **配方權限與設施驗證**：檢查配方是否位於玩家 `player.unlockedRecipes` 中；檢查當前場景建築設施或背包工具是否滿足 `requiredToolTypes`。
+- **建築物耐久消耗與毀損阻擋**：
+  - 場景建築物（如營火、火爐）具備當前耐久度 `currentDurability`；基礎最大耐久度由 `Building.durability` 定義（`-1` 代表永久設施）。
+  - **毀損嚴格驗證**：只有永久設施或 `currentDurability > 0` 的建築物能提供設施功能。當建築物耐久度為零時，前端顯示「缺少」並禁用製作，後端 API 亦同步安全阻擋並回傳 400 錯誤。
+  - **1:1 精力消耗**：製作成功時，若使用到場景中具有耐久度的建築物，根據該次製作實際扣除的精力值，以 **1:1** 的比例扣減該建築物的當前耐久度（最低扣至 0）；若耐久耗盡則發布毀損系統日誌。
+- **建築物修復機制 (`POST /api/location/repair-building`)**：
+  - 建築物圖示顯示即時耐久度進度條（>90% 綠、31-90% 黃、<=30% 紅）。
+  - 詳情視窗清楚列出該建築物設定的修復道具名稱、每份修復值 (`rate`) 與背包當前持有數量。
+  - 玩家可透過數量選擇器投入修復材料，扣除背包道具並恢復建築物耐久度（上限不超過最大耐久度）。
 - **原料優選與耐久公式**：
   - 材料扣除時優先消耗最低耐久度（最接近腐壞）的材料實體。
   - 若配方帶有 `durabilityFormula`，以主材料耐久度代入公式動態計算產物耐久度。
@@ -392,16 +400,19 @@ sequenceDiagram
     API->>API: 解析 modifiers 材料計算自訂前綴與附加營養 (bonusNutrition)
     API->>Helper: calculateSuccessRate 計算料理成功率並抽籤判定
     API->>Helper: 產出物品入包 (耐久物品生成獨立實體，一般物品堆疊)
+    API->>Helper: triggerRecipeUnlocks 檢查產物解鎖新配方 (recipe.triggerItem)
     API->>Helper: addLifeSkillExp 增加 COOKING 料理經驗 (含 ingredientExp)
-    API-->>Store: 回傳最新資料與製作結果 (craftQty, successQty, failQty)
-    Store->>Store: applyPlayerData(data), 輸出製作日誌
+    API->>API: 依消耗精力 1:1 扣除場景建築物 currentDurability (若歸零發布損壞日誌)
+    API->>DB: 儲存 locationDoc (更新建築物耐久度) 與 player
+    API-->>Store: 回傳最新玩家資料、製作結果 (含 newlyUnlockedRecipes) 與最新 location 建築狀態
+    Store->>Store: applyPlayerData(data), logNewlyUnlockedRecipes(newlyUnlockedRecipes), 更新當前地點建築物耐久條, 輸出製作日誌
 ```
 
 - **涉及檔案與函式**：
   - 前端視圖：`src/components/panels/CraftPanel.jsx`
-  - 前端狀態：`src/store/useGameStore.js` -> `performCraft(recipe, selectedMaterials, craftQty)`
-  - 後端路由：`server/routes/api.js` -> `router.post('/player/craft')`
-  - 核心輔助：`src/utils/gameHelpers.js` -> `calculateMaxExecutableByTools()`, `compareItemDurability()`, `applyToolsDurabilityDeduction()`, `calculateSuccessRate()`, `addLifeSkillExp()`, `addItemsToInventory()`
+  - 前端狀態：`src/store/useGameStore.js` -> `performCraft(recipe, selectedMaterials, craftQty)`, `logNewlyUnlockedRecipes()`
+  - 後端路由：`server/routes/api.js` -> `router.post('/player/craft')`, `triggerRecipeUnlocks()`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `calculateMaxExecutableByTools()`, `compareItemDurability()`, `applyToolsDurabilityDeduction()`, `calculateSuccessRate()`, `addLifeSkillExp()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
   1. **配方權限與環境設施驗證**：檢查配方是否位於玩家 `player.unlockedRecipes` 中；檢查當前場景建築設施（如加熱設施 `HEATING`、烹飪設施 `COOKING`）或背包工具是否滿足 `requiredToolTypes`。
   2. **原料損耗優選順序**：透過 `compareItemDurability` 優先消耗背包中耐久度最低（即最接近腐壞）的材料實體。
@@ -409,6 +420,52 @@ sequenceDiagram
   4. **修飾詞與客製化前綴**：配方支援基底材料（base）與修飾材料（modifier）。當投入修飾素材時，依據 `recipe.modifiers` 自動生成客製化前綴（如 `[修飾前綴]・[產物名稱]`）與額外營養加成 `bonusNutrition`。
   5. **生活技能成功率與產出實體化**：依料理技能等級判定成功率；成功產物若具有耐久度，一律逐一指派全域唯一識別碼 `generateInstanceId()` 生成獨立實體，並記錄 `lastDecayedAt`。
   6. **生活技能經驗累積**：製作完成後依配方基礎經驗與投入材料加成經驗（`ingredientExp`），透過 `addLifeSkillExp` 累加烹飪經驗值。
+  7. **建築物耐久度 1:1 消耗與後端阻擋**：
+     - 若配方所需設施由場景中具備有限耐久度的建築物（`durability !== -1`）提供，後端嚴格驗證其 `currentDurability > 0`；若耐久度歸零則前後端同步阻擋。
+     - 製作成功後，依據 `totalEnergyCost` 實際消耗精力，以 **1:1** 扣除該地點建築物的 `currentDurability`（最低至 0）。
+     - 若耐久度耗盡降至 0，發布系統日誌「場景設施【建築物名稱】已耗盡耐久度並損壞！」，並隨 API 回傳最新場景資料，前端建築物耐久度進度條即時更新。
+  8. **製作產物觸發新配方解鎖**：若製作成功（`successCraftQty > 0`）獲得新產物，透過 `triggerRecipeUnlocks` 比對所有配方的 `triggerItem`。若符合且尚未擁有，自動加入玩家的 `unlockedRecipes`，並隨 API 回傳 `newlyUnlockedRecipes`，前端透過 `logNewlyUnlockedRecipes` 輸出提示日誌「這好像可以做成[配方名稱]。」。
+
+---
+
+### 4-1. 修復建築物 (Building Repair)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Player as 玩家
+    participant View as GatherPanel.jsx (區域資源)
+    participant Store as useGameStore.js
+    participant API as server/routes/api.js (POST /location/repair-building)
+    participant DB as MongoDB (Player/Location)
+
+    Player->>View: 點選建築物，查看當前耐久度與修復道具清單
+    View->>View: 列出材料名稱、每份修復值 (+rate) 與背包持有量
+    Player->>View: 調整修復道具數量，點擊「修復」按鈕
+    View->>Store: repairBuilding(locationId, buildingId, repairItemId, qty)
+    Store->>API: POST /api/location/repair-building { locationId, buildingId, repairItemId, qty }
+    Note over API: 後端驗證：玩家身處該地點、非永久設施、耐久未滿、背包持有道具足夠
+    API->>API: 扣除玩家背包中的修復道具
+    API->>API: 累加建築物耐久度 currentDurability = min(maxDur, curDur + qty * rate)
+    API->>DB: player.save() 寫入玩家背包
+    API->>DB: locationDoc.save() 寫入建築物耐久度
+    DB-->>API: 儲存成功
+    API->>API: 發布系統日誌「使用了 X 個【道具】，修復了【建築物】Y 點耐久度」
+    API-->>Store: 回傳最新玩家資料與 location 場景物件
+    Store->>Store: 更新背包與場景建築物耐久度條 (getDurabilityColor)
+    Store-->>View: 渲染最新建築物狀態與耐久度百分比
+```
+
+- **涉及檔案與函式**：
+  - 前端視圖：`src/components/panels/GatherPanel.jsx`
+  - 前端狀態：`src/store/useGameStore.js` -> `repairBuilding(locationId, buildingId, repairItemId, qty)`
+  - 後端路由：`server/routes/api.js` -> `router.post('/location/repair-building')`
+  - 資料模型：`server/models/Building.js` (`durability`, `repairItems`) 與 `server/models/Location.js` (`currentDurability`)
+- **關鍵功能與運作機制**：
+  1. **SSOT 耐久度架構**：建築物基礎最大耐久度由 `Building.durability` 維護，場景實例僅記錄 `currentDurability`，杜絕冗餘記錄。
+  2. **修復材料需求清單**：詳情視窗清晰列出該建築物支援的修復材料名稱、圖示、每份修復值 (`rate`) 與背包目前持有量，未持有時給予明確提示。
+  3. **防浪費數量選擇**：數量選擇器上限取「背包持有量」與「修復至滿額所需量」之最小值，避免過度消耗素材。
+  4. **色彩狀態回饋**：耐久度條統一套用 `getDurabilityColor`（>90% 綠色、31-90% 黃色、<=30% 紅色），耐久度歸零標示已損壞。
 
 ---
 
@@ -650,19 +707,20 @@ sequenceDiagram
     API->>Helper: settleLocationPlacedItemsDecay / settlePlayerInventoryDecay
     API->>Helper: compareItemDurability(..., 'desc') 優先選取最高耐久物品
     API->>API: 從 location.placedItems 扣除或刪除該道具
-    API->>Helper: addItemsToInventory 移入玩家背包 (繼承原 metadata)
-    API-->>Store: 回傳更新後資料
-    Store->>Store: applyPlayerData(data, { locations })
+    API->>API: grantItemsToPlayer 移入玩家背包 (繼承原 metadata 並自動觸發配方解鎖)
+    API-->>Store: 回傳更新後資料 (含 locations 與 newlyUnlockedRecipes)
+    Store->>Store: applyPlayerData(data, { locations }), logNewlyUnlockedRecipes(newlyUnlockedRecipes)
 ```
 
 - **涉及檔案與函式**：
   - 前端視圖：`src/components/panels/LocationItemsPanel.jsx`
-  - 前端狀態：`src/store/useGameStore.js` -> `pickUpPlacedItem(locationId, instanceId, count)`
-  - 後端路由：`server/routes/api.js` -> `router.post('/location/pickup-item')`
-  - 核心輔助：`src/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemsToInventory()`
+  - 前端狀態：`src/store/useGameStore.js` -> `pickUpPlacedItem(locationId, instanceId, count)`, `logNewlyUnlockedRecipes()`
+  - 後端路由：`server/routes/api.js` -> `router.post('/location/pickup-item')`, `grantItemsToPlayer()`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
   1. **優選高品質與高耐久道具**：當地面存在多件同類物品時，後端排序優先挑選耐久度最高（`compareItemDurability(a, b, 'desc')`）的物品供玩家拾起。
-  2. **現場物品轉移與背包堆疊**：從場景 `location.placedItems` 陣列中扣減或刪除該物品，調用 `addItemsToInventory` 將其完整轉移入玩家背包 `player.inventory`，繼承所有原始 metadata。
+  2. **現場物品轉移與背包堆疊**：從場景 `location.placedItems` 陣列中扣減或刪除該物品，透過 `grantItemsToPlayer` 統一將其轉移入玩家背包 `player.inventory`，繼承所有原始 metadata（當前耐久度、品質、容器內容物等）。
+  3. **拾取觸發配方解鎖**：透過 `grantItemsToPlayer` 統一發放道具，拾取入包時自動比對 `recipe.triggerItem`，若吻合即時解鎖新配方，並由前端輸出「這好像可以做成[配方名稱]。」提示日誌。
 
 ---
 
@@ -720,7 +778,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor Player as 玩家
-    participant Event as 觸發源 (採集 / 購買)
+    participant Event as 觸發源 (採集 / 購買 / 製作 / 拾取)
     participant Store as useGameStore.js
     participant API as server/routes/api.js
     participant Helper as gameHelpers.js
@@ -728,28 +786,47 @@ sequenceDiagram
     alt 途徑一：採集素材觸發
         Player->>Event: 採集獲得素材 (gainedQty > 0)
         Event->>API: POST /api/player/gather
-        API->>Helper: checkRecipeUnlocks(unlockedRecipes, recipes, itemId)
-        API->>API: 比對 recipe.triggerItem，若吻合加入 player.unlockedRecipes
+        API->>API: grantItemsToPlayer 入包並觸發 triggerRecipeUnlocks
         API-->>Store: 回傳 newlyUnlockedRecipes
-        Store->>Store: 輸出「這好像可以做成[配方名稱]。」
+        Store->>Store: logNewlyUnlockedRecipes 輸出「這好像可以做成[配方名稱]。」
     else 途徑二：商店購買道具觸發
         Player->>Event: 向 NPC 購買道具
-        Event->>Store: performBuy(npc, itemId, price, qty)
-        Store->>Helper: checkRecipeUnlocks(currentUnlocked, recipes, itemId)
-        Store->>Store: 輸出「這好像可以做成...」，更新 unlockedRecipes
-        Store->>API: PUT /api/player { unlockedRecipes }
+        Event->>API: POST /api/player/buy
+        API->>API: grantItemsToPlayer 入包並觸發 triggerRecipeUnlocks
+        API-->>Store: 回傳 newlyUnlockedRecipes
+        Store->>Store: logNewlyUnlockedRecipes 輸出「這好像可以做成[配方名稱]。」
+    else 途徑三：製作獲得產物觸發
+        Player->>Event: 成功製作道具 (successCraftQty > 0)
+        Event->>API: POST /api/player/craft
+        API->>API: grantItemsToPlayer 入包並觸發 triggerRecipeUnlocks
+        API-->>Store: 回傳 newlyUnlockedRecipes
+        Store->>Store: logNewlyUnlockedRecipes 輸出「這好像可以做成[配方名稱]。」
+    else 途徑四：撿起地面道具觸發
+        Player->>Event: 撿起地面物品 (pickQty > 0)
+        Event->>API: POST /api/location/pickup-item
+        API->>API: grantItemsToPlayer 入包並觸發 triggerRecipeUnlocks
+        API-->>Store: 回傳 newlyUnlockedRecipes
+        Store->>Store: logNewlyUnlockedRecipes 輸出「這好像可以做成[配方名稱]。」
     end
 ```
 
 - **涉及檔案與函式**：
-  - 前端狀態：`src/store/useGameStore.js` -> `performGather()`, `performBuy()`
-  - 後端路由：`server/routes/api.js` -> `POST /api/player/gather`, `PUT /api/player`
-  - 核心輔助：`src/utils/gameHelpers.js` -> `checkRecipeUnlocks()`
+  - 前端狀態：`src/store/useGameStore.js` -> `performGather()`, `performBuy()`, `performCraft()`, `pickUpPlacedItem()`, `logNewlyUnlockedRecipes()`
+  - 後端路由：`server/routes/api.js` -> `POST /api/player/gather`, `POST /api/player/buy`, `POST /api/player/craft`, `POST /api/location/pickup-item`, `grantItemsToPlayer()`, `triggerRecipeUnlocks()`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `addItemsToInventory()`, `checkRecipeUnlocks()`
   - 前端視圖：`src/components/panels/CraftPanel.jsx` (製作權限過濾)
 - **關鍵功能與運作機制**：
-  1. **主要配方解鎖途徑**：
-     - **採集獲得觸發**：在 `POST /player/gather` 獲得產物時，後端呼叫 `checkRecipeUnlocks` 比對配方的 `triggerItem`。若符合且尚未擁有，自動加入玩家的 `unlockedRecipes`，前端接收後記錄日誌「這好像可以做成[配方名稱]。」。
-     - **商店購買觸發**：在 `performBuy` 動作中，呼叫 `checkRecipeUnlocks` 比對購買的道具是否為特定配方的前置材料，若符合則解鎖並透過 `PUT /api/player` 持久化。
+  1. **主要配方解鎖途徑（統一發放單一入口 grantItemsToPlayer）**：
+     - **後端專用單一入口 `grantItemsToPlayer(player, itemsToAdd, allDbItems)`**：
+       - **無耐久全新品（採集/購買）**：外部無需傳入 `options.durability`，函式自動自 `allDbItems` 取出資料庫預設設定處理堆疊或基礎耐久。
+       - **具動態/繼承狀態（製作/拾取）**：優先採用傳入的 `options`（如製作動態耐久、自訂料理前綴、拾取地面殘餘耐久度等）。
+       - **自動解鎖比對**：所有入包道具自動提取 ID 呼叫 `triggerRecipeUnlocks`，透過 `checkRecipeUnlocks` 比對 `recipe.triggerItem`。若符合且尚未擁有，自動更新 `player.unlockedRecipes` 並標記修改。
+     - **前端專用函式 `logNewlyUnlockedRecipes(newlyUnlockedRecipes)`**：統一遍歷新解鎖配方清單，發布「這好像可以做成[配方名稱]。」系統事件日誌。
+     - **四大觸發途徑**：
+       - **採集獲得觸發**：在 `POST /player/gather` 獲得產物時觸發解鎖判定。
+       - **商店購買觸發**：在 `POST /player/buy` 購買道具入包時觸發解鎖判定。
+       - **製作獲得產物觸發**：在 `POST /player/craft` 成功製作產出道具時觸發解鎖判定（支援多產出道具批次比對）。
+       - **拾取地面道具觸發**：在 `POST /location/pickup-item` 撿起地面物品入包時觸發解鎖判定。
   2. **製作權限守門機制**：在 `CraftPanel` 面板僅顯示與允許點擊已解鎖的配方；後端 `POST /player/craft` 端點亦會前置驗證 `player.unlockedRecipes`，未解鎖的配方一律回傳 400 錯誤。
 
 ---

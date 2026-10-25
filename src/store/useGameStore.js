@@ -532,11 +532,31 @@ export const useGameStore = create((set, get) => ({
     }
   },
 
+    /**
+   * 統一發布新解鎖配方的提示日誌。
+   * @param {Array} newlyUnlockedRecipes - 新解鎖配方清單。
+   */
+  logNewlyUnlockedRecipes: (newlyUnlockedRecipes = []) => {
+    if (!Array.isArray(newlyUnlockedRecipes) || newlyUnlockedRecipes.length === 0) return;
+    newlyUnlockedRecipes.forEach((recipe) => {
+      const recipeNameZh = recipe.name;
+      const recipeNameEn = recipe.nameEn || recipe.name;
+      get().addLog(
+        '配方系統',
+        'Recipe System',
+        `這好像可以做成${recipeNameZh}。`,
+        `It seems this can be made into ${recipeNameEn}.`,
+        'event'
+      );
+    });
+  },
+
   /**
    * 切換玩家目前所在場景地點，並扣除相應的精力消耗。
    * @param {string} targetLocId - 目標地點識別碼。
    * @returns {Promise<void>}
    */
+
   changeLocation: async (targetLocId) => {
     const { locations, player, inventory, items } = get();
     if (!player) return;
@@ -740,18 +760,8 @@ export const useGameStore = create((set, get) => ({
           await get().fetchLogs();
 
           // 檢查採集獲得資源是否觸發新配方解鎖
-          const newlyUnlocked = result.result?.newlyUnlockedRecipes || [];
-          newlyUnlocked.forEach((recipe) => {
-            const recipeNameZh = recipe.name;
-            const recipeNameEn = recipe.nameEn || recipe.name;
-            get().addLog(
-              '配方系統',
-              'Recipe System',
-              `這好像可以做成${recipeNameZh}。`,
-              `It seems this can be made into ${recipeNameEn}.`,
-              'event'
-            );
-          });
+          const newlyUnlocked = result.result?.newlyUnlockedRecipes || result.newlyUnlockedRecipes || [];
+          get().logNewlyUnlockedRecipes(newlyUnlocked);
         }
       } else {
         const errData = await res.json().catch(() => ({}));
@@ -835,7 +845,23 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
+          if (result.location) {
+            set((state) => ({
+              locations: state.locations.map((loc) =>
+                loc.locationId === result.location.locationId ? result.location : loc
+              ),
+              currentLocation:
+                state.currentLocation?.locationId === result.location.locationId
+                  ? result.location
+                  : state.currentLocation,
+            }));
+          }
           await get().fetchLogs();
+
+          // 檢查製作獲得產物是否觸發新配方解鎖
+          const newlyUnlocked = result.result?.newlyUnlockedRecipes || result.newlyUnlockedRecipes || [];
+          get().logNewlyUnlockedRecipes(newlyUnlocked);
+
           return true;
         }
       } else {
@@ -939,19 +965,8 @@ export const useGameStore = create((set, get) => ({
         const result = await res.json();
         if (result.success && result.data) {
           get().applyPlayerData(result.data);
-          if (result.newlyUnlockedRecipes && result.newlyUnlockedRecipes.length > 0) {
-            result.newlyUnlockedRecipes.forEach((recipe) => {
-              const recipeNameZh = recipe.name;
-              const recipeNameEn = recipe.nameEn || recipe.name;
-              get().addLog(
-                '配方系統',
-                'Recipe System',
-                `這好像可以做成${recipeNameZh}。`,
-                `It seems this can be made into ${recipeNameEn}.`,
-                'event'
-              );
-            });
-          }
+          const newlyUnlocked = result.newlyUnlockedRecipes || result.result?.newlyUnlockedRecipes || [];
+          get().logNewlyUnlockedRecipes(newlyUnlocked);
           return true;
         }
       } else {
@@ -1033,6 +1048,8 @@ export const useGameStore = create((set, get) => ({
           get().applyPlayerData(result.data, {
             locations: result.locations || get().locations,
           });
+          const newlyUnlocked = result.newlyUnlockedRecipes || result.result?.newlyUnlockedRecipes || [];
+          get().logNewlyUnlockedRecipes(newlyUnlocked);
           return true;
         }
       } else {
@@ -1442,5 +1459,53 @@ export const useGameStore = create((set, get) => ({
       loc.locationId === locId ? { ...loc, placedItems: updatedItems } : loc
     );
     set({ locations: updatedLocations });
+  },
+
+  /**
+   * 修復當前地點指定建築物的耐久度。
+   * @param {string} locationId - 地點 ID。
+   * @param {string} buildingId - 建築物 ID。
+   * @param {string} repairItemId - 修復道具 ID。
+   * @param {number} [qty=1] - 消耗的修復道具數量。
+   * @returns {Promise<boolean>} 是否修復成功。
+   */
+  repairBuilding: async (locationId, buildingId, repairItemId, qty = 1) => {
+    const { player } = get();
+    if (!player || !locationId || !buildingId || !repairItemId) return false;
+
+    try {
+      const res = await fetch(`${API_BASE}/location/repair-building`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-player-id': player._id || '' },
+        body: JSON.stringify({ locationId, buildingId, repairItemId, qty }),
+      });
+
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result.success) {
+        if (result.data) {
+          get().applyPlayerData(result.data);
+        }
+        if (result.location) {
+          set((state) => ({
+            locations: state.locations.map((loc) =>
+              loc.locationId === result.location.locationId ? result.location : loc
+            ),
+            currentLocation:
+              state.currentLocation?.locationId === result.location.locationId
+                ? result.location
+                : state.currentLocation,
+          }));
+        }
+        await get().fetchLogs();
+        return true;
+      } else {
+        const msg = result.message || '修復失敗！';
+        get().addLog('系統', 'System', msg, msg, 'system');
+        return false;
+      }
+    } catch (err) {
+      console.error('[Repair Building Error]', err);
+      return false;
+    }
   },
 }));

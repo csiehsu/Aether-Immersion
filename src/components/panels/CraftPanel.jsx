@@ -53,7 +53,14 @@ export const CraftPanel = () => {
 
   const currentLocation = locations.find((l) => l.locationId === player?.location);
   const locBuildingList = currentLocation?.buildings || [];
-  const locBuildingTypes = locBuildingList.map((b) => {
+  const locBuildingTypes = locBuildingList.filter((b) => {
+    const dbB = buildings.find((item) => item.buildingId === b.buildingId);
+    if (!dbB) return false;
+    const maxDur = dbB.durability ?? -1;
+    if (maxDur === -1) return true; // 永久設施
+    const curDur = b.currentDurability !== undefined ? b.currentDurability : maxDur;
+    return curDur > 0; // 當前耐久度大於 0 才可提供設施功能
+  }).map((b) => {
     const dbB = buildings.find((item) => item.buildingId === b.buildingId);
     return dbB ? dbB.type : b.buildingId;
   });

@@ -12,6 +12,7 @@ import {
   getMatchingToolsAscending,
   getItemDurabilityPercent,
   getDurabilityStatusInfo,
+  getDurabilityColor,
   calculateLiquidContainerCapacity,
   calculateSuccessRate,
 } from '../../utils/gameHelpers';
@@ -42,6 +43,7 @@ export const GatherPanel = () => {
   const questsList = useGameStore((state) => state.questsList || []);
   const submitQuest = useGameStore((state) => state.submitQuest);
   const acceptQuest = useGameStore((state) => state.acceptQuest);
+  const repairBuilding = useGameStore((state) => state.repairBuilding);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
@@ -51,6 +53,8 @@ export const GatherPanel = () => {
   const [buyQtys, setBuyQtys] = useState({});
   const [sellQtys, setSellQtys] = useState({});
   const [tradeTab, setTradeTab] = useState('buy');
+  const [repairQtys, setRepairQtys] = useState({});
+  const [isRepairing, setIsRepairing] = useState(false);
 
   /**
    * 檢查指定 NPC 是否有可承接任務。
@@ -751,9 +755,13 @@ export const GatherPanel = () => {
                 {locationBuildings.map((b, idx) => {
                   const bId = b.buildingId || idx;
                   const dbBuilding = buildings.find((item) => item.buildingId === b.buildingId);
-                  const bName = dbBuilding ? (dbBuilding.name || dbBuilding.buildingId) : b.buildingId;
+                  const bName = dbBuilding ? (language === 'en' && dbBuilding.nameEn ? dbBuilding.nameEn : dbBuilding.name) : b.buildingId;
                   const isSelected = selectedType === 'building' && selectedId === bId;
                   const bIcon = dbBuilding?.type === 'HEATING' ? '🔥' : '🏠';
+                  const maxDur = dbBuilding?.durability ?? -1;
+                  const curDur = maxDur !== -1 ? (b.currentDurability !== undefined ? b.currentDurability : maxDur) : -1;
+                  const percent = maxDur > 0 ? Math.max(0, Math.min(100, Math.round((curDur / maxDur) * 100))) : -1;
+                  const durColor = percent >= 0 ? getDurabilityColor(percent) : '#22c55e';
 
                   return (
                     <div
@@ -761,8 +769,30 @@ export const GatherPanel = () => {
                       className={`gather-tile building-tile ${isSelected ? 'selected' : ''}`}
                       onClick={() => toggleSelect('building', bId)}
                     >
-                      <div className="gather-tile-icon">
+                      <div className="gather-tile-icon" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <span>{bIcon}</span>
+                        {maxDur > 0 && (
+                          <div
+                            style={{
+                              width: '80%',
+                              height: '4px',
+                              background: 'rgba(0, 0, 0, 0.6)',
+                              borderRadius: '2px',
+                              overflow: 'hidden',
+                              marginTop: '3px',
+                            }}
+                            title={`${language === 'en' ? 'Durability' : '耐久度'}: ${curDur}/${maxDur}`}
+                          >
+                            <div
+                              style={{
+                                width: `${percent}%`,
+                                height: '100%',
+                                background: durColor,
+                                transition: 'width 0.2s ease',
+                              }}
+                            />
+                          </div>
+                        )}
                       </div>
                       <span className="gather-tile-name">{bName}</span>
                     </div>
@@ -774,24 +804,164 @@ export const GatherPanel = () => {
                 const b = locationBuildings.find((item, idx) => (item.buildingId || idx) === selectedId);
                 if (!b) return null;
                 const dbBuilding = buildings.find((item) => item.buildingId === b.buildingId);
-                const bName = dbBuilding ? (dbBuilding.name || dbBuilding.buildingId) : b.buildingId;
+                const bName = dbBuilding ? (language === 'en' && dbBuilding.nameEn ? dbBuilding.nameEn : dbBuilding.name) : b.buildingId;
                 const bType = dbBuilding ? dbBuilding.type : 'BUILDING';
+                const maxDur = dbBuilding?.durability ?? -1;
+                const curDur = maxDur !== -1 ? (b.currentDurability !== undefined ? b.currentDurability : maxDur) : -1;
+                const percent = maxDur > 0 ? Math.max(0, Math.min(100, Math.round((curDur / maxDur) * 100))) : -1;
+                const durColor = percent >= 0 ? getDurabilityColor(percent) : '#22c55e';
+                const repairItems = dbBuilding?.repairItems || [];
+                const isDamaged = maxDur > 0 && curDur < maxDur;
+                const isBroken = maxDur > 0 && curDur <= 0;
 
                 return (
                   <div className="gather-detail-window">
-                    <div className="gather-detail-header">
+                    <div className="gather-detail-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span className="gather-detail-name">{bName}</span>
-                    </div>
-                    <div className="creature-detail-stats">
-                      <span className="creature-type">
-                        {t.typeCreature || (language === 'en' ? 'Type' : '類型')}: {bType}
-                      </span>
-                      {b.lifespan !== undefined && b.lifespan !== null && (
-                        <span className="building-lifespan">
-                          {language === 'en' ? 'Lifespan' : '壽命'}: {b.lifespan}
+                      {maxDur === -1 ? (
+                        <span style={{ fontSize: '0.75rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                          {language === 'en' ? 'Permanent' : '永久設施'}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: durColor, background: 'rgba(255, 255, 255, 0.05)', padding: '2px 8px', borderRadius: '4px', border: `1px solid ${durColor}44` }}>
+                          {isBroken ? (language === 'en' ? 'Broken' : '已損壞') : `${percent}%`}
                         </span>
                       )}
                     </div>
+
+                    <div className="creature-detail-stats" style={{ marginBottom: '8px' }}>
+                      <span className="creature-type">
+                        {t.typeCreature || (language === 'en' ? 'Type' : '類型')}: {bType}
+                      </span>
+                    </div>
+
+                    {maxDur > 0 && (
+                      <div style={{ margin: '8px 0', padding: '8px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
+                          <span style={{ color: '#cbd5e1' }}>{language === 'en' ? 'Durability' : '當前耐久度'}:</span>
+                          <span style={{ color: durColor, fontWeight: 600 }}>
+                            {curDur} / {maxDur}
+                          </span>
+                        </div>
+                        <div style={{ width: '100%', height: '6px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ width: `${percent}%`, height: '100%', background: durColor, transition: 'width 0.2s ease' }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 修復道具需求與控制項 */}
+                    {maxDur > 0 && repairItems.length > 0 && (
+                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>
+                          🔨 {language === 'en' ? 'Repair Materials' : '修復材料需求'}
+                        </span>
+
+                        {repairItems.map((r) => {
+                          const dbItem = items.find((i) => i.itemId === r.itemId);
+                          const itemName = dbItem ? getLocalizedName(dbItem, language) : r.itemId;
+                          const heldCount = inventory
+                            .filter((inv) => inv.itemId === r.itemId)
+                            .reduce((sum, inv) => sum + (inv.count || 1), 0);
+                          const rate = r.rate || 1;
+                          const missingDur = Math.max(0, maxDur - curDur);
+                          const neededQty = Math.ceil(missingDur / rate);
+                          const maxQty = Math.max(1, Math.min(heldCount, neededQty));
+                          const currentQty = repairQtys[r.itemId] ?? 1;
+                          const canRepair = heldCount > 0 && isDamaged && !isRepairing;
+
+                          return (
+                            <div
+                              key={r.itemId}
+                              style={{
+                                padding: '8px',
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(255, 255, 255, 0.06)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {dbItem?.imageUrl ? (
+                                    <img src={dbItem.imageUrl} alt="" style={{ width: '20px', height: '20px', objectFit: 'contain' }} />
+                                  ) : (
+                                    <span>📦</span>
+                                  )}
+                                  <strong style={{ color: '#f8fafc' }}>{itemName}</strong>
+                                </div>
+                                <span style={{ fontSize: '0.75rem', color: heldCount > 0 ? '#4ade80' : '#f87171' }}>
+                                  {language === 'en' ? 'Held:' : '持有:'} {heldCount}
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                {language === 'en'
+                                  ? `Restores +${rate} durability each`
+                                  : `每 1 個可修復 +${rate} 點耐久度`}
+                              </div>
+
+                              {isDamaged ? (
+                                heldCount > 0 ? (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                                    <QuantitySelector
+                                      value={Math.min(currentQty, maxQty)}
+                                      onChange={(newVal) =>
+                                        setRepairQtys((prev) => ({ ...prev, [r.itemId]: newVal }))
+                                      }
+                                      min={1}
+                                      max={maxQty}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn-repair"
+                                      disabled={!canRepair}
+                                      style={{
+                                        padding: '4px 12px',
+                                        background: canRepair ? '#10b981' : '#475569',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: canRepair ? 'pointer' : 'not-allowed',
+                                        fontSize: '0.8rem',
+                                        fontWeight: 600,
+                                        transition: 'background 0.2s',
+                                      }}
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const qtyToUse = Math.min(currentQty, maxQty);
+                                        setIsRepairing(true);
+                                        try {
+                                          const success = await repairBuilding(player.location, b.buildingId, r.itemId, qtyToUse);
+                                          if (success) {
+                                            setRepairQtys((prev) => ({ ...prev, [r.itemId]: 1 }));
+                                          }
+                                        } finally {
+                                          setIsRepairing(false);
+                                        }
+                                      }}
+                                    >
+                                      {isRepairing
+                                        ? (language === 'en' ? 'Repairing...' : '修復中...')
+                                        : (language === 'en' ? 'Repair' : '修復')}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: '0.75rem', color: '#f87171', fontStyle: 'italic' }}>
+                                    {language === 'en' ? 'No repair materials in inventory.' : '（背包中未持有此修復材料）'}
+                                  </div>
+                                )
+                              ) : (
+                                <div style={{ fontSize: '0.75rem', color: '#10b981' }}>
+                                  ✓ {language === 'en' ? 'Facility is at full durability.' : '設施耐久度已滿'}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })()}

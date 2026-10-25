@@ -191,11 +191,13 @@ const sanitizeInventoryItems = (inventory) => {
     if (!raw) continue;
     const itemId = raw.itemId || raw.id || '';
     if (!itemId) continue;
+    const count = (raw.count !== undefined && !isNaN(Number(raw.count))) ? Number(raw.count) : 1;
+    if (count <= 0) continue;
     const instanceId = raw.instanceId || generateInstanceId();
     clean.push({
       instanceId,
       itemId,
-      count: raw.count || 1,
+      count,
       durability: raw.durability !== undefined ? raw.durability : -1,
       maxDurability: raw.maxDurability !== undefined ? raw.maxDurability : (raw.durability !== undefined ? raw.durability : -1),
       quality: raw.quality || '普通',
@@ -316,6 +318,112 @@ const transferPlacedItemToPlayer = (location, instanceId, player) => {
     }
   );
   return itemToPick;
+};
+
+/**
+ * 檢查道具獲得時是否觸發新配方解鎖。
+ * 支援傳入單一 itemId (string) 或多個 itemIds (Array<string>)。
+ * 自動查詢配方資料庫、執行比對、更新 player.unlockedRecipes 並標記修改。
+ * @param {Object} player - 玩家 Mongoose Document。
+ * @param {string|string[]} acquiredItemIds - 獲得的道具 ID 或 ID 陣列。
+ * @returns {Promise<Array>} newlyUnlockedRecipes - 新解鎖的配方物件陣列。
+ */
+const triggerRecipeUnlocks = async (player, acquiredItemIds) => {
+  if (!player || !acquiredItemIds) return [];
+  const rawList = Array.isArray(acquiredItemIds) ? acquiredItemIds : [acquiredItemIds];
+  const itemIds = rawList.filter(Boolean);
+  if (itemIds.length === 0) return [];
+
+  let allDbRecipes = await Recipe.find({});
+  if (!allDbRecipes || allDbRecipes.length === 0) allDbRecipes = initialRecipes;
+
+  const newlyUnlockedAll = [];
+  let currentUnlocked = player.unlockedRecipes || [];
+
+  for (const itemId of itemIds) {
+    const { newlyUnlockedRecipes, updatedUnlocked } = checkRecipeUnlocks(
+      currentUnlocked,
+      allDbRecipes,
+      itemId
+    );
+    if (newlyUnlockedRecipes && newlyUnlockedRecipes.length > 0) {
+      currentUnlocked = updatedUnlocked;
+      newlyUnlockedAll.push(...newlyUnlockedRecipes);
+    }
+  }
+
+  if (newlyUnlockedAll.length > 0) {
+    player.unlockedRecipes = currentUnlocked;
+    player.markModified('unlockedRecipes');
+  }
+  return newlyUnlockedAll;
+};
+
+/**
+ * 後端統一向玩家背包發放/加入道具，並自動觸發配方解鎖檢查。
+ * 1. 若 options 未提供 durability，自動自資料庫道具定義 (dbItem) 帶入預設耐久度（採集/購買無需手動傳遞）。
+ * 2. 若 options 提供了自訂耐久度（製作動態耐久、拾取殘餘耐久），優先使用 options 設定。
+ * 3. 自動更新玩家背包並 markModified('inventory')。
+ * 4. 自動觸發 triggerRecipeUnlocks 檢查獲得道具是否解鎖新配方。
+ * @param {Object} player - 玩家 Mongoose Document。
+ * @param {Array<{ itemId: string, count?: number, options?: Object }>} itemsToAdd - 欲加入的道具清單。
+ * @param {Array} [allDbItems] - 道具資料庫清單，若未提供則自動查詢。
+ * @returns {Promise<Array>} newlyUnlockedRecipes - 本次獲得道具新解鎖的配方物件陣列。
+ */
+const grantItemsToPlayer = async (player, itemsToAdd = [], allDbItems = null) => {
+  if (!player || !Array.isArray(itemsToAdd) || itemsToAdd.length === 0) return [];
+
+  let dbItems = allDbItems;
+  if (!dbItems || dbItems.length === 0) {
+    dbItems = await Item.find({});
+    if (!dbItems || dbItems.length === 0) dbItems = initialItems;
+  }
+
+  player.inventory = sanitizeInventoryItems(player.inventory);
+
+  for (const item of itemsToAdd) {
+    if (!item || !item.itemId) continue;
+    const dbItem = dbItems.find((d) => d.itemId === item.itemId) || initialItems.find((d) => d.itemId === item.itemId);
+    const opts = item.options || {};
+
+    // 耐久度推導：若未指定 options.durability，自動採用資料庫預設值（採集與購買無需傳入）
+    const itemDurability = opts.durability !== undefined
+      ? opts.durability
+      : (dbItem?.durability !== undefined && dbItem.durability > 0 ? dbItem.durability : -1);
+
+    const itemMaxDurability = opts.maxDurability !== undefined
+      ? opts.maxDurability
+      : (itemDurability > 0 ? itemDurability : -1);
+
+    const isContainer = Boolean(
+      opts.isContainer ||
+      (Array.isArray(dbItem?.type) ? dbItem.type.includes('CONTAINER') : dbItem?.type === 'CONTAINER')
+    );
+
+    const mergedOptions = {
+      ...opts,
+      durability: itemDurability,
+      maxDurability: itemMaxDurability,
+      quality: opts.quality || '普通',
+      ...(isContainer && !opts.contents ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
+    };
+
+    player.inventory = addItemsToInventory(
+      player.inventory,
+      item.itemId,
+      item.count || 1,
+      mergedOptions,
+      dbItems
+    );
+  }
+
+  player.inventory = sanitizeInventoryItems(player.inventory);
+  player.markModified('inventory');
+
+  // 自動觸發配方解鎖檢查
+  const acquiredItemIds = itemsToAdd.map((i) => i.itemId).filter(Boolean);
+  const newlyUnlockedRecipes = await triggerRecipeUnlocks(player, acquiredItemIds);
+  return newlyUnlockedRecipes;
 };
 
 /**
@@ -735,49 +843,15 @@ router.post('/player/buy', async (req, res) => {
       return res.status(400).json({ success: false, message: '金錢不足！' });
     }
 
-    const boughtDbItem = allDbItems.find((i) => i.itemId === itemId);
-    const boughtItemTypes = boughtDbItem && boughtDbItem.type
-      ? (Array.isArray(boughtDbItem.type) ? boughtDbItem.type : [boughtDbItem.type])
-      : [];
-
-    const itemDur = (boughtDbItem?.durability !== undefined && boughtDbItem.durability > 0)
-      ? boughtDbItem.durability
-      : -1;
-    const isContainer = boughtItemTypes.includes('CONTAINER') || (boughtDbItem?.capacity > 0);
-
     player.money = currentMoney - totalCost;
-    player.inventory = sanitizeInventoryItems(player.inventory);
-    player.inventory = addItemsToInventory(
-      player.inventory,
-      itemId,
-      buyQty,
-      {
-        durability: itemDur,
-        maxDurability: itemDur,
-        ...(isContainer ? { isContainer: true, contents: { itemId: '', amount: 0 } } : {}),
-      },
-      allDbItems
-    );
-    player.markModified('inventory');
-
-    let allDbRecipes = await Recipe.find();
-    if (!allDbRecipes || allDbRecipes.length === 0) allDbRecipes = initialRecipes;
-    const { newlyUnlockedRecipes, updatedUnlocked } = checkRecipeUnlocks(
-      player.unlockedRecipes || [],
-      allDbRecipes,
-      itemId
-    );
-
-    if (newlyUnlockedRecipes.length > 0) {
-      player.unlockedRecipes = updatedUnlocked;
-      player.markModified('unlockedRecipes');
-    }
+    const newlyUnlockedRecipes = await grantItemsToPlayer(player, [{ itemId, count: buyQty }], allDbItems);
 
     await player.save();
     return res.json({
       success: true,
       data: formatPlayerResponse(player),
       newlyUnlockedRecipes,
+      result: { newlyUnlockedRecipes },
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/buy:', err);
@@ -1106,10 +1180,22 @@ router.post('/player/gather', async (req, res) => {
     const locBuildingList = locationDoc?.buildings || [];
     const locBuildingIds = locBuildingList.map((b) => b.buildingId);
     let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
-    const locBuildingTypes = locBuildingList.map((b) => {
+    if (!dbBuildings || dbBuildings.length === 0) dbBuildings = initialBuildings;
+
+    // 篩選場景可用建築物類型：只有永久設施 (durability === -1) 或當前耐久度大於 0 的設施才算有效
+    const locBuildingTypes = [];
+    for (const b of locBuildingList) {
       const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
-      return found?.type || b.buildingId;
-    });
+      if (!found) continue;
+      const maxDur = found.durability ?? -1;
+      if (b.currentDurability === undefined && maxDur !== -1) {
+        b.currentDurability = maxDur;
+      }
+      const curDur = b.currentDurability !== undefined ? b.currentDurability : maxDur;
+      if (maxDur === -1 || curDur > 0) {
+        locBuildingTypes.push(found.type || b.buildingId);
+      }
+    }
 
     // 依耐久度升序檢查工具需求，並計算工具最大可執行次數（瓶頸最小值）
     const { maxExecutableQty: maxByTools, selectedTools } = calculateMaxExecutableByTools(
@@ -1224,18 +1310,19 @@ router.post('/player/gather', async (req, res) => {
     const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
     const finalSuccessRate = calculateSuccessRate(baseChance, currentSkillLevel);
 
-    // 依據實際採集次數、單次獲得量上限與最終成功率進行抽籤判定
+    // 依據實際採集次數、單次獲得量上限與最終成功率進行逐件獨立抽籤判定
     const maxYield = Math.max(1, Number(spot.maxYield) || 1);
+    const totalAttempts = actualQty * maxYield;
     let successQty = 0;
     let failQty = 0;
-    for (let i = 0; i < actualQty; i++) {
+    for (let i = 0; i < totalAttempts; i++) {
       if (Math.random() * 100 < finalSuccessRate) {
         successQty += 1;
       } else {
         failQty += 1;
       }
     }
-    const gainedQty = successQty * maxYield;
+    const gainedQty = successQty;
 
     const expPerUnit = (typeof spot.expPerUnit === 'number')
       ? spot.expPerUnit
@@ -1271,40 +1358,9 @@ router.post('/player/gather', async (req, res) => {
           allDbItems
         );
         player.markModified('inventory');
+        newlyUnlockedRecipes = await triggerRecipeUnlocks(player, itemId);
       } else {
-        const itemDurability = (targetItemDoc?.durability !== undefined && targetItemDoc.durability > 0)
-          ? targetItemDoc.durability
-          : -1;
-        const itemMaxDurability = itemDurability > 0 ? itemDurability : -1;
-
-        player.inventory = addItemsToInventory(
-          player.inventory,
-          itemId,
-          gainedQty,
-          {
-            durability: itemDurability,
-            maxDurability: itemMaxDurability,
-            quality: '普通',
-          },
-          allDbItems
-        );
-        player.markModified('inventory');
-      }
-
-      // 檢查採集獲得資源是否解鎖新配方（比對 recipe.triggerItem）
-      let allDbRecipes = await Recipe.find({});
-      if (!allDbRecipes || allDbRecipes.length === 0) allDbRecipes = initialRecipes;
-
-      const unlockResult = checkRecipeUnlocks(
-        player.unlockedRecipes,
-        allDbRecipes,
-        itemId
-      );
-      newlyUnlockedRecipes = unlockResult.newlyUnlockedRecipes;
-
-      if (newlyUnlockedRecipes.length > 0) {
-        player.unlockedRecipes = unlockResult.updatedUnlocked;
-        player.markModified('unlockedRecipes');
+        newlyUnlockedRecipes = await grantItemsToPlayer(player, [{ itemId, count: gainedQty }], allDbItems);
       }
     }
 
@@ -1319,8 +1375,8 @@ router.post('/player/gather', async (req, res) => {
       time: timeStr,
       sender: '系統',
       senderEn: 'System',
-      text: `採集${targetItemName}${actualQty}次，失敗${failQty}次。`,
-      textEn: `Gathered ${targetItemNameEn} ${actualQty} times, failed ${failQty} times.`,
+      text: `採集${targetItemName}${actualQty}次，獲得${gainedQty}個${failQty > 0 ? `，失敗${failQty}次` : ''}。`,
+      textEn: `Gathered ${targetItemNameEn} ${actualQty} times, gained ${gainedQty}${failQty > 0 ? `, failed ${failQty} times` : ''}.`,
       type: 'system',
       locationId: '',
       targetPlayerId,
@@ -1515,10 +1571,22 @@ router.post('/player/craft', async (req, res) => {
     const locBuildingList = locationDoc?.buildings || [];
     const locBuildingIds = locBuildingList.map((b) => b.buildingId);
     let dbBuildings = await Building.find({ buildingId: { $in: locBuildingIds } });
-    const locBuildingTypes = locBuildingList.map((b) => {
+    if (!dbBuildings || dbBuildings.length === 0) dbBuildings = initialBuildings;
+
+    // 篩選場景可用建築物類型：只有永久設施 (durability === -1) 或當前耐久度大於 0 的設施才算有效
+    const locBuildingTypes = [];
+    for (const b of locBuildingList) {
       const found = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
-      return found?.type || b.buildingId;
-    });
+      if (!found) continue;
+      const maxDur = found.durability ?? -1;
+      if (b.currentDurability === undefined && maxDur !== -1) {
+        b.currentDurability = maxDur;
+      }
+      const curDur = b.currentDurability !== undefined ? b.currentDurability : maxDur;
+      if (maxDur === -1 || curDur > 0) {
+        locBuildingTypes.push(found.type || b.buildingId);
+      }
+    }
 
     player.inventory = sanitizeInventoryItems(player.inventory);
     let allDbItems = await Item.find();
@@ -1777,6 +1845,7 @@ router.post('/player/craft', async (req, res) => {
       }
     }
 
+    const craftedItemsToAdd = [];
     if (successCraftQty > 0) {
       for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
         const out = effectiveOutputs[outIdx];
@@ -1793,30 +1862,16 @@ router.post('/player/craft', async (req, res) => {
         const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
         const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
 
-        if (finalDurability > 0) {
-          // 耐久度道具一律獨立計算，不進行堆疊，每次批量製作各自生成獨立實體
-          for (let k = 0; k < addQty; k++) {
-            updatedInv.push({
-              instanceId: generateInstanceId(),
-              itemId: finalItemId,
-              count: 1,
-              durability: finalDurability,
-              maxDurability: finalMaxDurability,
-              quality: '普通',
-              lastDecayedAt: new Date(),
-              ...(customName ? { customName, customNameEn } : {}),
-              ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
-            });
-          }
-        } else {
-          // 無耐久度道具維持一般堆疊邏輯
-          updatedInv = addItemsToInventory(updatedInv, finalItemId, addQty, {
-            customName,
-            customNameEn,
-            bonusNutrition: finalBonusNutrition,
-            quality: '普通',
-          });
-        }
+        craftedItemsToAdd.push({
+          itemId: finalItemId,
+          count: addQty,
+          options: {
+            durability: finalDurability,
+            maxDurability: finalMaxDurability,
+            ...(customName ? { customName, customNameEn } : {}),
+            ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
+          },
+        });
       }
     }
 
@@ -1870,8 +1925,11 @@ router.post('/player/craft', async (req, res) => {
     }
     applyEnergyConsumption(player, totalEnergyCost);
     player.markModified('stats');
-    player.inventory = sanitizeInventoryItems(updatedInv);
-    player.markModified('inventory');
+
+    // 扣除材料後的背包，透過 grantItemsToPlayer 統一移入製作產物並檢查配方解鎖
+    player.inventory = invAfterTools;
+    const newlyUnlockedRecipes = await grantItemsToPlayer(player, craftedItemsToAdd, allDbItems);
+
     if (hasQuestUpdate) {
       player.quests = updatedQuests;
       player.markModified('quests');
@@ -1955,16 +2013,197 @@ router.post('/player/craft', async (req, res) => {
       });
     }
 
+    // 扣除場景建築物耐久度：使用具有耐久度的建築時，根據使用精力 1:1 消耗其耐久度
+    let hasBuildingUpdated = false;
+    for (const b of locBuildingList) {
+      const dbB = dbBuildings.find((db) => db.buildingId === b.buildingId) || initialBuildings.find((db) => db.buildingId === b.buildingId);
+      if (!dbB) continue;
+      const maxDur = dbB.durability ?? -1;
+      if (maxDur !== -1 && reqTools.includes(dbB.type)) {
+        const curDur = b.currentDurability !== undefined ? b.currentDurability : maxDur;
+        const newDur = Math.max(0, Math.round((curDur - totalEnergyCost) * 10) / 10);
+        b.currentDurability = newDur;
+        hasBuildingUpdated = true;
+
+        if (newDur === 0 && curDur > 0) {
+          const bName = dbB.name || b.buildingId;
+          const bNameEn = dbB.nameEn || bName;
+          await GameLog.create({
+            time: timeStr,
+            sender: '系統',
+            senderEn: 'System',
+            text: `場景設施【${bName}】已耗盡耐久度並損壞！`,
+            textEn: `Facility [${bNameEn}] has run out of durability and broken!`,
+            type: 'system',
+            locationId: player.location,
+            targetPlayerId,
+          });
+        }
+      }
+    }
+
+    if (hasBuildingUpdated && locationDoc && locationDoc.save) {
+      locationDoc.markModified('buildings');
+      await locationDoc.save();
+    }
+
     await player.save();
     return res.json({
       success: true,
       source: 'mongodb',
       data: formatPlayerResponse(player),
-      result: { craftQty: actualCraftQty, successQty: successCraftQty, failQty: failCraftQty, requestedQty: numCraftQty },
+      location: locationDoc,
+      newlyUnlockedRecipes,
+      result: {
+        craftQty: actualCraftQty,
+        successQty: successCraftQty,
+        failQty: failCraftQty,
+        requestedQty: numCraftQty,
+        newlyUnlockedRecipes,
+      },
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/craft:', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/location/repair-building
+router.post('/location/repair-building', async (req, res) => {
+  try {
+    if (!isDbConnected()) {
+      return res.status(503).json({ success: false, message: '資料庫未連線！' });
+    }
+    const { locationId, buildingId, repairItemId, qty = 1 } = req.body;
+    const deductQty = Math.max(1, Number(qty) || 1);
+
+    let player = await getPlayerFromReq(req);
+    if (!player) {
+      return res.status(404).json({ success: false, message: '找不到玩家角色！' });
+    }
+    if (isPlayerComatose(player)) {
+      return res.status(400).json({ success: false, message: '角色處於昏迷狀態，無法行動！' });
+    }
+    if (player.location !== locationId) {
+      return res.status(400).json({ success: false, message: '玩家不在該建築物所在地點！' });
+    }
+
+    let locationDoc = await Location.findOne({ locationId });
+    if (!locationDoc) {
+      locationDoc = initialLocations.find((l) => l.locationId === locationId);
+    }
+    const b = (locationDoc?.buildings || []).find((item) => item.buildingId === buildingId);
+    if (!b) {
+      return res.status(404).json({ success: false, message: '當前地點找不到該建築物！' });
+    }
+
+    let dbBuilding = await Building.findOne({ buildingId });
+    if (!dbBuilding) {
+      dbBuilding = initialBuildings.find((db) => db.buildingId === buildingId);
+    }
+    if (!dbBuilding) {
+      return res.status(404).json({ success: false, message: '找不到該建築物定義！' });
+    }
+
+    const maxDur = dbBuilding.durability ?? -1;
+    if (maxDur === -1) {
+      return res.status(400).json({ success: false, message: '永久設施無需修復！' });
+    }
+
+    const curDur = b.currentDurability !== undefined ? b.currentDurability : maxDur;
+    if (curDur >= maxDur) {
+      return res.status(400).json({ success: false, message: '該建築物耐久度已滿，無需修復！' });
+    }
+
+    const repairOption = (dbBuilding.repairItems || []).find((r) => r.itemId === repairItemId);
+    if (!repairOption) {
+      return res.status(400).json({ success: false, message: '此道具無法用於修復該建築物！' });
+    }
+
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    await settlePlayerInventoryDecay(player, allDbItems);
+
+    let totalHeld = 0;
+    for (const inv of player.inventory) {
+      if (inv.itemId === repairItemId) {
+        totalHeld += (inv.count || 1);
+      }
+    }
+    if (totalHeld < deductQty) {
+      return res.status(400).json({ success: false, message: '修復道具數量不足！' });
+    }
+
+    // 扣除玩家背包中的修復道具（優先扣除耐久度低者，扣至 <= 0 自背包中移除）
+    const matchingIndices = [];
+    player.inventory.forEach((inv, idx) => {
+      if (inv.itemId === repairItemId) {
+        matchingIndices.push(idx);
+      }
+    });
+    matchingIndices.sort((a, b) => compareItemDurability(player.inventory[a], player.inventory[b]));
+
+    const indicesToRemove = new Set();
+    let remainingToDeduct = deductQty;
+    for (const idx of matchingIndices) {
+      if (remainingToDeduct <= 0) break;
+      const inv = player.inventory[idx];
+      const c = inv.count || 1;
+      const deductCount = Math.min(c, remainingToDeduct);
+      remainingToDeduct -= deductCount;
+      if (c <= deductCount) {
+        indicesToRemove.add(idx);
+      } else {
+        inv.count = c - deductCount;
+      }
+    }
+    player.inventory = player.inventory.filter((_, idx) => !indicesToRemove.has(idx));
+    player.inventory = sanitizeInventoryItems(player.inventory);
+    player.markModified('inventory');
+
+    // 累加建築物耐久度（最高不超過最大耐久）
+    const rate = repairOption.rate || 1;
+    const addedDurability = deductQty * rate;
+    const newDurability = Math.min(maxDur, Math.round((curDur + addedDurability) * 10) / 10);
+    b.currentDurability = newDurability;
+
+    await player.save();
+    if (locationDoc.save) {
+      locationDoc.markModified('buildings');
+      await locationDoc.save();
+    }
+
+    // 發布日誌
+    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
+    const dbItem = allDbItems.find((d) => d.itemId === repairItemId);
+    const itemName = dbItem?.name || repairItemId;
+    const itemNameEn = dbItem?.nameEn || itemName;
+    const bName = dbBuilding.name || buildingId;
+    const bNameEn = dbBuilding.nameEn || bName;
+
+    await GameLog.create({
+      time: timeStr,
+      sender: '系統',
+      senderEn: 'System',
+      text: `使用了 ${deductQty} 個【${itemName}】，修復了【${bName}】${Math.round((newDurability - curDur) * 10) / 10} 點耐久度。`,
+      textEn: `Used ${deductQty} [${itemNameEn}] to repair [${bNameEn}] by ${Math.round((newDurability - curDur) * 10) / 10} durability.`,
+      type: 'system',
+      locationId,
+      targetPlayerId,
+    });
+
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      location: locationDoc,
+      repairedAmount: Math.round((newDurability - curDur) * 10) / 10,
+      newDurability,
+    });
+  } catch (err) {
+    console.error('[API Error] POST /api/location/repair-building:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -2117,30 +2356,32 @@ router.post('/location/pickup-item', async (req, res) => {
     location.markModified('placedItems');
     await location.save();
 
-    player.inventory = sanitizeInventoryItems(player.inventory);
-    for (const pItem of pickedItems) {
-      player.inventory = addItemsToInventory(
-        player.inventory,
-        pItem.itemId,
-        pItem.count || 1,
-        {
-          instanceId: pItem.instanceId,
-          durability: pItem.durability,
-          maxDurability: pItem.maxDurability,
-          quality: pItem.quality || '普通',
-          customName: pItem.customName || '',
-          customNameEn: pItem.customNameEn || '',
-          bonusNutrition: pItem.bonusNutrition,
-          contents: pItem.contents,
-          lastDecayedAt: pItem.lastDecayedAt,
-        }
-      );
-    }
-    player.markModified('inventory');
+    const itemsToAdd = pickedItems.map((pItem) => ({
+      itemId: pItem.itemId,
+      count: pItem.count || 1,
+      options: {
+        instanceId: pItem.instanceId,
+        durability: pItem.durability,
+        maxDurability: pItem.maxDurability,
+        quality: pItem.quality || '普通',
+        customName: pItem.customName || '',
+        customNameEn: pItem.customNameEn || '',
+        bonusNutrition: pItem.bonusNutrition,
+        contents: pItem.contents,
+        lastDecayedAt: pItem.lastDecayedAt,
+      },
+    }));
+    const newlyUnlockedRecipes = await grantItemsToPlayer(player, itemsToAdd, allDbItems);
     await player.save();
 
     const allLocations = await Location.find({});
-    return res.json({ success: true, data: formatPlayerResponse(player), locations: allLocations });
+    return res.json({
+      success: true,
+      data: formatPlayerResponse(player),
+      locations: allLocations,
+      newlyUnlockedRecipes,
+      result: { newlyUnlockedRecipes },
+    });
   } catch (err) {
     console.error('[API Error] POST /api/location/pickup-item:', err);
     res.status(500).json({ success: false, error: err.message });
