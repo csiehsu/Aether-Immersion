@@ -15,7 +15,7 @@ export const translations = {
     inventoryTitle: '🎒 背包',
     creaturesTitle: '🐾 區域生物',
     logTitle: '📜 紀錄',
-    currentLocation: '📍 當前位置',
+    currentLocation: '📍 目前位置',
     lockedLocation: '🔒 未解鎖',
     goToLocation: '前往',
     reqLevel: '等級要求',

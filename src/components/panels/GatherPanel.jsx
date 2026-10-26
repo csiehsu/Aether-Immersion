@@ -800,7 +800,6 @@ export const GatherPanel = () => {
                 if (!b) return null;
                 const dbBuilding = buildings.find((item) => item.buildingId === b.buildingId);
                 const bName = dbBuilding ? (language === 'en' && dbBuilding.nameEn ? dbBuilding.nameEn : dbBuilding.name) : b.buildingId;
-                const bType = dbBuilding ? dbBuilding.type : 'BUILDING';
                 const maxDur = dbBuilding?.durability ?? -1;
                 const curDur = maxDur !== -1 ? (b.currentDurability !== undefined ? b.currentDurability : maxDur) : -1;
                 const percent = maxDur > 0 ? Math.max(0, Math.min(100, Math.round((curDur / maxDur) * 100))) : -1;
@@ -824,16 +823,10 @@ export const GatherPanel = () => {
                       )}
                     </div>
 
-                    <div className="creature-detail-stats" style={{ marginBottom: '8px' }}>
-                      <span className="creature-type">
-                        {t.typeCreature || (language === 'en' ? 'Type' : '類型')}: {bType}
-                      </span>
-                    </div>
-
                     {maxDur > 0 && (
                       <div style={{ margin: '8px 0', padding: '8px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
-                          <span style={{ color: '#cbd5e1' }}>{language === 'en' ? 'Durability' : '當前耐久度'}:</span>
+                          <span style={{ color: '#cbd5e1' }}>{language === 'en' ? 'Durability' : '目前耐久度'}:</span>
                           <span style={{ color: durColor, fontWeight: 600 }}>
                             {curDur} / {maxDur}
                           </span>
