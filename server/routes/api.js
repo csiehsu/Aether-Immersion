@@ -9,14 +9,18 @@ import { Npc } from '../models/Npc.js';
 import { Building } from '../models/Building.js';
 import { BattleSkill } from '../models/BattleSkill.js';
 import { Quest } from '../models/Quest.js';
-import { initialItems } from '../seeds/seedItems.js';
-import { initialLocations } from '../seeds/seedLocations.js';
-import { initialRecipes } from '../seeds/seedRecipes.js';
-import { initialNpcs } from '../seeds/seedNpcs.js';
-import { initialBuildings } from '../seeds/seedBuildings.js';
-import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
-import { initialQuests } from '../seeds/seedQuests.js';
+import { getSeedData } from '../utils/seedLoader.js';
 import { isDbConnected, fetchCollectionData, generateInstanceId } from '../utils/dbHelper.js';
+
+const {
+  initialItems,
+  initialLocations,
+  initialRecipes,
+  initialNpcs,
+  initialBuildings,
+  initialBattleSkills,
+  initialQuests,
+} = await getSeedData();
 import {
   settleEnergyRecovery,
   applyEnergyConsumption,
