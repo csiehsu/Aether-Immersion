@@ -961,7 +961,7 @@ npm run build
 - **Environment**: `Node`
 - **Region**: 建議選擇 `Singapore` 或 `Oregon`（離台灣與亞洲延遲較低）
 - **Branch**: `main`
-- **Build Command**: `npm install && npm run build`
+- **Build Command**: `npm install && npm run build`（或 `npm install --include=dev && npm run build`）
 - **Start Command**: `npm start`
 - **Plan**: `Free`（或 Starter）
 
