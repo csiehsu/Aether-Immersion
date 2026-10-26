@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { OAuth2Client } from 'google-auth-library';
 import { Player } from '../models/Player.js';
 import { isDbConnected } from '../utils/dbHelper.js';
@@ -80,9 +81,6 @@ router.post('/google', async (req, res) => {
     if (!player && googleUser.email) {
       player = await Player.findOne({ email: googleUser.email });
     }
-    if (!player) {
-      player = await Player.findOne({ googleId: null });
-    }
 
     if (player) {
       settleEnergyRecovery(player);
@@ -127,7 +125,12 @@ router.post('/google', async (req, res) => {
 router.post('/logout', async (req, res) => {
   try {
     if (isDbConnected()) {
-      await Player.updateMany({}, { $set: { isLoggedIn: false } });
+      const pId = req.headers?.['x-player-id'] || req.body?.playerId;
+      if (pId && mongoose.isValidObjectId(pId)) {
+        await Player.findByIdAndUpdate(pId, { $set: { isLoggedIn: false } });
+      } else {
+        await Player.updateMany({}, { $set: { isLoggedIn: false } });
+      }
     }
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (err) {

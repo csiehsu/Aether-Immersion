@@ -30,7 +30,6 @@ import {
   MAX_HP,
   MAX_ENERGY,
   TOTAL_CREATION_STATS,
-  DEFAULT_INITIAL_STATS,
 } from '../../shared/constants/gameConstants.js';
 import {
   addLifeSkillExp,
@@ -114,7 +113,7 @@ const getPlayerFromReq = async (req) => {
     const player = await Player.findById(pId);
     if (player) return player;
   }
-  return await Player.findOne({ isLoggedIn: true }) || await Player.findOne();
+  return null;
 };
 
 /**
@@ -491,79 +490,46 @@ router.get('/player', async (req, res) => {
 
     let player = await getPlayerFromReq(req);
     if (!player) {
-      const defaultName = '冒險者';
-      const defaultMentor = '';
+      return res.json({ success: false, data: null, isLoggedIn: false, message: '未登入或查無此玩家！' });
+    }
 
-      player = await Player.create({
-        name: defaultName,
-        mentor: defaultMentor,
-        isCharacterCreated: false,
-        stats: { ...DEFAULT_INITIAL_STATS },
-        skills: [{ skillId: 'NORMAL_ATTACK', level: 0 }],
-        lifeSkills: {
-          GATHERING: { level: 0, exp: 0 },
-          FISHING: { level: 0, exp: 0 },
-          MINING: { level: 0, exp: 0 },
-          COOKING: { level: 0, exp: 0 },
-        },
-        level: 1,
-        hp: MAX_HP,
-        money: 0,
-        energy: MAX_ENERGY,
-        maxEnergy: MAX_ENERGY,
-        lastEnergyRecoveredAt: new Date(),
-        location: 'AZURE_BAY_MARKET',
-        knownLocations: [
-          'AZURE_BAY_PORT',
-          'AZURE_BAY_MARKET',
-          'AZURE_BAY_GATE',
-          'ROCKY_PLAIN',
-          'AZURE_BAY_VARIETY_SHOP',
-          'ROCK_WALL',
-          'ROCK_WALL_CAVE',
-          'AZURE_BAY_OFFSHORE',
-        ],
-      });
-      console.log('[MongoDB] Created initial player record in MongoDB.');
+    const energyUpdated = settleEnergyRecovery(player);
+    let allDbItems = await Item.find();
+    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+    const decayUpdated = await settlePlayerInventoryDecay(player, allDbItems);
+    let updated = energyUpdated || decayUpdated;
+
+    if (!player.lifeSkills) {
+      player.lifeSkills = {
+        GATHERING: { level: 0, exp: 0 },
+        FISHING: { level: 0, exp: 0 },
+        MINING: { level: 0, exp: 0 },
+        COOKING: { level: 0, exp: 0 },
+      };
+      player.markModified('lifeSkills');
+      updated = true;
     } else {
-      const energyUpdated = settleEnergyRecovery(player);
-      let allDbItems = await Item.find();
-      if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
-      const decayUpdated = await settlePlayerInventoryDecay(player, allDbItems);
-      let updated = energyUpdated || decayUpdated;
-
-      if (!player.lifeSkills) {
-        player.lifeSkills = {
-          GATHERING: { level: 0, exp: 0 },
-          FISHING: { level: 0, exp: 0 },
-          MINING: { level: 0, exp: 0 },
-          COOKING: { level: 0, exp: 0 },
-        };
-        player.markModified('lifeSkills');
-        updated = true;
-      } else {
-        ['GATHERING', 'FISHING', 'MINING', 'COOKING'].forEach((key) => {
-          if (!player.lifeSkills[key]) {
-            player.lifeSkills[key] = { level: 0, exp: 0 };
+      ['GATHERING', 'FISHING', 'MINING', 'COOKING'].forEach((key) => {
+        if (!player.lifeSkills[key]) {
+          player.lifeSkills[key] = { level: 0, exp: 0 };
+          player.markModified('lifeSkills');
+          updated = true;
+        } else {
+          const currentExp = roundExp(player.lifeSkills[key].exp || 0);
+          const correctLevel = calculateSkillLevel(currentExp);
+          if (player.lifeSkills[key].level !== correctLevel || player.lifeSkills[key].exp !== currentExp) {
+            player.lifeSkills[key].level = correctLevel;
+            player.lifeSkills[key].exp = currentExp;
             player.markModified('lifeSkills');
             updated = true;
-          } else {
-            const currentExp = roundExp(player.lifeSkills[key].exp || 0);
-            const correctLevel = calculateSkillLevel(currentExp);
-            if (player.lifeSkills[key].level !== correctLevel || player.lifeSkills[key].exp !== currentExp) {
-              player.lifeSkills[key].level = correctLevel;
-              player.lifeSkills[key].exp = currentExp;
-              player.markModified('lifeSkills');
-              updated = true;
-            }
           }
-        });
-      }
+        }
+      });
+    }
 
-      if (updated) {
-        player.markModified('knownLocations');
-        await player.save();
-      }
+    if (updated) {
+      player.markModified('knownLocations');
+      await player.save();
     }
     return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {

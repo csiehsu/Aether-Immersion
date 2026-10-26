@@ -198,8 +198,11 @@ AetherImmersion/
 - 角色初始攜帶 10 份滿耐久的熟食口糧與 1 個盛裝滿飲用水的隨身液體容器。
 
 ### 13. 多人連線與身分識別隔離系統 (Multiplayer Identity & Session Isolation)
-- **請求身分綁定**：前端所有與後端通訊的 API 請求（包括採集、移動、合成、交易、食用、心跳等）皆在 Header 附帶 `x-player-id: player._id`。
-- **後端單一查詢隔離 (`getPlayerFromReq`)**：後端統一以請求標頭提供的特定 ID 定位玩家文檔，提供安全 Fallback 相容本機開發，徹底杜絕多名玩家連線時相互覆寫資料庫記錄的問題。
+- **瀏覽器端憑證隔離 (LocalStorage)**：
+  - 玩家透過 Google OAuth 登入成功或完成創角後，前端將當前玩家識別碼 `player._id` 保存於該瀏覽器專屬的 `localStorage ('aether_player_id')`。
+  - 當玩家在登入狀態下點擊登出，前端主動清除該瀏覽器的 LocalStorage 紀錄，並通知後端將該玩家標記為離線。
+- **請求身分綁定**：前端所有與後端通訊的 API 請求（包括採集、移動、合成、交易、食用、心跳、任務等）皆在 Header 附帶 `x-player-id: player._id`。首頁載入（`syncFromMongo`）時優先以 LocalStorage 的 `playerId` 進行驗證，若未登入或查無此玩家則保持在登入頁面（`LoginView`）。
+- **後端單一查詢隔離 (`getPlayerFromReq`)**：後端統一以請求標頭提供的特定 ID 定位玩家文檔，若未提供或 ID 無效一律視為未登入，杜絕全域共用資料庫登入狀態導致不同瀏覽器分頁/視窗相互覆寫或自動登入他人帳號的問題。
 
 ---
 

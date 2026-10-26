@@ -24,6 +24,7 @@ import {
 export { translations };
 
 const API_BASE = 'http://localhost:5000/api';
+const STORAGE_PLAYER_ID_KEY = 'aether_player_id';
 
 /**
  * 從後端 API 載入特定集合資料並寫入 Zustand Store。
@@ -275,11 +276,22 @@ export const useGameStore = create((set, get) => ({
     const strength = typeof str === 'object' ? str.strength : str;
     const speed = typeof str === 'object' ? str.speed : spd;
     const dexVal = typeof str === 'object' ? str.dexterity : (dex ?? 1);
+    let existingPlayerId = get().player?._id || '';
+    if (!existingPlayerId) {
+      try {
+        existingPlayerId = localStorage.getItem(STORAGE_PLAYER_ID_KEY) || '';
+      } catch (e) {
+        console.warn('[LocalStorage] Unable to read player ID:', e);
+      }
+    }
 
     try {
       const res = await fetch(`${API_BASE}/player/create-character`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': existingPlayerId,
+        },
         body: JSON.stringify({
           name,
           stats: {
@@ -295,6 +307,13 @@ export const useGameStore = create((set, get) => ({
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.data) {
+          if (result.data._id) {
+            try {
+              localStorage.setItem(STORAGE_PLAYER_ID_KEY, result.data._id);
+            } catch (e) {
+              console.warn('[LocalStorage] Unable to save player ID:', e);
+            }
+          }
           await get().fetchLocations();
           get().applyPlayerData(result.data, { screenMode: 'game' });
           return true;
@@ -325,6 +344,13 @@ export const useGameStore = create((set, get) => ({
         if (result.success && result.user) {
           const gUser = result.user;
           const dbP = result.player;
+          if (dbP?._id) {
+            try {
+              localStorage.setItem(STORAGE_PLAYER_ID_KEY, dbP._id);
+            } catch (e) {
+              console.warn('[LocalStorage] Unable to save player ID:', e);
+            }
+          }
           const user = {
             isLoggedIn: true,
             name: gUser.name,
@@ -349,12 +375,35 @@ export const useGameStore = create((set, get) => ({
    */
   logout: async () => {
     try {
-      await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+      let pId = get().player?._id || '';
+      if (!pId) {
+        try {
+          pId = localStorage.getItem(STORAGE_PLAYER_ID_KEY) || '';
+        } catch {
+          // ignore
+        }
+      }
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': pId,
+        },
+        body: JSON.stringify({ playerId: pId }),
+      });
     } catch {
       // Ignore network errors when logging out offline
     }
 
+    try {
+      localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
+    } catch (e) {
+      console.warn('[LocalStorage] Unable to remove player ID:', e);
+    }
+
     set({
+      player: null,
+      inventory: [],
       user: { isLoggedIn: false, name: '', email: '', pictureUrl: null },
       screenMode: 'login',
     });
@@ -417,7 +466,24 @@ export const useGameStore = create((set, get) => ({
         get().fetchQuests(),
       ]);
 
-      const res = await fetch(`${API_BASE}/player`, { headers: { 'x-player-id': get().player?._id || '' } });
+      let storedPlayerId = '';
+      try {
+        storedPlayerId = localStorage.getItem(STORAGE_PLAYER_ID_KEY) || '';
+      } catch (e) {
+        console.warn('[LocalStorage] Unable to read player ID:', e);
+      }
+
+      const targetPlayerId = storedPlayerId || get().player?._id || '';
+      if (!targetPlayerId) {
+        set({
+          screenMode: 'login',
+          player: null,
+          user: { isLoggedIn: false, name: '', email: '', pictureUrl: null },
+        });
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/player`, { headers: { 'x-player-id': targetPlayerId } });
       if (!res.ok) {
         set({ mongoStatus: 'offline', isDisconnected: true });
         return;
@@ -431,8 +497,19 @@ export const useGameStore = create((set, get) => ({
         get().applyPlayerData(dbP, {
           user: dbP.isLoggedIn
             ? { isLoggedIn: true, name: dbP.name, email: dbP.email, pictureUrl: dbP.pictureUrl }
-            : get().user,
-          screenMode: dbP.isLoggedIn ? nextScreen : get().screenMode,
+            : { isLoggedIn: false, name: '', email: '', pictureUrl: null },
+          screenMode: dbP.isLoggedIn ? nextScreen : 'login',
+        });
+      } else {
+        try {
+          localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
+        } catch {
+          // ignore
+        }
+        set({
+          screenMode: 'login',
+          player: null,
+          user: { isLoggedIn: false, name: '', email: '', pictureUrl: null },
         });
       }
 
@@ -1131,7 +1208,10 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/quest/accept`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': get().player?._id || '',
+        },
         body: JSON.stringify({ questId, locationId, instanceId }),
       });
       if (res.ok) {
@@ -1173,7 +1253,10 @@ export const useGameStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/quest/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-player-id': get().player?._id || '',
+        },
         body: JSON.stringify({ questId }),
       });
       if (res.ok) {
@@ -1319,7 +1402,10 @@ export const useGameStore = create((set, get) => ({
           try {
             const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-player-id': player._id || get().player?._id || '',
+              },
               body: JSON.stringify({ hp: pCurrentHp, inventory: updatedInv }),
             });
             if (res.ok) {
@@ -1371,7 +1457,10 @@ export const useGameStore = create((set, get) => ({
           try {
             const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-player-id': player._id || get().player?._id || '',
+              },
               body: JSON.stringify({ hp: pCurrentHp }),
             });
             if (res.ok) {
