@@ -3,19 +3,22 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.23.4"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "vite",
     "server": "node server/index.js",
     "dev:full": "concurrently \"vite\" \"node server/index.js\"",
     "seed:sync": "node server/scripts/syncSeedsToDb.js",
+    "seed:sync:prod": "node server/scripts/syncSeedsToDb.js --prod",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.5",
-    "concurrently": "^10.0.5",
     "cors": "^2.8.6",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
@@ -31,10 +34,11 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.6",
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",
     "globals": "^17.12.0",
-    "vite": "^8.3.0"
+    "vite": "^8.3.5"
   }
 }

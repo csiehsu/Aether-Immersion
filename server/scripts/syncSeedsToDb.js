@@ -19,7 +19,32 @@ import { initialQuests } from '../seeds/seedQuests.js';
 
 dotenv.config();
 
-const mongoURI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/AetherImmersion';
+/**
+ * 解析目標資料庫名稱及過濾引數標籤。
+ * 優先序：
+ * 1. 命令行引數包含 '--prod' 或 '--production' -> 'AetherImmersion'（正式玩家資料庫）
+ * 2. process.env.MONGODB_DB_NAME
+ * 3. process.env.NODE_ENV === 'production' -> 'AetherImmersion'
+ * 4. 預設（開發環境）-> 'AetherImmersion_dev'（本機開發資料庫）
+ * @param {string[]} targets
+ * @returns {{ targetDbName: string, filteredTargets: string[] }}
+ */
+export function resolveTargetDbAndTargets(targets = []) {
+  const isProdFlag = targets.some((t) => ['--prod', '--production', '-p'].includes(t.toLowerCase().trim()));
+  const filteredTargets = targets.filter(
+    (t) => !['--prod', '--production', '-p', '--dev'].includes(t.toLowerCase().trim())
+  );
+
+  let targetDbName = 'AetherImmersion_dev';
+  if (isProdFlag || process.env.NODE_ENV === 'production') {
+    targetDbName = 'AetherImmersion';
+  }
+  if (process.env.MONGODB_DB_NAME) {
+    targetDbName = process.env.MONGODB_DB_NAME;
+  }
+
+  return { targetDbName, filteredTargets };
+}
 
 /**
  * 獨立同步設施與建築物資料 (seedBuildings.js -> buildings)
@@ -202,18 +227,21 @@ export const SYNC_REGISTRY = {
 
 /**
  * 執行種子資料同步主進入點
- * @param {string[]} [targets=[]] - 要同步的模組名稱清單，若為空或包含 'all' 則同步核心預設項目
+ * @param {string[]} [targets=[]] - 要同步的模組名稱清單，若為空或包含 'all' 則同步核心預設項目；支援 '--prod' 切換至正式庫
  */
 export async function syncSeeds(targets = []) {
-  console.log('[Sync] 連線至 MongoDB...');
+  const { targetDbName, filteredTargets } = resolveTargetDbAndTargets(targets);
+  const mongoURI = process.env.MONGODB_URI || `mongodb://127.0.0.1:27017/${targetDbName}`;
+
+  console.log(`[Sync] 準備連線至 MongoDB 資料庫: [${targetDbName}]...`);
   try {
     await mongoose.connect(mongoURI, {
-      dbName: 'AetherImmersion',
+      dbName: targetDbName,
       serverSelectionTimeoutMS: 8000,
     });
-    console.log('[Sync] 資料庫連線成功！');
+    console.log(`[Sync] 資料庫 [${targetDbName}] 連線成功！`);
 
-    const cleanTargets = targets
+    const cleanTargets = filteredTargets
       .map((t) => t.toLowerCase().trim())
       .filter(Boolean);
 

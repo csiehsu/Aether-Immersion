@@ -95,7 +95,7 @@ export const checkCanSubmitQuest = (qDef, pQuest, inventory = []) => {
         return false;
       }
     }
-    if (obj.type === 'VISIT_LOCATION') {
+    if (obj.type === 'VISIT_LOCATION' || obj.type === 'ARRIVE_LOCATION') {
       const prog = pQuest.progress?.[idx];
       if (prog && !prog.isCompleted && prog.currentCount < (obj.requiredCount || 1)) {
         return false;

@@ -909,20 +909,40 @@ GOOGLE_CLIENT_ID=your_google_client_id.apps.googleusercontent.com
 ```
 *(若未設定 Google Client ID，系統將自動啟動 Demo 模擬登入模式供開發測試)*
 
-### 3. 啟動後端 Express API 伺服器
+> [!TIP]
+> **資料庫環境自動隔離機制**：
+> - **本機開發環境**（預設）：伺服器會自動連線至 `AetherImmersion_dev` 資料庫，確保開發與測試行為絕不污染線上玩家真實紀錄。
+> - **雲端正式環境**（Render，設定 `NODE_ENV=production`）：伺服器自動連線至 `AetherImmersion` 正式玩家資料庫。
+> - **自訂切換**：可隨時在 `.env` 加入 `MONGODB_DB_NAME=您的資料庫名稱` 覆蓋預設行為。
+
+### 3. 種子資料同步 (Seeds Sync)
+當遊戲的地圖、生物或道具設定有調整時，可透過以下指令同步至資料庫：
+```bash
+# 同步至【開發測試庫】(AetherImmersion_dev)
+npm run seed:sync
+# 或指定同步特定模組至開發庫
+node server/scripts/syncSeedsToDb.js locations
+
+# 同步至【線上正式庫】(AetherImmersion)
+npm run seed:sync:prod
+# 或指定同步特定模組至正式庫
+node server/scripts/syncSeedsToDb.js locations --prod
+```
+
+### 4. 啟動後端 Express API 伺服器
 ```bash
 node server/index.js
 ```
 - API 服務網址：`http://localhost:5000`
 - 健康檢查端點：`http://localhost:5000/api/health`
 
-### 4. 啟動前端 Vite 開發伺服器
+### 5. 啟動前端 Vite 開發伺服器
 ```bash
 npm run dev
 ```
 - 前端網頁介面：`http://localhost:5173`
 
-### 5. 語法檢查與生產環境打包測試
+### 6. 語法檢查與生產環境打包測試
 ```bash
 # 執行 ESLint 程式碼檢查
 npm run lint

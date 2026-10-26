@@ -1516,6 +1516,36 @@ router.post('/player/travel', async (req, res) => {
       player.markModified('knownLocations');
     }
 
+    // 檢查是否有進行中的任務目標包含抵達該地點
+    if (Array.isArray(player.quests) && player.quests.length > 0) {
+      const dbQuests = await Quest.find({});
+      let hasQuestUpdate = false;
+      for (const q of player.quests) {
+        if (q.status !== 'IN_PROGRESS') continue;
+        const qDef = (dbQuests || []).find((def) => def.questId === q.questId);
+        if (!qDef) continue;
+        (qDef.objectives || []).forEach((obj, objIdx) => {
+          if (
+            (obj.type === 'VISIT_LOCATION' || obj.type === 'ARRIVE_LOCATION') &&
+            (obj.targetId === targetLocationId || obj.targetLocationId === targetLocationId)
+          ) {
+            let prog = (q.progress || []).find((p) => p.objectiveIndex === objIdx);
+            if (!prog) {
+              prog = { objectiveIndex: objIdx, currentCount: 0, isCompleted: false };
+              q.progress = q.progress || [];
+              q.progress.push(prog);
+            }
+            prog.currentCount = Math.max(prog.currentCount || 0, 1);
+            prog.isCompleted = true;
+            hasQuestUpdate = true;
+          }
+        });
+      }
+      if (hasQuestUpdate) {
+        player.markModified('quests');
+      }
+    }
+
     await player.save();
     return res.json({ success: true, source: 'mongodb', data: formatPlayerResponse(player) });
   } catch (err) {
