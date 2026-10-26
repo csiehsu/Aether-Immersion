@@ -930,3 +930,32 @@ npm run lint
 # 執行 Vite 生產打包構建
 npm run build
 ```
+
+---
+
+## ☁️ 5. 雲端正式環境部署指南 (Render 全端一體化託管)
+
+本專案支援將前後端整合於單一 Node.js Web Service 部署於 [Render](https://render.com/)，具備企業級 SOC 2 資安防護、零跨網域 (CORS) 問題與全自動 HTTPS 憑證。
+
+### 1. Render Web Service 設定參數
+- **Environment**: `Node`
+- **Region**: 建議選擇 `Singapore` 或 `Oregon`（離台灣與亞洲延遲較低）
+- **Branch**: `main`
+- **Build Command**: `npm install && npm run build`
+- **Start Command**: `npm start`
+- **Plan**: `Free`（或 Starter）
+
+### 2. Render 環境變數 (Environment Variables)
+在 Render 控制台的「Environment」分頁中新增以下密鑰：
+| 變數名稱 | 說明 / 範例值 |
+| :--- | :--- |
+| `NODE_ENV` | `production` |
+| `MONGODB_URI` | 遠端 MongoDB Atlas 完整連線字串 (`mongodb+srv://...`) |
+| `GOOGLE_CLIENT_ID` | Google OAuth Client ID |
+| `VITE_GOOGLE_CLIENT_ID` | 同上（供前端 Vite 編譯注入） |
+
+### 3. Google OAuth 授權網域白名單
+1. 部署完成後，取得 Render 分配之網址（例如 `https://aether-immersion.onrender.com`）。
+2. 前往 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 編輯 OAuth 2.0 用戶端 ID。
+3. 在「**已授權的 JavaScript 來源 (Authorized JavaScript origins)**」新增上述 Render 網址。
+4. 儲存後數分鐘即可直接邀請玩家點擊網址進行遊玩！
