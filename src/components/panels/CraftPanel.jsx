@@ -537,7 +537,7 @@ export const CraftPanel = () => {
                   <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} max={calculatedMaxCraft} />
                   <button
                     type="button"
-                    className="btn-craft"
+                    className={`btn-craft ${isComatose ? 'btn-comatose' : ''}`}
                     disabled={!isReadyToCraft}
                     title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : undefined}
                     onClick={(e) => handleStartCraft(rec, e, isReadyToCraft)}

@@ -37,13 +37,13 @@ AetherImmersion/
 │   │   ├── common/
 │   │   │   └── QuantitySelector.jsx  # 🔢 數量增減調節選擇器元件 (+1/-1, +10/-10, 手動輸入與邊界限制)
 │   │   ├── panels/                   # 遊戲主要操作功能面板
-│   │   │   ├── CraftPanel.jsx        # 🔨 物品製作面板 (配方解鎖檢驗、材料投入槽位、設施檢驗、批量合成)
+│   │   │   ├── CraftPanel.jsx        # 🔨 製作面板 (配方解鎖檢驗、材料投入槽位、設施檢驗、批量合成)
 │   │   │   ├── CreaturesPanel.jsx    # 🐾 區域生物面板 (生物狀態檢視、戰鬥攻擊發起)
-│   │   │   ├── GatherPanel.jsx       # 🌿 區域資源面板 (NPC 互動買賣/戰鬥、資源採集點、場景設施)
-│   │   │   ├── InventoryPanel.jsx    # 🎒 冒險背包面板 (道具詳情、品質、耐久度、營養效果、批量食用、丟棄)
-│   │   │   ├── LocationItemsPanel.jsx# 📍 現場物品面板 (地面掉落物拾取)
-│   │   │   ├── LogPanel.jsx          # 📜 對話與系統紀錄面板 (分類篩選、發送對話、日誌滾動檢視)
-│   │   │   └── MovePanel.jsx         # 🧭 地點移動面板 (相鄰場景路徑移動、負重判定、精力折算提示)
+│   │   │   ├── GatherPanel.jsx       # 🌿 資源面板 (NPC 互動買賣/戰鬥、資源採集點、場景設施)
+│   │   │   ├── InventoryPanel.jsx    # 🎒 背包面板 (道具詳情、品質、耐久度、營養效果、批量食用、丟棄)
+│   │   │   ├── LocationItemsPanel.jsx# 📍 物資面板 (地面掉落物拾取)
+│   │   │   ├── LogPanel.jsx          # 📜 紀錄面板 (分類篩選、發送對話、日誌滾動檢視)
+│   │   │   └── MovePanel.jsx         # 🧭 移動面板 (相鄰場景路徑移動、負重判定、精力折算提示)
 │   │   ├── BottomToolbar.jsx         # 📱 底部行動版功能分頁切換列
 │   │   ├── CollapsiblePanel.jsx      # 📦 可折疊展開通用面板容器外殼 (Glassmorphism 視覺風格)
 │   │   ├── GameInterface.jsx         # 🎮 遊戲主要操作視圖與三欄桌面版/自適應行動版視口容器
@@ -437,7 +437,7 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     actor Player as 玩家
-    participant View as GatherPanel.jsx (區域資源)
+    participant View as GatherPanel.jsx (資源)
     participant Store as useGameStore.js
     participant API as server/routes/api.js (POST /location/repair-building)
     participant DB as MongoDB (Player/Location)

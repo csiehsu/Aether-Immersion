@@ -567,7 +567,7 @@ export const GatherPanel = () => {
                 const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
 
                 const buttonText = isComatose
-                  ? (t.comatoseCannotAct || '昏迷中，無法行動')
+                  ? (t.comatose || (language === 'en' ? 'Comatose' : '昏迷中'))
                   : !hasNonConsumableTools
                   ? (t.missingTools || '缺少需求工具')
                   : !hasEnoughBait
@@ -721,7 +721,7 @@ export const GatherPanel = () => {
                         </div>
                         <button
                           type="button"
-                          className="btn-gather"
+                          className={`btn-gather ${isComatose ? 'btn-comatose' : ''}`}
                           disabled={!canGather}
                           title={buttonText}
                           onClick={(e) => {

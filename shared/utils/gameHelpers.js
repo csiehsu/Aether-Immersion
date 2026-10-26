@@ -255,6 +255,20 @@ export const getDurabilityColor = (percent) => {
 };
 
 /**
+ * 依負重百分比取得進度條顏色。
+ * 規則與物品腐壞機制相同但順序相反（低為綠、高為紅）：
+ * 30% 以下為綠色，31-90% 為黃色，91% 以上或超重為紅色。
+ * @param {number} percent - 負重百分比 (0-100)。
+ * @param {boolean} [isOverburdened=false] - 是否處於負重超載狀態。
+ * @returns {string} 色碼字串。
+ */
+export const getWeightColor = (percent, isOverburdened = false) => {
+  if (isOverburdened || percent > 90) return '#ef4444'; // 紅色
+  if (percent > 30) return '#eab308';                   // 黃色
+  return '#22c55e';                                     // 綠色
+};
+
+/**
  * 判斷指定道具實體或基礎定義是否為永久免損耗道具。
  * 規則：道具實體或基礎定義之 durability 等於 PERMANENT_DURABILITY (-1)。
  * @param {Object} item - 道具實體物件。

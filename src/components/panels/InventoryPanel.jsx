@@ -11,6 +11,7 @@ import {
   compareItemDurability,
   getItemDurabilityPercent,
   getDurabilityColor,
+  getWeightColor,
 } from '../../utils/gameHelpers';
 
 /**
@@ -34,6 +35,7 @@ export const InventoryPanel = () => {
   const currentWeight = calculateCurrentWeight(inventory, items);
   const maxWeight = calculateMaxWeight(player);
   const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
 
   // 相同 ID 的物品統合成一個項目，統計總數量
   const groupedInventory = useMemo(() => {
@@ -86,15 +88,39 @@ export const InventoryPanel = () => {
       headerExtra={
         <div
           style={{
-            fontSize: '0.78rem',
-            fontWeight: 600,
-            color: isOverburdened ? '#ef4444' : '#94a3b8',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
+            gap: '8px',
           }}
         >
-          <span>⚖️ {currentWeight} / {maxWeight} kg</span>
+          <div
+            style={{
+              width: '80px',
+              height: '6px',
+              background: 'rgba(255, 255, 255, 0.15)',
+              borderRadius: '3px',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${weightPercent}%`,
+                height: '100%',
+                background: getWeightColor(weightPercent, isOverburdened),
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <span
+            style={{
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              color: isOverburdened ? '#ef4444' : '#94a3b8',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {currentWeight} / {maxWeight} kg
+          </span>
         </div>
       }
     >

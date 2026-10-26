@@ -105,7 +105,7 @@ export const MovePanel = () => {
               </div>
               <button
                 type="button"
-                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''} ${isMissingItem ? 'btn-missing-item' : ''}`}
+                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''} ${isMissingItem ? 'btn-missing-item' : ''} ${isComatose && !isCurrent ? 'btn-comatose' : ''}`}
                 disabled={isDisabled}
                 onClick={(e) => {
                   e.stopPropagation();

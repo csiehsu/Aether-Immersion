@@ -10,6 +10,8 @@ import {
   roundExp,
   SKILL_EXP_THRESHOLDS,
   MAX_SKILL_LEVEL,
+  getDurabilityColor,
+  getWeightColor,
 } from '../utils/gameHelpers';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/gameConstants';
@@ -26,7 +28,6 @@ export const TopHUD = () => {
   const user = useGameStore((state) => state.user);
   const language = useGameStore((state) => state.language);
   const setLanguage = useGameStore((state) => state.setLanguage);
-  const mongoStatus = useGameStore((state) => state.mongoStatus);
   const viewMode = useGameStore((state) => state.viewMode);
   const setViewMode = useGameStore((state) => state.setViewMode);
   const settleEnergyRecovery = useGameStore((state) => state.settleEnergyRecovery);
@@ -48,6 +49,10 @@ export const TopHUD = () => {
   const maxWeight = calculateMaxWeight(player);
   const isOverburdened = isPlayerOverburdened(player, inventory, items);
   const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
+  const waterVal = player?.stats?.water ?? MAX_WATER;
+  const foodVal = player?.stats?.food ?? MAX_FOOD;
+  const waterPercent = Math.min(100, Math.max(0, (waterVal / MAX_WATER) * 100));
+  const foodPercent = Math.min(100, Math.max(0, (foodVal / MAX_FOOD) * 100));
 
   const statusEffects = player ? getStatusEffects(player) : [];
   const primaryStatus = statusEffects[0] || null;
@@ -181,20 +186,58 @@ export const TopHUD = () => {
                 </div>
               </div>
 
-              <div className="player-details-body">
+              <div className="player-details-body" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div className="status-bar-group hp-group details-hp">
                   <div className="status-bar-info">
                     <span className="bar-label">{t.hp}</span>
                     <span className="bar-val">{player?.hp ?? 0} / {maxHp}</span>
                   </div>
                   <div className="bar-track">
-                    <div className="bar-fill hp-fill" style={{ width: `${hpPercent}%` }}></div>
+                    <div
+                      className="bar-fill"
+                      style={{
+                        width: `${hpPercent}%`,
+                        background: getDurabilityColor(hpPercent),
+                      }}
+                    />
                   </div>
                 </div>
 
-                <div className="status-bar-group details-weight" style={{ marginBottom: '8px' }}>
+                <div className="status-bar-group details-water">
                   <div className="status-bar-info">
-                    <span className="bar-label">⚖️ {language === 'en' ? 'Weight' : '負重'}</span>
+                    <span className="bar-label">{t.waterLabel || (language === 'en' ? 'Water' : '水分')}</span>
+                    <span className="bar-val">{waterVal} / {MAX_WATER}</span>
+                  </div>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{
+                        width: `${waterPercent}%`,
+                        background: getDurabilityColor(waterPercent),
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="status-bar-group details-food">
+                  <div className="status-bar-info">
+                    <span className="bar-label">{t.foodLabel || (language === 'en' ? 'Food' : '飽食')}</span>
+                    <span className="bar-val">{foodVal} / {MAX_FOOD}</span>
+                  </div>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{
+                        width: `${foodPercent}%`,
+                        background: getDurabilityColor(foodPercent),
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="status-bar-group details-weight">
+                  <div className="status-bar-info">
+                    <span className="bar-label">{language === 'en' ? 'Weight' : '負重'}</span>
                     <span className="bar-val" style={{ color: isOverburdened ? '#ef4444' : undefined, fontWeight: isOverburdened ? 700 : undefined }}>
                       {currentWeight} / {maxWeight} kg {isOverburdened ? `(${language === 'en' ? 'Overburdened' : '超重'})` : ''}
                     </span>
@@ -204,42 +247,33 @@ export const TopHUD = () => {
                       className="bar-fill"
                       style={{
                         width: `${weightPercent}%`,
-                        background: isOverburdened ? '#ef4444' : (weightPercent >= 80 ? '#f59e0b' : '#38bdf8'),
+                        background: getWeightColor(weightPercent, isOverburdened),
                       }}
                     />
                   </div>
                 </div>
 
-                <div className="player-details-stats-grid">
-                  <div className="stat-card str">
-                    <span className="stat-icon">💪</span>
-                    <span className="stat-label">{t.strLabel || '力量'}</span>
-                    <span className="stat-value">{player?.stats?.strength ?? player?.str ?? 1}</span>
+                <div style={{ marginTop: '4px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600, marginBottom: '6px' }}>
+                    {language === 'en' ? 'Attributes' : '屬性'}
                   </div>
-                  <div className="stat-card spd">
-                    <span className="stat-icon">⚡</span>
-                    <span className="stat-label">{t.spdLabel || '速度'}</span>
-                    <span className="stat-value">{player?.stats?.speed ?? player?.spd ?? 1}</span>
-                  </div>
-                  <div className="stat-card dex">
-                    <span className="stat-icon">🎯</span>
-                    <span className="stat-label">{t.dexLabel || '精巧'}</span>
-                    <span className="stat-value">{player?.stats?.dexterity ?? player?.dex ?? 1}</span>
-                  </div>
-                  <div className="stat-card def">
-                    <span className="stat-icon">🛡️</span>
-                    <span className="stat-label">{t.defLabel || '防禦'}</span>
-                    <span className="stat-value">{player?.stats?.defense ?? 0}</span>
-                  </div>
-                  <div className="stat-card water">
-                    <span className="stat-icon">💧</span>
-                    <span className="stat-label">{t.waterLabel || '水分'}</span>
-                    <span className="stat-value">{player?.stats?.water ?? MAX_WATER}</span>
-                  </div>
-                  <div className="stat-card food">
-                    <span className="stat-icon">🍖</span>
-                    <span className="stat-label">{t.foodLabel || '飽食'}</span>
-                    <span className="stat-value">{player?.stats?.food ?? MAX_FOOD}</span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px 12px', fontSize: '0.8rem' }}>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>{t.strLabel || (language === 'en' ? 'Strength' : '力量')}{language === 'en' ? ': ' : '：'}</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{player?.stats?.strength ?? player?.str ?? 1}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>{t.spdLabel || (language === 'en' ? 'Speed' : '速度')}{language === 'en' ? ': ' : '：'}</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{player?.stats?.speed ?? player?.spd ?? 1}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>{t.dexLabel || (language === 'en' ? 'Dexterity' : '精巧')}{language === 'en' ? ': ' : '：'}</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{player?.stats?.dexterity ?? player?.dex ?? 1}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#94a3b8' }}>{t.defLabel || (language === 'en' ? 'Defense' : '防禦')}{language === 'en' ? ': ' : '：'}</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{player?.stats?.defense ?? 0}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -310,13 +344,6 @@ export const TopHUD = () => {
               </div>
 
               <div className="settings-menu-body">
-                <div className="menu-setting-item">
-                  <span className="menu-item-label">{t.dbStatusLabel}</span>
-                  <span className={`mongo-badge status-${mongoStatus}`}>
-                    {mongoStatus === 'connected' ? t.mongoConnected : t.mongoOffline}
-                  </span>
-                </div>
-
                 <div className="menu-setting-item">
                   <span className="menu-item-label">{t.accountLinkLabel}</span>
                   <GoogleLoginButton />

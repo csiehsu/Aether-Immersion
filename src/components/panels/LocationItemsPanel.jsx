@@ -100,7 +100,7 @@ export const LocationItemsPanel = () => {
 
   return (
     <CollapsiblePanel
-      title={t.locationItemsTitle || (language === 'en' ? '📍 Location Items' : '📍 現場物品')}
+      title={t.locationItemsTitle || (language === 'en' ? '📍 Supplies' : '📍 物資')}
       className="location-items-panel"
       isOpen={isOpen}
       onToggle={setIsOpen}
@@ -135,7 +135,7 @@ export const LocationItemsPanel = () => {
     >
       {groupedPlacedItems.length === 0 ? (
         <div className="empty-inventory-notice">
-          <span>📍 {language === 'en' ? 'No items at this location.' : '此地點暫無現場物品。'}</span>
+          <span>📍 {language === 'en' ? 'No supplies at this location.' : '此地點暫無物資。'}</span>
         </div>
       ) : (
         <div className="inventory-panel-wrapper">
