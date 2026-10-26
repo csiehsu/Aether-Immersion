@@ -31,6 +31,7 @@ export const InventoryPanel = () => {
 
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [actionQty, setActionQty] = useState(1);
+  const [isDropping, setIsDropping] = useState(false);
 
   const currentWeight = calculateCurrentWeight(inventory, items);
   const maxWeight = calculateMaxWeight(player);
@@ -446,34 +447,46 @@ export const InventoryPanel = () => {
                     <button
                       type="button"
                       className="btn-drop-item"
+                      disabled={isDropping}
                       style={{
-                        background: '#dc2626',
+                        background: isDropping ? '#6b7280' : '#dc2626',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: '4px',
                         padding: '6px 12px',
                         fontSize: '0.8125rem',
                         fontWeight: 600,
-                        cursor: 'pointer',
+                        cursor: isDropping ? 'not-allowed' : 'pointer',
+                        opacity: isDropping ? 0.7 : 1,
                         transition: 'background 0.2s ease',
                       }}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        const currentLocId = player?.location || 'AZURE_BAY_PORT';
-                        const dropCount = isContainer
-                          ? Math.min(actionQty, selectedGroup.totalCount || 1)
-                          : actionQty;
-                        const success = await dropItem(currentLocId, selectedGroup.itemId, dropCount);
-                        if (success) {
-                          if ((selectedGroup.totalCount || 1) <= dropCount) {
-                            setSelectedItemId(null);
-                          } else {
-                            setActionQty(1);
+                        if (isDropping || !dropItem) return;
+                        setIsDropping(true);
+                        try {
+                          const currentLocId = player?.location || 'AZURE_BAY_PORT';
+                          const dropCount = isContainer
+                            ? Math.min(actionQty, selectedGroup.totalCount || 1)
+                            : actionQty;
+                          const targetItem = sortedItems[0] || selectedGroup.items[0];
+                          const targetKey = targetItem?.instanceId || selectedGroup.itemId;
+                          const success = await dropItem(currentLocId, targetKey, dropCount);
+                          if (success) {
+                            if ((selectedGroup.totalCount || 1) <= dropCount) {
+                              setSelectedItemId(null);
+                            } else {
+                              setActionQty(1);
+                            }
                           }
+                        } finally {
+                          setIsDropping(false);
                         }
                       }}
                     >
-                      {t.dropBtn || (language === 'en' ? 'Drop' : '丟棄')}
+                      {isDropping
+                        ? (language === 'en' ? 'Dropping...' : '丟棄中...')
+                        : (t.dropBtn || (language === 'en' ? 'Drop' : '丟棄'))}
                     </button>
                   </div>
                 </div>

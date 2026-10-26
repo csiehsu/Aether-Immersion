@@ -28,6 +28,7 @@ export const LocationItemsPanel = () => {
   const [isOpen, setIsOpen] = useState(true);
   const [selectedGroupKey, setSelectedGroupKey] = useState(null);
   const [pickQty, setPickQty] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // 面板展開時每 10 秒自動重新整理同步一次現場物品
   useEffect(() => {
@@ -347,32 +348,56 @@ export const LocationItemsPanel = () => {
                       <button
                         type="button"
                         className="btn-use-item"
-                        style={{ background: '#3b82f6', color: '#ffffff' }}
+                        disabled={isSubmitting}
+                        style={{
+                          background: isSubmitting ? '#4b5563' : '#3b82f6',
+                          color: '#ffffff',
+                          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                          opacity: isSubmitting ? 0.7 : 1,
+                        }}
                         onClick={async (e) => {
                           e.stopPropagation();
-                          if (acceptQuestFromPlacedItem) {
-                            await acceptQuestFromPlacedItem(
-                              selectedGroup.triggerQuestId,
-                              currentLocation.locationId,
-                              selectedGroup.items[0]?.instanceId
-                            );
+                          if (isSubmitting) return;
+                          setIsSubmitting(true);
+                          try {
+                            if (acceptQuestFromPlacedItem) {
+                              await acceptQuestFromPlacedItem(
+                                selectedGroup.triggerQuestId,
+                                currentLocation.locationId,
+                                selectedGroup.items[0]?.instanceId
+                              );
+                            }
+                            setSelectedGroupKey(null);
+                            setPickQty(1);
+                          } finally {
+                            setIsSubmitting(false);
                           }
-                          setSelectedGroupKey(null);
-                          setPickQty(1);
                         }}
                       >
-                        {t.acceptBtn || (language === 'en' ? 'Accept' : '接受')}
+                        {isSubmitting
+                          ? (language === 'en' ? 'Processing...' : '處理中...')
+                          : (t.acceptBtn || (language === 'en' ? 'Accept' : '接受'))}
                       </button>
                     ) : (
                       <>
                         <button
                           type="button"
                           className="btn-use-item"
-                          style={{ background: '#10b981', color: '#ffffff' }}
+                          disabled={isSubmitting}
+                          style={{
+                            background: isSubmitting ? '#4b5563' : '#10b981',
+                            color: '#ffffff',
+                            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                            opacity: isSubmitting ? 0.7 : 1,
+                          }}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            if (pickUpPlacedItem) {
-                              const targetKey = selectedGroup.itemId;
+                            if (isSubmitting || !pickUpPlacedItem) return;
+                            setIsSubmitting(true);
+                            try {
+                              // 優先傳入所選堆疊第一筆實體的 instanceId，若無則傳 itemId
+                              const targetItem = sortedItems[0] || selectedGroup.items[0];
+                              const targetKey = targetItem?.instanceId || selectedGroup.itemId;
                               const success = await pickUpPlacedItem(
                                 currentLocation.locationId,
                                 targetKey,
@@ -384,17 +409,23 @@ export const LocationItemsPanel = () => {
                                 }
                                 setPickQty(1);
                               }
+                            } finally {
+                              setIsSubmitting(false);
                             }
                           }}
                         >
-                          {t.pickupBtn || (language === 'en' ? 'Pick Up' : '撿起')}
+                          {isSubmitting
+                            ? (language === 'en' ? 'Picking up...' : '拾取中...')
+                            : (t.pickupBtn || (language === 'en' ? 'Pick Up' : '撿起'))}
                         </button>
                         <button
                           type="button"
                           className="btn-use-item"
+                          disabled={isSubmitting}
                           style={{ background: '#475569', color: '#ffffff' }}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (isSubmitting) return;
                             setSelectedGroupKey(null);
                             setPickQty(1);
                           }}

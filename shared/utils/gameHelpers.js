@@ -199,10 +199,69 @@ export const areBonusNutritionsEqual = (bonusA, bonusB) => {
   return true;
 };
 
+export const FRESHNESS_TIERS = {
+  FRESH: 'FRESH',      // 新鮮: > 90%
+  STALE: 'STALE',      // 普通/熟成: 31% ~ 90%
+  SPOILING: 'SPOILING',// 臨期: 1% ~ 30%
+  ROTTED: 'ROTTED',    // 腐敗: <= 0%
+};
+
 /**
- * 檢查兩件道具是否符合堆疊規則（同一 itemId、相同客製名稱、相同附加營養、相容耐久度）。
+ * 取得道具的保鮮等級 (Freshness Tier)。
+ * 規則與進度條紅黃綠三色對齊：
+ * > 90% -> FRESH (綠色)
+ * 31% ~ 90% -> STALE (黃色)
+ * 1% ~ 30% -> SPOILING (紅色)
+ * <= 0% -> ROTTED (已腐敗)
+ * @param {number} durability - 當前耐久度
+ * @param {number} maxDurability - 最大耐久度
+ * @returns {string} FRESH | STALE | SPOILING | ROTTED
+ */
+export const getFreshnessTier = (durability, maxDurability) => {
+  const cur = Number(durability) || 0;
+  const max = Number(maxDurability) || cur || 1;
+  if (cur <= 0) return FRESHNESS_TIERS.ROTTED;
+  const percent = Math.round((cur / max) * 100);
+  if (percent > 90) return FRESHNESS_TIERS.FRESH;
+  if (percent > 30) return FRESHNESS_TIERS.STALE;
+  return FRESHNESS_TIERS.SPOILING;
+};
+
+/**
+ * 計算兩組相同物品合併時的加權平均耐久度與最大耐久度。
+ * 公式：weighted = round((durA * countA + durB * countB) / (countA + countB))
+ * @param {number} durA - A 組當前耐久度
+ * @param {number} maxA - A 組最大耐久度
+ * @param {number} countA - A 組數量
+ * @param {number} durB - B 組當前耐久度
+ * @param {number} maxB - B 組最大耐久度
+ * @param {number} countB - B 組數量
+ * @returns {{ durability: number, maxDurability: number }}
+ */
+export const calculateWeightedDurability = (durA, maxA, countA, durB, maxB, countB) => {
+  const cA = Math.max(1, Number(countA) || 1);
+  const cB = Math.max(1, Number(countB) || 1);
+  const totalCount = cA + cB;
+  const dA = Number(durA) || 0;
+  const dB = Number(durB) || 0;
+  const mA = Number(maxA) || dA || 1;
+  const mB = Number(maxB) || dB || 1;
+
+  const weightedDur = Math.max(1, Math.round((dA * cA + dB * cB) / totalCount));
+  const weightedMax = Math.max(weightedDur, Math.round((mA * cA + mB * cB) / totalCount));
+
+  return { durability: weightedDur, maxDurability: weightedMax };
+};
+
+/**
+ * 檢查兩件道具是否符合堆疊規則。
+ * 1. 同一 itemId、相同客製名稱、相同附加營養、非帶內容物容器。
+ * 2. 腐壞消耗品：同一保鮮檔位 (FRESH / STALE / SPOILING) 允許堆疊。
+ * 3. 非腐壞耐用裝備：durability > 0 維持獨立實體，不可堆疊。
+ * 4. 無耐久道具：一律可堆疊。
  * @param {Object} itemA
  * @param {Object} itemB
+ * @param {Array<Object>} [dbItems=[]]
  * @returns {boolean}
  */
 export const canItemsStack = (itemA, itemB, dbItems = []) => {
@@ -232,10 +291,24 @@ export const canItemsStack = (itemA, itemB, dbItems = []) => {
     return false;
   }
 
+  const dbItem = Array.isArray(dbItems) ? dbItems.find((d) => d.itemId === idA) : null;
+  const isDecayA = isDecayItem(itemA, dbItem);
+  const isDecayB = isDecayItem(itemB, dbItem);
+
+  // 若為腐壞道具：相同保鮮檔位 (Tier) 允許堆疊合併
+  if (isDecayA && isDecayB) {
+    const tierA = getFreshnessTier(itemA.durability, itemA.maxDurability);
+    const tierB = getFreshnessTier(itemB.durability, itemB.maxDurability);
+    if (tierA === FRESHNESS_TIERS.ROTTED || tierB === FRESHNESS_TIERS.ROTTED) {
+      return false;
+    }
+    return tierA === tierB;
+  }
+
   const durA = itemA.durability !== undefined && itemA.durability !== null && itemA.durability > 0 ? itemA.durability : -1;
   const durB = itemB.durability !== undefined && itemB.durability !== null && itemB.durability > 0 ? itemB.durability : -1;
 
-  // 具有耐久度的道具 (durability > 0) 一律獨立計算，不可堆疊
+  // 具有耐久度且非腐敗之耐久裝備 (如武器、鎬、工具)，仍維持獨立實體不可堆疊
   if (durA > 0 || durB > 0) {
     return false;
   }
@@ -513,7 +586,45 @@ export const settleItemDecay = (items = [], allDbItems = [], options = {}) => {
     }
   }
 
-  return { updatedItems, rottedItems, isChanged };
+  // 跨檔位降級後的同檔位自動整併 (依加權平均耐久度合併同檔位堆疊)
+  const consolidatedItems = [];
+  for (const item of updatedItems) {
+    const dbItem = dbItemMap.get(item.itemId);
+    if (!isDecayItem(item, dbItem)) {
+      consolidatedItems.push(item);
+      continue;
+    }
+    const matchIdx = consolidatedItems.findIndex((c) => canItemsStack(c, item, allDbItems));
+    if (matchIdx >= 0) {
+      const existing = consolidatedItems[matchIdx];
+      const oldCount = existing.count || 1;
+      const addCount = item.count || 1;
+      const newTotal = oldCount + addCount;
+      const weighted = calculateWeightedDurability(
+        existing.durability,
+        existing.maxDurability,
+        oldCount,
+        item.durability,
+        item.maxDurability,
+        addCount
+      );
+      consolidatedItems[matchIdx] = {
+        ...existing,
+        count: newTotal,
+        durability: weighted.durability,
+        maxDurability: weighted.maxDurability,
+        lastDecayedAt: new Date(Math.max(
+          new Date(existing.lastDecayedAt || now).getTime(),
+          new Date(item.lastDecayedAt || now).getTime()
+        )).toISOString(),
+      };
+      isChanged = true;
+    } else {
+      consolidatedItems.push(item);
+    }
+  }
+
+  return { updatedItems: consolidatedItems, rottedItems, isChanged };
 };
 
 /**
@@ -801,22 +912,31 @@ export const checkTravelRequirements = (connection, inventory = [], allDbItems =
 
 /**
  * 依堆疊規則將道具新增至地面放置物清單 (placedItems)。
- * 若完全符合堆疊條件則合併數量，否則新增獨立實體。耐久度道具一律為獨立實體。
+ * 1. 容器或帶內容物道具：維持獨立實體。
+ * 2. 具有耐久度且非腐壞之裝備/工具：維持獨立實體。
+ * 3. 腐壞消耗品：同一保鮮檔位 (FRESH / STALE / SPOILING) 自動堆疊合併，並採加權平均耐久度。
+ * 4. 無耐久道具：自動堆疊合併。
  * @param {Array<Object>} [placedItems=[]]
  * @param {Object} itemToAdd
+ * @param {Array<Object>} [dbItems=[]]
  * @returns {Array<Object>}
  */
 export const addItemToPlacedItems = (placedItems = [], itemToAdd, dbItems = []) => {
   const updated = (placedItems || []).map((p) => (p && p.toObject ? p.toObject() : { ...p }));
   const addCount = Math.max(1, Number(itemToAdd.count) || 1);
-  const isDurabilityItem = itemToAdd.durability !== undefined && itemToAdd.durability !== null && itemToAdd.durability > 0;
+  const dbItem = Array.isArray(dbItems) ? dbItems.find((d) => d.itemId === itemToAdd.itemId) : null;
+  const isDecay = isDecayItem(itemToAdd, dbItem);
+
   const isContainerItem = Boolean(
     itemToAdd.isContainer ||
     (itemToAdd.contents && (itemToAdd.contents.itemId || itemToAdd.contents.amount > 0)) ||
     (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === itemToAdd.itemId && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
   );
 
-  if (isDurabilityItem || isContainerItem) {
+  // 非腐敗但具有耐久度的裝備/工具，或者容器，維持獨立實體
+  const isEquipDurabilityItem = !isDecay && itemToAdd.durability !== undefined && itemToAdd.durability !== null && itemToAdd.durability > 0;
+
+  if (isEquipDurabilityItem || isContainerItem) {
     for (let k = 0; k < addCount; k++) {
       updated.push({
         instanceId: (k === 0 && itemToAdd.instanceId) ? itemToAdd.instanceId : generateInstanceId(),
@@ -836,11 +956,39 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd, dbItems = []) 
     return updated;
   }
 
+  // 嘗試堆疊 (同檔位腐敗消耗品，或無耐久道具)
   const matchIdx = updated.findIndex((p) => canItemsStack(p, itemToAdd, dbItems));
 
   if (matchIdx >= 0) {
-    updated[matchIdx].count = (updated[matchIdx].count || 1) + addCount;
+    const existing = updated[matchIdx];
+    const oldCount = existing.count || 1;
+    const newTotalCount = oldCount + addCount;
+
+    let mergedDurability = existing.durability;
+    let mergedMaxDurability = existing.maxDurability;
+
+    if (isDecay && existing.durability > 0 && itemToAdd.durability > 0) {
+      const weighted = calculateWeightedDurability(
+        existing.durability,
+        existing.maxDurability,
+        oldCount,
+        itemToAdd.durability,
+        itemToAdd.maxDurability,
+        addCount
+      );
+      mergedDurability = weighted.durability;
+      mergedMaxDurability = weighted.maxDurability;
+    }
+
+    updated[matchIdx] = {
+      ...existing,
+      count: newTotalCount,
+      durability: mergedDurability,
+      maxDurability: mergedMaxDurability,
+      lastDecayedAt: itemToAdd.lastDecayedAt ? new Date(itemToAdd.lastDecayedAt).toISOString() : (existing.lastDecayedAt || new Date().toISOString()),
+    };
   } else {
+    // 新增為單一堆疊實體 (count: addCount)
     updated.push({
       instanceId: itemToAdd.instanceId || generateInstanceId(),
       itemId: itemToAdd.itemId,
@@ -859,7 +1007,11 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd, dbItems = []) 
 };
 
 /**
- * 統一將道具新增至背包陣列；若相同 itemId 且屬性相同則增加堆疊數量，否則新增實體。耐久度道具一律各自為獨立實體。
+ * 統一將道具新增至背包陣列。
+ * 1. 容器或帶內容物道具：維持獨立實體。
+ * 2. 具有耐久度且非腐壞之裝備/工具：維持獨立實體。
+ * 3. 腐壞消耗品：同一保鮮檔位 (FRESH / STALE / SPOILING) 自動堆疊合併，並採加權平均耐久度。
+ * 4. 無耐久道具：自動堆疊合併。
  * @param {Array<Object>} [inventory=[]] - 現有背包陣列。
  * @param {string} itemId - 道具識別碼。
  * @param {number} [count=1] - 增加的道具數量。
@@ -878,12 +1030,7 @@ export const addItemToPlacedItems = (placedItems = [], itemToAdd, dbItems = []) 
 export const addItemsToInventory = (inventory = [], itemId, count = 1, options = {}, dbItems = []) => {
   const addQty = Math.max(1, Number(count) || 1);
   const updated = [...inventory];
-  const isDurabilityItem = options.durability !== undefined && options.durability !== null && options.durability > 0;
-  const isContainerItem = Boolean(
-    options.isContainer ||
-    (options.contents && (options.contents.itemId || options.contents.amount > 0)) ||
-    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === itemId && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
-  );
+  const dbItem = Array.isArray(dbItems) ? dbItems.find((d) => d.itemId === itemId) : null;
   const targetItem = {
     itemId,
     customName: options.customName || '',
@@ -894,10 +1041,19 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
     maxDurability: options.maxDurability,
     quality: options.quality || '普通',
   };
+  const isDecay = isDecayItem(targetItem, dbItem);
 
+  const isContainerItem = Boolean(
+    options.isContainer ||
+    (options.contents && (options.contents.itemId || options.contents.amount > 0)) ||
+    (Array.isArray(dbItems) && dbItems.some((d) => d.itemId === itemId && (Array.isArray(d.type) ? d.type.includes('CONTAINER') : d.type === 'CONTAINER')))
+  );
+
+  // 非腐敗但具有耐久度的裝備/工具，或者容器，維持獨立實體
+  const isEquipDurabilityItem = !isDecay && options.durability !== undefined && options.durability !== null && options.durability > 0;
   const itemLastDecayedAt = options.lastDecayedAt ? new Date(options.lastDecayedAt).toISOString() : new Date().toISOString();
 
-  if (isDurabilityItem || isContainerItem) {
+  if (isEquipDurabilityItem || isContainerItem) {
     for (let k = 0; k < addQty; k++) {
       updated.push({
         instanceId: (k === 0 && options.instanceId) ? options.instanceId : generateInstanceId(),
@@ -915,35 +1071,57 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
     return updated;
   }
 
+  // 檢查是否可堆疊 (同檔位腐敗道具或無耐久道具)
   const existingIdx = updated.findIndex((i) => canItemsStack(i, targetItem, dbItems));
 
   if (existingIdx >= 0) {
     const existing = updated[existingIdx];
     const oldCount = existing.count || 1;
     const newTotalCount = oldCount + addQty;
+
+    let mergedDurability = existing.durability;
+    let mergedMaxDurability = existing.maxDurability;
+
+    if (isDecay && existing.durability > 0 && options.durability > 0) {
+      const weighted = calculateWeightedDurability(
+        existing.durability,
+        existing.maxDurability,
+        oldCount,
+        options.durability,
+        options.maxDurability,
+        addQty
+      );
+      mergedDurability = weighted.durability;
+      mergedMaxDurability = weighted.maxDurability;
+    }
+
     const updatedItem = {
       ...existing,
       count: newTotalCount,
+      durability: mergedDurability,
+      maxDurability: mergedMaxDurability,
+      lastDecayedAt: options.lastDecayedAt ? new Date(options.lastDecayedAt).toISOString() : (existing.lastDecayedAt || itemLastDecayedAt),
       ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
       ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
       ...(options.quality ? { quality: options.quality } : {}),
     };
-
     updated[existingIdx] = updatedItem;
-  } else {
-    updated.push({
-      instanceId: options.instanceId || generateInstanceId(),
-      itemId,
-      count: addQty,
-      durability: options.durability !== undefined ? options.durability : -1,
-      maxDurability: options.maxDurability !== undefined ? options.maxDurability : -1,
-      quality: options.quality || '普通',
-      lastDecayedAt: itemLastDecayedAt,
-      ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
-      ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
-    });
+    return updated;
   }
 
+  // 新增獨立堆疊
+  updated.push({
+    instanceId: options.instanceId || generateInstanceId(),
+    itemId,
+    count: addQty,
+    durability: options.durability !== undefined ? options.durability : -1,
+    maxDurability: options.maxDurability !== undefined && options.maxDurability > 0 ? options.maxDurability : (options.durability > 0 ? options.durability : -1),
+    quality: options.quality || '普通',
+    lastDecayedAt: itemLastDecayedAt,
+    ...(options.contents ? { contents: { ...options.contents } } : {}),
+    ...(targetItem.customName ? { customName: targetItem.customName, customNameEn: targetItem.customNameEn } : {}),
+    ...(targetItem.bonusNutrition ? { bonusNutrition: targetItem.bonusNutrition } : {}),
+  });
   return updated;
 };
 

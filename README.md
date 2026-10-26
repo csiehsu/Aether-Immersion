@@ -160,16 +160,27 @@ AetherImmersion/
 
 ### 7. 道具腐壞與保鮮機制 (Item Freshness & Decay System)
 - **易腐道具定義**：`isDecayItem` 判定定義包含 `DECAY` 且具備有效耐久度之道具（如生鮮魚肉、料理菜餚等）。
-- **分鐘級時間戳遞減**：以道具獨立的 `lastDecayedAt` 時間戳為準，每經過 1 分鐘扣除 1 點耐久度，未滿 1 分鐘的零頭毫秒數精確保留於時間戳中。
+- **保鮮度分級桶堆疊與加權平均耐久度 (Quality Tier Buckets)**：
+  - 易腐消耗品依照目前耐久比例劃分為 **3 個保鮮檔位**：
+    - 🟢 **新鮮 (Fresh)**：耐久比例 `> 90%`（綠色）
+    - 🟡 **熟成/普通 (Stale)**：耐久比例 `31% ～ 90%`（黃色）
+    - 🔴 **臨期 (Spoiling)**：耐久比例 `1% ～ 30%`（紅色）
+    - 🪦 **腐敗 (Rotted)**：耐久比例 `<= 0%`（自動銷毀移除）
+  - **堆疊與加權平均規則**：處於同一保鮮檔位的同種物品**允許合併堆疊**，合併時採用**加權平均耐久度**：
+    $$\text{newDurability} = \text{Math.round}\left(\frac{\text{count}_A \times \text{dur}_A + \text{count}_B \times \text{dur}_B}{\text{count}_A + \text{count}_B}\right)$$
+    不同檔位彼此隔離不混堆，確保同地點/同背包同種物品**最多僅有 3 個堆疊**，徹底壓縮陣列物件體積。
+- **跨檔位衰減與自動整併**：每經過 1 分鐘扣除 1 點耐久度；當堆疊隨時間流逝跨越門檻降級時，若背包或地面已存在同檔位物品，自動以加權平均進行無縫整併。
 - **腐壞清理與通知**：耐久度扣至 <= 0 自動銷毀；背包物品腐壞輸出系統日誌「[道具名稱]已腐敗。」；地面物品腐壞靜默移除。
 - **後端權威定時心跳結算**：前端由 `TopHUD` 偵測背包易腐道具時間差達 1 分鐘或切換可視狀態 (`visibilitychange`) 時發送 `POST /api/player/heartbeat`，由後端執行 `settlePlayerInventoryDecay` 並即時寫入資料庫；後端在所有核心 API 前置亦進行安全強制結算，杜絕用戶端全量覆寫造成的道具遺失。
 
 ### 8. 地面放置物與遺留拾取機制 (Placed Items & Dropping System)
 - **丟棄道具 (`POST /player/drop-item`)**：
-  - 驗證玩家當前位置與地點一致，優先丟棄低耐久道具。
-  - 完整保留道具實體屬性（耐久、品質、自訂名稱、附加營養、容器內裝物、腐敗時間戳），移至場景地面 `location.placedItems`。
+  - 驗證玩家目前位置與地點一致，優先丟棄低耐久道具。
+  - 受後端玩家動作鎖（Action Mutex）保護，同檔位易腐道具自動加權合併進地面既有堆疊。
+  - 前端丟棄按鈕具備防連點狀態（`isDropping`），發送中禁用按鈕防止重複送出。
 - **拾取道具 (`POST /location/pickup-item`)**：
-  - 優先挑選耐久度最高（`desc`）的道具移入玩家背包。
+  - 前端以所選堆疊之特定 `instanceId` 精確拾取，受後端動作鎖串行排隊保護。
+  - 前端拾取按鈕具備防連點狀態（`isSubmitting`），發送中禁用按鈕防止並發競態導致的道具增殖。
 
 ### 9. 配方解鎖機制 (Recipe Unlock System)
 - **主要解鎖途徑**：
@@ -689,10 +700,14 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/player/drop-item')`
   - 核心輔助：`src/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemToPlacedItems()`
 - **關鍵功能與運作機制**：
-  1. **位置防偽檢驗**：後端嚴格驗證玩家當前所在場景 `player.location` 必須與請求丟棄的地點 `locationId` 完全一致。
+  1. **位置防偽檢驗**：後端嚴格驗證玩家目前所在場景 `player.location` 必須與請求丟棄的地點 `locationId` 完全一致。
   2. **優先丟棄低耐久道具**：透過 `compareItemDurability` 排序，優先扣減耐久度最低的實體道具。
-  3. **完整實體屬性封裝**：被丟棄的道具實體完整保留所有 metadata（包括 `instanceId`、當前與最大耐久度 `durability`/`maxDurability`、品質 `quality`、自訂修飾名稱 `customName`/`customNameEn`、料理附加營養 `bonusNutrition`、水壺容器內裝內容物 `contents` 以及腐敗基準時間戳 `lastDecayedAt`）。
-  4. **現場地面物品堆疊或獨立生成**：呼叫 `addItemToPlacedItems`：有耐久度的道具在地面維持獨立實體；無耐久度的道具則自動與地面同類道具堆疊計數。
+  3. **完整實體屬性封裝**：被丟棄的道具實體完整保留所有 metadata（包括 `instanceId`、目前與最大耐久度 `durability`/`maxDurability`、品質 `quality`、自訂修飾名稱 `customName`/`customNameEn`、料理附加營養 `bonusNutrition`、水壺容器內裝內容物 `contents` 以及腐敗基準時間戳 `lastDecayedAt`）。
+  4. **保鮮分級桶與加權堆疊生成**：呼叫 `addItemToPlacedItems`：
+     - 易腐消耗品：若地面已存在相同保鮮檔位（新鮮、普通、臨期）的物品，自動以**加權平均耐久度**合併數量。
+     - 容器與耐用裝備（非易腐耐久品）：維持獨立實體。
+     - 無耐久道具：自動與地面同類道具堆疊計數。
+  5. **前後端並發保護**：前端介面於丟棄期間啟用 `isDropping` 停用按鈕防連點；後端以 `runPlayerActionWithLock` 串行排隊執行，防範多重丟棄覆寫。
 
 ---
 
@@ -708,14 +723,16 @@ sequenceDiagram
     participant Helper as gameHelpers.js
 
     Player->>View: 點擊地面物品清單中的「撿起」
+    View->>View: 鎖定按鈕 (isSubmitting = true)
     View->>Store: pickUpPlacedItem(locationId, instanceId, count)
     Store->>API: POST /api/location/pickup-item { locationId, instanceId, count }
+    API->>API: 進入玩家 Action Mutex 排隊鎖
     API->>Helper: settleLocationPlacedItemsDecay / settlePlayerInventoryDecay
-    API->>Helper: compareItemDurability(..., 'desc') 優先選取最高耐久物品
-    API->>API: 從 location.placedItems 扣除或刪除該道具
-    API->>API: grantItemsToPlayer 移入玩家背包 (繼承原 metadata 並自動觸發配方解鎖)
+    API->>API: 精確以 instanceId 扣除地面該檔位堆疊
+    API->>API: grantItemsToPlayer 移入玩家背包 (同檔位加權平均堆疊並觸發配方解鎖)
     API-->>Store: 回傳更新後資料 (含 locations 與 newlyUnlockedRecipes)
     Store->>Store: applyPlayerData(data, { locations }), logNewlyUnlockedRecipes(newlyUnlockedRecipes)
+    View->>View: 解除按鈕鎖定 (isSubmitting = false)
 ```
 
 - **涉及檔案與函式**：
@@ -724,9 +741,10 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/location/pickup-item')`, `grantItemsToPlayer()`
   - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **優選高品質與高耐久道具**：當地面存在多件同類物品時，後端排序優先挑選耐久度最高（`compareItemDurability(a, b, 'desc')`）的物品供玩家拾起。
-  2. **現場物品轉移與背包堆疊**：從場景 `location.placedItems` 陣列中扣減或刪除該物品，透過 `grantItemsToPlayer` 統一將其轉移入玩家背包 `player.inventory`，繼承所有原始 metadata（當前耐久度、品質、容器內容物等）。
+  1. **優選高品質與高耐久道具**：當地面存在多件同類物品時，前端優先指定耐久度最高（`sortedItems[0]`）的實體堆疊移入玩家背包。
+  2. **現場物品轉移與背包加權堆疊**：從場景 `location.placedItems` 陣列中精確扣減該堆疊，透過 `grantItemsToPlayer` 統一將其轉移入玩家背包 `player.inventory`；若背包已有同檔位物品則自動採**加權平均耐久度**合併，繼承原始 metadata。
   3. **拾取觸發配方解鎖**：透過 `grantItemsToPlayer` 統一發放道具，拾取入包時自動比對 `recipe.triggerItem`，若吻合即時解鎖新配方，並由前端輸出「這好像可以做成[配方名稱]。」提示日誌。
+  4. **前後端並發防護**：前端啟用 `isSubmitting` 禁用按鈕，後端啟用玩家動作鎖串行排隊，徹底消除競態翻倍增殖。
 
 ---
 
@@ -929,20 +947,40 @@ npm run seed:sync:prod
 node server/scripts/syncSeedsToDb.js locations --prod
 ```
 
-### 4. 啟動後端 Express API 伺服器
+### 4. 正式資料鏡像至測試庫 (Clone Prod to Dev)
+若需將線上真實玩家與地面散落物品複製至本機測試庫進行除錯或堆疊測試：
+```bash
+# 單向鏡像複製 (locations, players, gamelogs) 至 AetherImmersion_dev
+npm run db:clone:dev
+
+# 複製並自動對測試庫現存散落物執行加權平均整併測試
+npm run db:clone:dev:compact
+```
+
+### 5. 線上資料庫批次整併與清理 (Database Consolidation)
+若需對資料庫中現存的散落物品（地面放置物與玩家背包）進行一次性加權堆疊大掃除：
+```bash
+# 整理【本機測試庫】(AetherImmersion_dev)
+npm run db:compact
+
+# 整理【線上正式庫】(AetherImmersion)
+npm run db:compact:prod
+```
+
+### 6. 啟動後端 Express API 伺服器
 ```bash
 node server/index.js
 ```
 - API 服務網址：`http://localhost:5000`
 - 健康檢查端點：`http://localhost:5000/api/health`
 
-### 5. 啟動前端 Vite 開發伺服器
+### 7. 啟動前端 Vite 開發伺服器
 ```bash
 npm run dev
 ```
 - 前端網頁介面：`http://localhost:5173`
 
-### 6. 語法檢查與生產環境打包測試
+### 8. 語法檢查與生產環境打包測試
 ```bash
 # 執行 ESLint 程式碼檢查
 npm run lint

@@ -94,7 +94,7 @@ collectionRoutes.forEach(({ path, model, initialData }) => {
         if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
         for (const loc of result.data) {
           if (loc.placedItems && loc.placedItems.length > 0) {
-            await settleLocationPlacedItemsDecay(loc, allDbItems);
+            await settleLocationPlacedItemsDecay(loc, allDbItems, false);
           }
         }
       }
@@ -160,12 +160,40 @@ const settlePlayerInventoryDecay = async (player, allDbItems) => {
 };
 
 /**
+ * 玩家動作非同步排隊互斥鎖 (Action Mutex Queue)。
+ * 確保同一玩家的敏感資料庫讀寫操作 (如丟棄、拾取、移動) 依序串行執行，
+ * 徹底杜絕因前端連點產生的並發舊快照覆蓋與道具增殖。
+ */
+const playerActionLocks = new Map();
+
+const runPlayerActionWithLock = async (playerId, taskFn) => {
+  if (!playerId) return taskFn();
+  const prevPromise = playerActionLocks.get(playerId) || Promise.resolve();
+  let release;
+  const currentPromise = new Promise((resolve) => {
+    release = resolve;
+  });
+  playerActionLocks.set(playerId, currentPromise);
+
+  try {
+    await prevPromise;
+    return await taskFn();
+  } finally {
+    release();
+    if (playerActionLocks.get(playerId) === currentPromise) {
+      playerActionLocks.delete(playerId);
+    }
+  }
+};
+
+/**
  * 結算指定場景中地面放置道具的腐敗狀態，扣至 <= 0 自動刪除，不發送提示訊息。
  * @param {Object} location - 地點 Mongoose 文件物件。
  * @param {Array<Object>} allDbItems - 物品基礎定義清單。
+ * @param {boolean} [shouldSave=true] - 是否立即持久化至資料庫 (唯讀查詢可設為 false)。
  * @returns {Promise<boolean>} 若地面放置道具清單有變更回傳 true，否則回傳 false。
  */
-const settleLocationPlacedItemsDecay = async (location, allDbItems) => {
+const settleLocationPlacedItemsDecay = async (location, allDbItems, shouldSave = true) => {
   if (!location || !location.placedItems || location.placedItems.length === 0) return false;
   const { updatedItems, isChanged } = settleItemDecay(
     location.placedItems,
@@ -175,8 +203,10 @@ const settleLocationPlacedItemsDecay = async (location, allDbItems) => {
 
   if (isChanged) {
     location.placedItems = updatedItems;
-    location.markModified('placedItems');
-    await location.save();
+    if (shouldSave) {
+      location.markModified('placedItems');
+      await location.save();
+    }
   }
 
   return isChanged;
@@ -2317,105 +2347,117 @@ router.post('/location/pickup-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
 
-    const requestedCount = Math.max(1, Number(count) || 1);
-
-    const location = await Location.findOne({ locationId });
-    if (!location) {
-      return res.status(404).json({ success: false, message: '找不到該地點！' });
-    }
-
-    let allDbItems = await Item.find();
-    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
-    await settleLocationPlacedItemsDecay(location, allDbItems);
-    await settlePlayerInventoryDecay(player, allDbItems);
-
-    // 尋找符合 instanceId 或 itemId 的所有地面物品
-    const matchingIndices = [];
-    (location.placedItems || []).forEach((item, idx) => {
-      if (item.instanceId === instanceId || item.itemId === instanceId) {
-        matchingIndices.push(idx);
+    return await runPlayerActionWithLock(player._id.toString(), async () => {
+      // 排隊後重新自資料庫讀取最新狀態，防範並發競態
+      player = await Player.findById(player._id);
+      if (!player) {
+        return res.status(404).json({ success: false, message: '找不到玩家資料！' });
       }
-    });
 
-    if (matchingIndices.length === 0) {
-      return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
-    }
+      const location = await Location.findOne({ locationId });
+      if (!location) {
+        return res.status(404).json({ success: false, message: '找不到該地點！' });
+      }
 
-    // 預設選擇耐久度最高的，若耐久度相同則以資料庫順序為主
-    matchingIndices.sort((idxA, idxB) => {
-      const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
-      if (cmp !== 0) return cmp;
-      return idxA - idxB;
-    });
+      const requestedCount = Math.max(1, Number(count) || 1);
+      let allDbItems = await Item.find();
+      if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+      await settleLocationPlacedItemsDecay(location, allDbItems, true);
+      await settlePlayerInventoryDecay(player, allDbItems);
 
-    const totalAvailable = matchingIndices.reduce(
-      (sum, idx) => sum + (location.placedItems[idx].count || 1),
-      0
-    );
-    const pickQty = Math.max(1, Math.min(requestedCount, totalAvailable));
+      // 優先精確匹配特定 instanceId，若未精確命中再依 itemId 匹配
+      let matchingIndices = [];
+      const exactIndex = (location.placedItems || []).findIndex((item) => item.instanceId === instanceId);
+      if (exactIndex >= 0) {
+        matchingIndices = [exactIndex];
+      } else {
+        (location.placedItems || []).forEach((item, idx) => {
+          if (item.instanceId === instanceId || item.itemId === instanceId) {
+            matchingIndices.push(idx);
+          }
+        });
+      }
 
-    let remainingToPick = pickQty;
-    const indicesToRemove = new Set();
-    const pickedItems = [];
+      if (matchingIndices.length === 0) {
+        return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
+      }
 
-    for (const idx of matchingIndices) {
-      if (remainingToPick <= 0) break;
-      const pItem = location.placedItems[idx];
-      const curCount = pItem.count || 1;
-      const deductCount = Math.min(curCount, remainingToPick);
-
-      pickedItems.push({
-        instanceId: pItem.instanceId,
-        itemId: pItem.itemId,
-        count: deductCount,
-        durability: pItem.durability !== undefined ? pItem.durability : -1,
-        maxDurability: pItem.maxDurability !== undefined ? pItem.maxDurability : -1,
-        quality: pItem.quality || '普通',
-        customName: pItem.customName || '',
-        customNameEn: pItem.customNameEn || '',
-        bonusNutrition: pItem.bonusNutrition ? { ...pItem.bonusNutrition } : undefined,
-        contents: pItem.contents ? { ...pItem.contents } : undefined,
-        triggerQuestId: pItem.triggerQuestId || '',
-        lastDecayedAt: pItem.lastDecayedAt || new Date(),
+      // 預設選擇耐久度最高的，若耐久度相同則以資料庫順序為主
+      matchingIndices.sort((idxA, idxB) => {
+        const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
+        if (cmp !== 0) return cmp;
+        return idxA - idxB;
       });
 
-      remainingToPick -= deductCount;
-      if (curCount <= deductCount) {
-        indicesToRemove.add(idx);
-      } else {
-        pItem.count = curCount - deductCount;
+      const totalAvailable = matchingIndices.reduce(
+        (sum, idx) => sum + (location.placedItems[idx].count || 1),
+        0
+      );
+      const pickQty = Math.max(1, Math.min(requestedCount, totalAvailable));
+
+      let remainingToPick = pickQty;
+      const indicesToRemove = new Set();
+      const pickedItems = [];
+
+      for (const idx of matchingIndices) {
+        if (remainingToPick <= 0) break;
+        const pItem = location.placedItems[idx];
+        const curCount = pItem.count || 1;
+        const deductCount = Math.min(curCount, remainingToPick);
+
+        pickedItems.push({
+          instanceId: pItem.instanceId,
+          itemId: pItem.itemId,
+          count: deductCount,
+          durability: pItem.durability !== undefined ? pItem.durability : -1,
+          maxDurability: pItem.maxDurability !== undefined ? pItem.maxDurability : -1,
+          quality: pItem.quality || '普通',
+          customName: pItem.customName || '',
+          customNameEn: pItem.customNameEn || '',
+          bonusNutrition: pItem.bonusNutrition ? { ...pItem.bonusNutrition } : undefined,
+          contents: pItem.contents ? { ...pItem.contents } : undefined,
+          triggerQuestId: pItem.triggerQuestId || '',
+          lastDecayedAt: pItem.lastDecayedAt || new Date(),
+        });
+
+        remainingToPick -= deductCount;
+        if (curCount <= deductCount) {
+          indicesToRemove.add(idx);
+        } else {
+          pItem.count = curCount - deductCount;
+        }
       }
-    }
 
-    location.placedItems = location.placedItems.filter((_, idx) => !indicesToRemove.has(idx));
-    location.markModified('placedItems');
-    await location.save();
+      location.placedItems = location.placedItems.filter((_, idx) => !indicesToRemove.has(idx));
+      location.markModified('placedItems');
+      await location.save();
 
-    const itemsToAdd = pickedItems.map((pItem) => ({
-      itemId: pItem.itemId,
-      count: pItem.count || 1,
-      options: {
-        instanceId: pItem.instanceId,
-        durability: pItem.durability,
-        maxDurability: pItem.maxDurability,
-        quality: pItem.quality || '普通',
-        customName: pItem.customName || '',
-        customNameEn: pItem.customNameEn || '',
-        bonusNutrition: pItem.bonusNutrition,
-        contents: pItem.contents,
-        lastDecayedAt: pItem.lastDecayedAt,
-      },
-    }));
-    const newlyUnlockedRecipes = await grantItemsToPlayer(player, itemsToAdd, allDbItems);
-    await player.save();
+      const itemsToAdd = pickedItems.map((pItem) => ({
+        itemId: pItem.itemId,
+        count: pItem.count || 1,
+        options: {
+          instanceId: pItem.instanceId,
+          durability: pItem.durability,
+          maxDurability: pItem.maxDurability,
+          quality: pItem.quality || '普通',
+          customName: pItem.customName || '',
+          customNameEn: pItem.customNameEn || '',
+          bonusNutrition: pItem.bonusNutrition,
+          contents: pItem.contents,
+          lastDecayedAt: pItem.lastDecayedAt,
+        },
+      }));
+      const newlyUnlockedRecipes = await grantItemsToPlayer(player, itemsToAdd, allDbItems);
+      await player.save();
 
-    const allLocations = await Location.find({});
-    return res.json({
-      success: true,
-      data: formatPlayerResponse(player),
-      locations: allLocations,
-      newlyUnlockedRecipes,
-      result: { newlyUnlockedRecipes },
+      const allLocations = await Location.find({});
+      return res.json({
+        success: true,
+        data: formatPlayerResponse(player),
+        locations: allLocations,
+        newlyUnlockedRecipes,
+        result: { newlyUnlockedRecipes },
+      });
     });
   } catch (err) {
     console.error('[API Error] POST /api/location/pickup-item:', err);
@@ -2439,96 +2481,109 @@ router.post('/player/drop-item', async (req, res) => {
       return res.status(404).json({ success: false, message: '找不到玩家資料！' });
     }
 
-    if (player.location !== locationId) {
-      return res.status(400).json({ success: false, message: '玩家不在該地點！' });
-    }
-
-    const location = await Location.findOne({ locationId });
-    if (!location) {
-      return res.status(404).json({ success: false, message: '找不到該地點！' });
-    }
-
-    let allDbItems = await Item.find();
-    if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
-    await settlePlayerInventoryDecay(player, allDbItems);
-    await settleLocationPlacedItemsDecay(location, allDbItems);
-
-    player.inventory = sanitizeInventoryItems(player.inventory);
-
-    // 尋找符合 instanceId 或 itemId 的所有背包物品
-    const matchingIndices = [];
-    player.inventory.forEach((item, idx) => {
-      if ((item.instanceId && item.instanceId === itemKey) || item.itemId === itemKey) {
-        matchingIndices.push(idx);
+    return await runPlayerActionWithLock(player._id.toString(), async () => {
+      // 排隊後重新自資料庫讀取最新狀態
+      player = await Player.findById(player._id);
+      if (!player) {
+        return res.status(404).json({ success: false, message: '找不到玩家資料！' });
       }
-    });
 
-    if (matchingIndices.length === 0) {
-      return res.status(400).json({ success: false, message: '背包中沒有該道具！' });
-    }
+      if (player.location !== locationId) {
+        return res.status(400).json({ success: false, message: '玩家不在該地點！' });
+      }
 
-    // 預設選擇耐久度最低的，若耐久度相同則以資料庫順序為主
-    matchingIndices.sort((idxA, idxB) => {
-      const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
-      if (cmp !== 0) return cmp;
-      return idxA - idxB;
-    });
+      const location = await Location.findOne({ locationId });
+      if (!location) {
+        return res.status(404).json({ success: false, message: '找不到該地點！' });
+      }
 
-    const totalAvailable = matchingIndices.reduce(
-      (sum, idx) => sum + (player.inventory[idx].count || 1),
-      0
-    );
-    const dropQty = Math.max(1, Math.min(Number(count) || 1, totalAvailable));
+      let allDbItems = await Item.find();
+      if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
+      await settlePlayerInventoryDecay(player, allDbItems);
+      await settleLocationPlacedItemsDecay(location, allDbItems, true);
 
-    let remainingToDrop = dropQty;
-    const indicesToRemove = new Set();
-    const droppedItems = [];
+      player.inventory = sanitizeInventoryItems(player.inventory);
 
-    for (const idx of matchingIndices) {
-      if (remainingToDrop <= 0) break;
-      const invItem = player.inventory[idx];
-      const curCount = invItem.count || 1;
-      const deductCount = Math.min(curCount, remainingToDrop);
+      // 優先精確匹配特定 instanceId，若未精確命中再依 itemId 匹配
+      let matchingIndices = [];
+      const exactIndex = player.inventory.findIndex((item) => item.instanceId === itemKey);
+      if (exactIndex >= 0) {
+        matchingIndices = [exactIndex];
+      } else {
+        player.inventory.forEach((item, idx) => {
+          if (item.instanceId === itemKey || item.itemId === itemKey) {
+            matchingIndices.push(idx);
+          }
+        });
+      }
 
-      droppedItems.push({
-        instanceId: generateInstanceId(),
-        itemId: invItem.itemId,
-        count: deductCount,
-        durability: invItem.durability !== undefined ? invItem.durability : -1,
-        maxDurability: invItem.maxDurability !== undefined ? invItem.maxDurability : -1,
-        quality: invItem.quality || '普通',
-        customName: invItem.customName || '',
-        customNameEn: invItem.customNameEn || '',
-        bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
-        contents: invItem.contents ? { ...invItem.contents } : undefined,
-        lastDecayedAt: invItem.lastDecayedAt || new Date(),
+      if (matchingIndices.length === 0) {
+        return res.status(400).json({ success: false, message: '背包中沒有該道具！' });
+      }
+
+      // 預設選擇耐久度最低的，若耐久度相同則以資料庫順序為主
+      matchingIndices.sort((idxA, idxB) => {
+        const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
+        if (cmp !== 0) return cmp;
+        return idxA - idxB;
       });
 
-      remainingToDrop -= deductCount;
-      if (curCount <= deductCount) {
-        indicesToRemove.add(idx);
-      } else {
-        invItem.count = curCount - deductCount;
+      const totalAvailable = matchingIndices.reduce(
+        (sum, idx) => sum + (player.inventory[idx].count || 1),
+        0
+      );
+      const dropQty = Math.max(1, Math.min(Number(count) || 1, totalAvailable));
+
+      let remainingToDrop = dropQty;
+      const indicesToRemove = new Set();
+      const droppedItems = [];
+
+      for (const idx of matchingIndices) {
+        if (remainingToDrop <= 0) break;
+        const invItem = player.inventory[idx];
+        const curCount = invItem.count || 1;
+        const deductCount = Math.min(curCount, remainingToDrop);
+
+        droppedItems.push({
+          instanceId: invItem.instanceId || generateInstanceId(),
+          itemId: invItem.itemId,
+          count: deductCount,
+          durability: invItem.durability !== undefined ? invItem.durability : -1,
+          maxDurability: invItem.maxDurability !== undefined ? invItem.maxDurability : -1,
+          quality: invItem.quality || '普通',
+          customName: invItem.customName || '',
+          customNameEn: invItem.customNameEn || '',
+          bonusNutrition: invItem.bonusNutrition ? { ...invItem.bonusNutrition } : undefined,
+          contents: invItem.contents ? { ...invItem.contents } : undefined,
+          lastDecayedAt: invItem.lastDecayedAt || new Date(),
+        });
+
+        remainingToDrop -= deductCount;
+        if (curCount <= deductCount) {
+          indicesToRemove.add(idx);
+        } else {
+          invItem.count = curCount - deductCount;
+        }
       }
-    }
 
-    player.inventory = player.inventory.filter((_, idx) => !indicesToRemove.has(idx));
-    player.markModified('inventory');
+      player.inventory = player.inventory.filter((_, idx) => !indicesToRemove.has(idx));
+      player.markModified('inventory');
 
-    // 依堆疊規則將物品加入現場物品（耐久度道具各自為獨立實體）
-    for (const dItem of droppedItems) {
-      location.placedItems = addItemToPlacedItems(location.placedItems || [], dItem);
-    }
-    location.markModified('placedItems');
+      // 依堆疊規則將物品加入現場物品（同檔位自動加權平均合併）
+      for (const dItem of droppedItems) {
+        location.placedItems = addItemToPlacedItems(location.placedItems || [], dItem, allDbItems);
+      }
+      location.markModified('placedItems');
 
-    await location.save();
-    await player.save();
+      await location.save();
+      await player.save();
 
-    const allLocations = await Location.find({});
-    return res.json({
-      success: true,
-      data: formatPlayerResponse(player),
-      locations: allLocations,
+      const allLocations = await Location.find({});
+      return res.json({
+        success: true,
+        data: formatPlayerResponse(player),
+        locations: allLocations,
+      });
     });
   } catch (err) {
     console.error('[API Error] POST /api/player/drop-item:', err);
