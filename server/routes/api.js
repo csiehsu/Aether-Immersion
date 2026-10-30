@@ -2320,26 +2320,51 @@ router.get('/logs', async (req, res) => {
     }
     const { locationId, playerId } = req.query;
 
-    let query = {};
-    if (locationId || playerId) {
-      const orConditions = [];
-      if (locationId) {
-        orConditions.push({
-          type: { $in: ['dialogue', 'event'] },
-          locationId: String(locationId),
-        });
-      }
-      if (playerId) {
-        orConditions.push({
-          type: 'system',
-          targetPlayerId: String(playerId),
-        });
-      }
-      query = orConditions.length > 0 ? { $or: orConditions } : {};
+    // 若無提供任何過濾參數，預設撈取最新 50 筆
+    if (!locationId && !playerId) {
+      const logs = await GameLog.find({}).sort({ createdAt: -1 }).limit(50);
+      return res.json({ success: true, source: 'mongodb', data: logs });
     }
 
-    const logs = await GameLog.find(query).sort({ createdAt: -1 }).limit(50);
-    return res.json({ success: true, source: 'mongodb', data: logs });
+    // 分開保障配額：地點公開紀錄（對話/事件）最多 50 筆，個人私密系統訊息最多 50 筆，避免對話被大量系統訊息擠壓
+    const queries = [];
+
+    if (locationId) {
+      queries.push(
+        GameLog.find({
+          type: { $in: ['dialogue', 'event'] },
+          locationId: String(locationId),
+        })
+          .sort({ createdAt: -1 })
+          .limit(50)
+      );
+    } else {
+      queries.push(Promise.resolve([]));
+    }
+
+    if (playerId) {
+      queries.push(
+        GameLog.find({
+          type: 'system',
+          targetPlayerId: String(playerId),
+        })
+          .sort({ createdAt: -1 })
+          .limit(50)
+      );
+    } else {
+      queries.push(Promise.resolve([]));
+    }
+
+    const [publicLogs, systemLogs] = await Promise.all(queries);
+
+    // 合併並依 createdAt 降序（最新在前）重新排序
+    const combinedLogs = [...publicLogs, ...systemLogs].sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+
+    return res.json({ success: true, source: 'mongodb', data: combinedLogs });
   } catch (err) {
     console.error('[API Error] GET /api/logs:', err);
     res.status(500).json({ success: false, error: err.message });
