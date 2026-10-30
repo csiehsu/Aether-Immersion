@@ -27,6 +27,7 @@ export const LocationItemsPanel = () => {
 
   const [isOpen, setIsOpen] = useState(true);
   const [selectedGroupKey, setSelectedGroupKey] = useState(null);
+  const [selectedInstanceId, setSelectedInstanceId] = useState(null);
   const [pickQty, setPickQty] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,9 +85,11 @@ export const LocationItemsPanel = () => {
   const handleSelectItem = (key) => {
     if (selectedGroupKey === key) {
       setSelectedGroupKey(null);
+      setSelectedInstanceId(null);
       setPickQty(1);
     } else {
       setSelectedGroupKey(key);
+      setSelectedInstanceId(null);
       setPickQty(1);
     }
   };
@@ -98,6 +101,16 @@ export const LocationItemsPanel = () => {
     if (!selectedGroup) return [];
     return [...selectedGroup.items].sort((a, b) => compareItemDurability(a, b, 'desc'));
   }, [selectedGroup]);
+
+  // 目前所選定的現場目標實體，若未手動選定則預設取排序第一項
+  const activeItem = useMemo(() => {
+    if (!sortedItems.length) return null;
+    if (selectedInstanceId) {
+      const found = sortedItems.find((it) => it.instanceId === selectedInstanceId);
+      if (found) return found;
+    }
+    return sortedItems[0];
+  }, [sortedItems, selectedInstanceId]);
 
   return (
     <CollapsiblePanel
@@ -180,7 +193,7 @@ export const LocationItemsPanel = () => {
           </div>
 
           {selectedGroup && (() => {
-            const repItem = sortedItems[0] || {};
+            const repItem = activeItem || sortedItems[0] || {};
             const dbItem = items.find((i) => i.itemId === selectedGroup.itemId);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : null;
             const isQuestItem = selectedGroup.isQuestItem;
@@ -213,6 +226,9 @@ export const LocationItemsPanel = () => {
               (it) => it.durability !== undefined && it.durability !== null && it.durability > 0
             );
 
+            const maxPickQty = repItem.count || 1;
+            const showQuantitySelector = maxPickQty > 1 && !isQuestItem;
+
             return (
               <div className="inventory-detail-window">
                 {itemDesc ? (
@@ -223,11 +239,11 @@ export const LocationItemsPanel = () => {
                   </p>
                 )}
 
-                {/* 獨立個體小圖示區（不開放點選，上方進度條呈現耐久度色彩，不顯示數字） */}
+                {/* 獨立個體小圖示區（支援手動點選現場實體，上方進度條呈現耐久度色彩，不顯示數字） */}
                 {(sortedItems.length > 1 || hasDurability) && (
                   <div style={{ marginTop: '8px', marginBottom: '8px' }}>
                     <div style={{ fontSize: '0.74rem', color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}>
-                      {language === 'en' ? 'Individual Items:' : '現場實體狀態：'}
+                      {language === 'en' ? 'Select Target Item Entity:' : '選擇目標實體道具：'}
                     </div>
                     <div
                       style={{
@@ -244,23 +260,21 @@ export const LocationItemsPanel = () => {
                         const percent = getItemDurabilityPercent(inst, dbItem);
                         const hasDur = percent >= 0;
                         const durColor = hasDur ? getDurabilityColor(percent) : '#22c55e';
+                        const isSelectedInstance = repItem.instanceId
+                          ? inst.instanceId === repItem.instanceId
+                          : instIdx === 0;
 
                         return (
                           <div
                             key={inst.instanceId || `${inst.itemId}_${instIdx}`}
+                            className={`instance-item-chip ${isSelectedInstance ? 'selected' : ''}`}
                             style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
                               width: '38px',
                               height: '46px',
-                              padding: '3px',
-                              background: 'rgba(255, 255, 255, 0.05)',
-                              borderRadius: '4px',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
-                              cursor: 'default',
-                              userSelect: 'none',
+                            }}
+                            onClick={() => {
+                              setSelectedInstanceId(inst.instanceId);
+                              setPickQty(1);
                             }}
                             title={hasDur ? (language === 'en' ? 'Durability Status' : '耐久度狀態') : ''}
                           >
@@ -330,16 +344,16 @@ export const LocationItemsPanel = () => {
                 })()}
 
                 <div className="detail-action-container">
-                  {selectedGroup.totalCount > 1 && !isQuestItem && (
+                  {showQuantitySelector && (
                     <div className="detail-qty-row">
                       <span className="detail-qty-label">
                         {language === 'en' ? 'Quantity:' : '選取數量：'}
                       </span>
                       <QuantitySelector
-                        value={pickQty}
+                        value={Math.min(pickQty, maxPickQty)}
                         onChange={setPickQty}
                         min={1}
-                        max={selectedGroup.totalCount}
+                        max={maxPickQty}
                       />
                     </div>
                   )}
@@ -364,10 +378,11 @@ export const LocationItemsPanel = () => {
                               await acceptQuestFromPlacedItem(
                                 selectedGroup.triggerQuestId,
                                 currentLocation.locationId,
-                                selectedGroup.items[0]?.instanceId
+                                repItem.instanceId || selectedGroup.items[0]?.instanceId
                               );
                             }
                             setSelectedGroupKey(null);
+                            setSelectedInstanceId(null);
                             setPickQty(1);
                           } finally {
                             setIsSubmitting(false);
@@ -395,17 +410,17 @@ export const LocationItemsPanel = () => {
                             if (isSubmitting || !pickUpPlacedItem) return;
                             setIsSubmitting(true);
                             try {
-                              // 優先傳入所選堆疊第一筆實體的 instanceId，若無則傳 itemId
-                              const targetItem = sortedItems[0] || selectedGroup.items[0];
-                              const targetKey = targetItem?.instanceId || selectedGroup.itemId;
+                              const countToPick = Math.min(pickQty, repItem.count || 1);
+                              const targetKey = repItem.instanceId || selectedGroup.itemId;
                               const success = await pickUpPlacedItem(
                                 currentLocation.locationId,
                                 targetKey,
-                                pickQty
+                                countToPick
                               );
                               if (success) {
-                                if (selectedGroup.totalCount <= pickQty) {
+                                if (selectedGroup.totalCount <= countToPick) {
                                   setSelectedGroupKey(null);
+                                  setSelectedInstanceId(null);
                                 }
                                 setPickQty(1);
                               }
@@ -427,6 +442,7 @@ export const LocationItemsPanel = () => {
                             e.stopPropagation();
                             if (isSubmitting) return;
                             setSelectedGroupKey(null);
+                            setSelectedInstanceId(null);
                             setPickQty(1);
                           }}
                         >

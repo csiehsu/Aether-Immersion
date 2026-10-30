@@ -4,6 +4,27 @@ import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedText } from '../../utils/language';
 
 /**
+ * 根據日誌的 createdAt (UTC 時間戳) 格式化為玩家裝置本機時區之時間字串 (HH:mm:ss)。
+ * 若無 createdAt 則 fallback 至 log.time 或空字串。
+ * @param {{ createdAt?: string | Date, time?: string }} log
+ * @returns {string}
+ */
+const formatLogTime = (log) => {
+  if (log?.createdAt) {
+    const d = new Date(log.createdAt);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+    }
+  }
+  return log?.time || '';
+};
+
+/**
  * 遊戲訊息與對話紀錄面板元件。
  * 支援依類型篩選（全部、對話、系統、事件）與自訂玩家對話文字發送功能。
  * 對話與事件僅在該地點可見，系統訊息為玩家私人不分地點。
@@ -97,7 +118,7 @@ export const LogPanel = () => {
               await fetchLogs();
             }
           }}
-          title={t.refresh || '重新整理'}
+          aria-label={t.refresh || '重新整理'}
         >
           <span>🔄</span>
           <span>{t.refresh || '重新整理'}</span>
@@ -141,10 +162,11 @@ export const LogPanel = () => {
           const logText = getLocalizedText(log.text, log.textEn, language);
           // 僅對話 (dialogue) 顯示發話者姓名；系統訊息與事件訊息不顯示發話者
           const showSender = log.type === 'dialogue';
+          const timeStr = formatLogTime(log);
 
           return (
             <div key={log.id || log._id} className={`log-row type-${log.type}`}>
-              <span className="log-time">[{log.time}]</span>
+              {timeStr && <span className="log-time">[{timeStr}]</span>}
               {showSender && <span className="log-sender">{senderText}:</span>}
               <span className="log-text">{logText}</span>
             </div>

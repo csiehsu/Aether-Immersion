@@ -33,6 +33,9 @@ import {
 import {
   calculateEffectiveEnergyCost,
   calculateStatEnergyDiscount,
+  calculateMaxExecutableBySatiety,
+  getStatusEffects,
+  isPlayerComatose,
 } from './energyHelper.js';
 
 export {
@@ -52,6 +55,9 @@ export {
   PERMANENT_DURABILITY,
   calculateEffectiveEnergyCost,
   calculateStatEnergyDiscount,
+  calculateMaxExecutableBySatiety,
+  getStatusEffects,
+  isPlayerComatose,
 };
 
 /**
@@ -105,80 +111,6 @@ export const normalizePlayerStats = (rawStats = {}, fallback = {}) => {
   };
 };
 
-/**
- * 檢查玩家是否處於昏迷狀態。
- * 規則：水分 (water)、飽食度 (food) 或生命值 (hp) 任一項小於或等於 0 即為昏迷。
- * @param {Object} player - 玩家物件。
- * @returns {boolean} 是否昏迷。
- */
-export const isPlayerComatose = (player) => {
-  if (!player) return false;
-  const water = player.stats?.water ?? MAX_WATER;
-  const food = player.stats?.food ?? MAX_FOOD;
-  const hp = player.hp ?? MAX_HP;
-  return water <= 0 || food <= 0 || hp <= 0;
-};
-
-/**
- * 取得玩家當前作用中的狀態效果清單 (Status Effects)。
- * 規則（固定數值門檻：80 / 60 / 30）：
- * 1. 充沛飽足 (WELL_FED)：飽食 >= 80 且 水分 >= 80。
- *    - 行動精力消耗 × 0.9（疊加 60% 門檻效果）
- *    - 每消耗 10 點精力恢復 1 HP
- * 2. 輕度飽足 (LIGHT_FED)：飽食 >= 60 且 水分 >= 60（且未達 WELL_FED）。
- *    - 行動精力消耗 × 0.9
- * 3. 飢渴虛弱 (FAMISHED_DEHYDRATED)：飽食 < 30 且 水分 < 30（兩項皆低於 30）。
- *    - 行動精力消耗 × 1.2
- * 4. 一般狀態 (NORMAL)：其餘情況。
- *    - 行動精力消耗 × 1.0
- * 
- * @param {Object} player - 玩家物件。
- * @returns {Array<Object>} 狀態效果物件陣列。
- */
-export const getStatusEffects = (player) => {
-  if (!player || isPlayerComatose(player)) return [];
-  const water = player.stats?.water ?? MAX_WATER;
-  const food = player.stats?.food ?? MAX_FOOD;
-
-  const effects = [];
-
-  if (water >= STATUS_THRESHOLD_WELL_FED && food >= STATUS_THRESHOLD_WELL_FED) {
-    effects.push({
-      id: 'WELL_FED',
-      name: '充沛飽足',
-      nameEn: 'Well Fed',
-      type: 'BUFF',
-      energyCostMultiplier: STATUS_BUFF_MULTIPLIER,
-      canRegenHp: true,
-      description: `飽食與水分皆達 ${STATUS_THRESHOLD_WELL_FED} 以上：行動精力消耗 -10%，每消耗 ${ENERGY_HP_REGEN_CYCLE} 點精力恢復 1 HP`,
-      descriptionEn: `Food and Water >= ${STATUS_THRESHOLD_WELL_FED}: Action energy cost -10%, restore 1 HP for every ${ENERGY_HP_REGEN_CYCLE} energy spent`,
-    });
-  } else if (water >= STATUS_THRESHOLD_LIGHT_FED && food >= STATUS_THRESHOLD_LIGHT_FED) {
-    effects.push({
-      id: 'LIGHT_FED',
-      name: '輕度飽足',
-      nameEn: 'Light Fed',
-      type: 'BUFF',
-      energyCostMultiplier: STATUS_BUFF_MULTIPLIER,
-      canRegenHp: false,
-      description: `飽食與水分皆達 ${STATUS_THRESHOLD_LIGHT_FED} 以上：行動精力消耗 -10%`,
-      descriptionEn: `Food and Water >= ${STATUS_THRESHOLD_LIGHT_FED}: Action energy cost -10%`,
-    });
-  } else if (water < STATUS_THRESHOLD_FAMISHED && food < STATUS_THRESHOLD_FAMISHED) {
-    effects.push({
-      id: 'FAMISHED_DEHYDRATED',
-      name: '飢渴虛弱',
-      nameEn: 'Famished & Dehydrated',
-      type: 'DEBUFF',
-      energyCostMultiplier: STATUS_DEBUFF_MULTIPLIER,
-      canRegenHp: false,
-      description: `飽食與水分皆低於 ${STATUS_THRESHOLD_FAMISHED}：行動精力消耗 +20%`,
-      descriptionEn: `Food and Water < ${STATUS_THRESHOLD_FAMISHED}: Action energy cost +20%`,
-    });
-  }
-
-  return effects;
-};
 
 
 /**
@@ -1487,4 +1419,81 @@ export const checkRecipeUnlocks = (currentUnlocked = [], recipes = [], acquiredI
 
   return { newlyUnlockedRecipes, updatedUnlocked };
 };
+
+/**
+ * 檢查食用或飲用特定數量之營養道具時，是否會導致玩家飽食度或水分超過上限（120）。
+ *
+ * @param {Object} playerOrStats - 玩家物件或玩家 stats 物件。
+ * @param {Object} nutrition - 營養物件，包含 food, water 等增益值。
+ * @param {number} [qty=1] - 攝取數量。
+ * @returns {{ wouldExceed: boolean, wouldExceedFood: boolean, wouldExceedWater: boolean, potentialFoodGain: number, potentialWaterGain: number }}
+ */
+export const checkNutritionOverLimit = (playerOrStats = {}, nutrition = {}, qty = 1) => {
+  const stats = playerOrStats.stats || playerOrStats || {};
+  const currentWater = stats.water ?? MAX_WATER;
+  const currentFood = stats.food ?? MAX_FOOD;
+
+  const count = Math.max(0, Number(qty) || 0);
+  const potentialFoodGain = (nutrition.food || 0) * count;
+  const potentialWaterGain = (nutrition.water || 0) * count;
+
+  const wouldExceedFood =
+    potentialFoodGain > 0 && Math.round((currentFood + potentialFoodGain) * 100) / 100 > MAX_FOOD;
+  const wouldExceedWater =
+    potentialWaterGain > 0 && Math.round((currentWater + potentialWaterGain) * 100) / 100 > MAX_WATER;
+
+  return {
+    wouldExceed: Boolean(wouldExceedFood || wouldExceedWater),
+    wouldExceedFood,
+    wouldExceedWater,
+    potentialFoodGain,
+    potentialWaterGain,
+  };
+};
+
+/**
+ * 根據玩家目前飽食度與水分，以及單份營養數據與可用持有量，
+ * 計算出在「不超過上限 120」的前提下最多能吃/喝多少（吃飽/喝飽之數量）。
+ *
+ * @param {Object} playerOrStats - 玩家物件或玩家 stats 物件。
+ * @param {Object} singleNutrition - 單份營養物件，包含 food, water 等增益值。
+ * @param {number} [availableQty=1] - 目前持有數量或容器液體存量。
+ * @returns {number} 最大可攝取數量（若已飽腹或吃 1 個都會溢出則回傳 0）。
+ */
+export const calculateMaxConsumableQty = (playerOrStats = {}, singleNutrition = {}, availableQty = 1) => {
+  const stats = playerOrStats.stats || playerOrStats || {};
+  const currentWater = stats.water ?? MAX_WATER;
+  const currentFood = stats.food ?? MAX_FOOD;
+
+  const maxAvailable = Math.max(0, Math.floor(Number(availableQty) || 0));
+  if (maxAvailable <= 0) return 0;
+
+  const unitFood = singleNutrition.food || 0;
+  const unitWater = singleNutrition.water || 0;
+
+  // 若該物品不提供飽食度亦不提供水分，則非飽食/補水道具，無法吃飽/喝飽
+  if (unitFood <= 0 && unitWater <= 0) {
+    return 0;
+  }
+
+  let maxByFood = Infinity;
+  if (unitFood > 0) {
+    const room = MAX_FOOD - currentFood;
+    if (room <= 0) return 0;
+    maxByFood = Math.floor(Math.round(room * 100) / Math.round(unitFood * 100));
+  }
+
+  let maxByWater = Infinity;
+  if (unitWater > 0) {
+    const room = MAX_WATER - currentWater;
+    if (room <= 0) return 0;
+    maxByWater = Math.floor(Math.round(room * 100) / Math.round(unitWater * 100));
+  }
+
+  const allowable = Math.min(maxByFood, maxByWater);
+  if (allowable <= 0) return 0;
+
+  return Math.min(maxAvailable, allowable);
+};
+
 

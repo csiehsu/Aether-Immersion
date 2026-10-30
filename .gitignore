@@ -10,6 +10,7 @@ lerna-debug.log*
 .env
 node_modules
 server/seeds/
+backups/
 dist
 dist-ssr
 *.local

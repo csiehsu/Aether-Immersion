@@ -3,7 +3,6 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { QuantitySelector } from '../common/QuantitySelector';
-import { MAX_WATER, MAX_FOOD } from '../../constants/gameConstants';
 import {
   calculateCurrentWeight,
   calculateMaxWeight,
@@ -12,6 +11,8 @@ import {
   getItemDurabilityPercent,
   getDurabilityColor,
   getWeightColor,
+  checkNutritionOverLimit,
+  calculateMaxConsumableQty,
 } from '../../utils/gameHelpers';
 
 /**
@@ -30,6 +31,7 @@ export const InventoryPanel = () => {
   const t = translations[language] || translations['zh-TW'];
 
   const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedInstanceId, setSelectedInstanceId] = useState(null);
   const [actionQty, setActionQty] = useState(1);
   const [isDropping, setIsDropping] = useState(false);
 
@@ -67,9 +69,11 @@ export const InventoryPanel = () => {
   const handleSelectItem = (itemId) => {
     if (selectedItemId === itemId) {
       setSelectedItemId(null);
+      setSelectedInstanceId(null);
       setActionQty(1);
     } else {
       setSelectedItemId(itemId);
+      setSelectedInstanceId(null);
       setActionQty(1);
     }
   };
@@ -81,6 +85,16 @@ export const InventoryPanel = () => {
     if (!selectedGroup) return [];
     return [...selectedGroup.items].sort(compareItemDurability);
   }, [selectedGroup]);
+
+  // 目前所選定的目標實體，若未手動選定則預設取排序第一項
+  const activeItem = useMemo(() => {
+    if (!sortedItems.length) return null;
+    if (selectedInstanceId) {
+      const found = sortedItems.find((it) => it.instanceId === selectedInstanceId);
+      if (found) return found;
+    }
+    return sortedItems[0];
+  }, [sortedItems, selectedInstanceId]);
 
   return (
     <CollapsiblePanel
@@ -165,7 +179,7 @@ export const InventoryPanel = () => {
           </div>
 
           {selectedGroup && (() => {
-            const repItem = sortedItems[0] || {};
+            const repItem = activeItem || sortedItems[0] || {};
             const dbItem = items.find((i) => i.itemId === selectedGroup.itemId);
             const itemDesc = dbItem ? getLocalizedDesc(dbItem, language) : null;
             const dbItemTypes = Array.isArray(dbItem?.type) ? dbItem.type : (dbItem?.type ? [dbItem.type] : []);
@@ -215,26 +229,20 @@ export const InventoryPanel = () => {
               totalNutrition.food !== 0
             );
 
-            const totalLiquidAmount = isContainer
-              ? sortedItems.reduce((sum, it) => sum + (it.contents?.amount || 0), 0)
-              : 0;
+            const currentContainerLiquid = repItem.contents?.amount || 0;
             const maxActionQty = isContainer
-              ? (totalLiquidAmount > 0 ? totalLiquidAmount : 1)
-              : (selectedGroup.totalCount || 1);
-            const showQuantitySelector = isContainer
-              ? totalLiquidAmount > 1
-              : (selectedGroup.totalCount || 1) > 1;
-
-            const currentStats = player?.stats || {};
-            const currentWater = currentStats.water ?? MAX_WATER;
-            const currentFood = currentStats.food ?? MAX_FOOD;
+              ? (currentContainerLiquid > 0 ? currentContainerLiquid : (repItem.count || 1))
+              : (repItem.count || 1);
+            const showQuantitySelector = maxActionQty > 1;
 
             const qtyToConsume = Math.min(actionQty, maxActionQty);
-            const potentialFoodGain = (totalNutrition.food || 0) * qtyToConsume;
-            const potentialWaterGain = (totalNutrition.water || 0) * qtyToConsume;
-            const wouldExceedFood = potentialFoodGain > 0 && Math.round((currentFood + potentialFoodGain) * 100) / 100 > MAX_FOOD;
-            const wouldExceedWater = potentialWaterGain > 0 && Math.round((currentWater + potentialWaterGain) * 100) / 100 > MAX_WATER;
-            const isOverLimit = (isContainer ? totalLiquidAmount > 0 : hasNutrition) && (wouldExceedFood || wouldExceedWater);
+            const nutritionCheck = checkNutritionOverLimit(player, totalNutrition, qtyToConsume);
+            const isOverLimit = (isContainer ? currentContainerLiquid > 0 : hasNutrition) && nutritionCheck.wouldExceed;
+
+            const availableSatietyQty = isContainer ? currentContainerLiquid : (repItem.count || 1);
+            const fillQty = (hasNutrition || isContainer)
+              ? calculateMaxConsumableQty(player, totalNutrition, availableSatietyQty)
+              : 0;
 
             const hasDurability =
               (dbItem?.durability !== undefined && dbItem.durability > 0) ||
@@ -252,9 +260,12 @@ export const InventoryPanel = () => {
                   </p>
                 )}
 
-                {/* 獨立個體小圖示區（不開放點選，僅有耐久度或容器道具顯示個體狀態） */}
-                {(hasDurability || isContainer) && (
+                {/* 獨立個體小圖示區（支援手動點選目標實體） */}
+                {(sortedItems.length > 1 || hasDurability || isContainer) && (
                   <div style={{ marginTop: '8px', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '0.74rem', color: '#94a3b8', fontWeight: 600, marginBottom: '4px' }}>
+                      {language === 'en' ? 'Select Target Item Entity:' : '選擇目標實體道具：'}
+                    </div>
                     <div
                       style={{
                         display: 'flex',
@@ -277,23 +288,21 @@ export const InventoryPanel = () => {
                         const displayImageUrl = isContainer
                           ? (liquidDbItem?.imageUrl || null)
                           : (dbItem?.imageUrl || null);
+                        const isSelectedInstance = repItem.instanceId
+                          ? inst.instanceId === repItem.instanceId
+                          : instIdx === 0;
 
                         return (
                           <div
                             key={inst.instanceId || `${inst.itemId}_${instIdx}`}
+                            className={`instance-item-chip ${isSelectedInstance ? 'selected' : ''}`}
                             style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              justifyContent: 'center',
                               width: '42px',
                               height: '48px',
-                              padding: '3px',
-                              background: 'rgba(255, 255, 255, 0.05)',
-                              borderRadius: '4px',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
-                              cursor: 'default',
-                              userSelect: 'none',
+                            }}
+                            onClick={() => {
+                              setSelectedInstanceId(inst.instanceId);
+                              setActionQty(1);
                             }}
                             title={
                               isContainer
@@ -416,20 +425,51 @@ export const InventoryPanel = () => {
                     {(hasNutrition || isContainer) && (
                       <button
                         type="button"
-                        className="btn-use-item"
-                        disabled={isContainer && totalLiquidAmount <= 0}
-                        style={isContainer && totalLiquidAmount <= 0 ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-                        title={isOverLimit ? (t.notNeededNow || '現在還不需要這個。') : undefined}
+                        className="btn-fill-satiety"
+                        disabled={fillQty <= 0 || (isContainer && currentContainerLiquid <= 0)}
                         onClick={async (e) => {
                           e.stopPropagation();
-                          if (isContainer && totalLiquidAmount <= 0) return;
-                          const qtyToConsume = Math.min(actionQty, maxActionQty);
-                          const prevTotal = selectedGroup.totalCount || 1;
-                          const success = await consumeItem(selectedGroup.itemId, qtyToConsume);
+                          if (fillQty <= 0 || (isContainer && currentContainerLiquid <= 0)) return;
+                          const targetKey = repItem.instanceId || selectedGroup.itemId;
+                          const success = await consumeItem(targetKey, fillQty);
                           if (success) {
                             if (!isContainer) {
-                              if (prevTotal <= qtyToConsume) {
+                              if ((selectedGroup.totalCount || 1) <= fillQty) {
                                 setSelectedItemId(null);
+                                setSelectedInstanceId(null);
+                              } else {
+                                setActionQty(1);
+                              }
+                            } else {
+                              setActionQty(1);
+                            }
+                          }
+                        }}
+                      >
+                        {fillQty <= 0
+                          ? (t.alreadyFullBtn || (language === 'en' ? 'Full' : '已飽'))
+                          : (isContainer
+                              ? (t.drinkToFullBtn || (language === 'en' ? 'Drink to Full' : '喝飽'))
+                              : (t.eatToFullBtn || (language === 'en' ? 'Eat to Full' : '吃飽')))}
+                      </button>
+                    )}
+                    {(hasNutrition || isContainer) && (
+                      <button
+                        type="button"
+                        className="btn-use-item"
+                        disabled={(isContainer && currentContainerLiquid <= 0) || isOverLimit}
+                        style={(isContainer && currentContainerLiquid <= 0) || isOverLimit ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if ((isContainer && currentContainerLiquid <= 0) || isOverLimit) return;
+                          const qtyToConsume = Math.min(actionQty, maxActionQty);
+                          const targetKey = repItem.instanceId || selectedGroup.itemId;
+                          const success = await consumeItem(targetKey, qtyToConsume);
+                          if (success) {
+                            if (!isContainer) {
+                              if ((selectedGroup.totalCount || 1) <= qtyToConsume) {
+                                setSelectedItemId(null);
+                                setSelectedInstanceId(null);
                               } else {
                                 setActionQty(1);
                               }
@@ -466,15 +506,13 @@ export const InventoryPanel = () => {
                         setIsDropping(true);
                         try {
                           const currentLocId = player?.location || 'AZURE_BAY_PORT';
-                          const dropCount = isContainer
-                            ? Math.min(actionQty, selectedGroup.totalCount || 1)
-                            : actionQty;
-                          const targetItem = sortedItems[0] || selectedGroup.items[0];
-                          const targetKey = targetItem?.instanceId || selectedGroup.itemId;
+                          const dropCount = Math.min(actionQty, repItem.count || 1);
+                          const targetKey = repItem.instanceId || selectedGroup.itemId;
                           const success = await dropItem(currentLocId, targetKey, dropCount);
                           if (success) {
                             if ((selectedGroup.totalCount || 1) <= dropCount) {
                               setSelectedItemId(null);
+                              setSelectedInstanceId(null);
                             } else {
                               setActionQty(1);
                             }

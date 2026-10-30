@@ -27,6 +27,7 @@ import {
   isPlayerComatose,
   calculateEffectiveEnergyCost,
   getStatusEffects,
+  calculateMaxExecutableBySatiety,
 } from '../utils/energyHelper.js';
 import {
   MAX_WATER,
@@ -51,6 +52,7 @@ import {
   fillLiquidContainers,
   checkRecipeUnlocks,
   checkTravelRequirements,
+  checkNutritionOverLimit,
 } from '../../shared/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -140,11 +142,9 @@ const settlePlayerInventoryDecay = async (player, allDbItems) => {
   }
 
   if (rottedItems && rottedItems.length > 0) {
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
     for (const rotted of rottedItems) {
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `${rotted.name}已腐敗。`,
@@ -1017,10 +1017,22 @@ router.post('/player/consume', async (req, res) => {
       logActionText = `飲用了 [${containerName}] 中的 [${liquidName}] x${deductDrink}`;
       logActionTextEn = `Drank [${liquidNameEn}] x${deductDrink} from [${containerNameEn}]`;
     } else {
-      const matching = player.inventory
+      let matching = player.inventory
         .map((item, idx) => ({ item, idx }))
-        .filter(({ item }) => item.itemId === targetItemId)
-        .sort((a, b) => compareItemDurability(a.item, b.item, 'asc'));
+        .filter(({ item }) => item.itemId === targetItemId);
+
+      if (instanceId) {
+        const targetExactIdx = matching.findIndex(({ item }) => item.instanceId === instanceId);
+        if (targetExactIdx >= 0) {
+          const [exactMatch] = matching.splice(targetExactIdx, 1);
+          matching.sort((a, b) => compareItemDurability(a.item, b.item, 'asc'));
+          matching.unshift(exactMatch);
+        } else {
+          matching.sort((a, b) => compareItemDurability(a.item, b.item, 'asc'));
+        }
+      } else {
+        matching.sort((a, b) => compareItemDurability(a.item, b.item, 'asc'));
+      }
 
       let remaining = targetQty;
       let totalUsed = 0;
@@ -1063,10 +1075,9 @@ router.post('/player/consume', async (req, res) => {
     const currentStats = player.stats || {};
     const currentWater = currentStats.water ?? MAX_WATER;
     const currentFood = currentStats.food ?? MAX_FOOD;
-    const wouldExceedFood = foodGain > 0 && Math.round((currentFood + foodGain) * 100) / 100 > MAX_FOOD;
-    const wouldExceedWater = waterGain > 0 && Math.round((currentWater + waterGain) * 100) / 100 > MAX_WATER;
+    const { wouldExceed } = checkNutritionOverLimit(currentStats, { food: foodGain, water: waterGain }, 1);
 
-    if (wouldExceedFood || wouldExceedWater) {
+    if (wouldExceed) {
       return res.status(400).json({ success: false, message: '現在還不需要這個。' });
     }
 
@@ -1261,11 +1272,17 @@ router.post('/player/gather', async (req, res) => {
     }
 
     const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
+    const maxBySatiety = calculateMaxExecutableBySatiety(player, singleCost);
 
-    // 計算實際執行次數（受限於精力、肉餌、工具耐久度與容器可用容量）
-    const actualQty = Math.max(1, Math.min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer));
+    if (maxBySatiety <= 0) {
+      return res.status(400).json({ success: false, message: '飢渴中，無法行動！請先補充飲食。' });
+    }
+
+    // 計算實際執行次數（受限於精力、肉餌、工具耐久度、容器可用容量與飽食水分存量）
+    const actualQty = Math.max(1, Math.min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer, maxBySatiety));
     const isLimitedByTools = maxByTools < addQty && actualQty === maxByTools;
     const isLimitedByContainer = isLiquidResource && maxByContainer < addQty && actualQty === maxByContainer;
+    const isLimitedBySatiety = maxBySatiety < addQty && actualQty === maxBySatiety;
 
     const baseTotalCost = unitCost * actualQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
@@ -1377,14 +1394,12 @@ router.post('/player/gather', async (req, res) => {
     }
 
     // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
 
     const targetItemName = targetItemDoc?.name || spot.itemId;
     const targetItemNameEn = targetItemDoc?.nameEn || targetItemDoc?.name || spot.itemId;
 
     await GameLog.create({
-      time: timeStr,
       sender: '系統',
       senderEn: 'System',
       text: `採集${targetItemName}${actualQty}次，獲得${gainedQty}個${failQty > 0 ? `，失敗${failQty}次` : ''}。`,
@@ -1396,7 +1411,6 @@ router.post('/player/gather', async (req, res) => {
 
     if (isLimitedByTools) {
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `只執行了${actualQty}次，工具就壞了。`,
@@ -1409,11 +1423,22 @@ router.post('/player/gather', async (req, res) => {
 
     if (isLimitedByContainer) {
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `容器空間有限，只夠裝 ${actualQty} 份。`,
         textEn: `Container capacity is limited, only enough for ${actualQty} portions.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
+    if (isLimitedBySatiety) {
+      await GameLog.create({
+        sender: '系統',
+        senderEn: 'System',
+        text: `飢渴難耐，體能透支，只執行了${actualQty}次便停止了。`,
+        textEn: `Famished and exhausted, only executed ${actualQty} times before stopping.`,
         type: 'system',
         locationId: '',
         targetPlayerId,
@@ -1425,7 +1450,6 @@ router.post('/player/gather', async (req, res) => {
       const toolName = bTool.customName || dbI?.name || bTool.itemId;
       const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `${toolName}已損壞。`,
@@ -1531,6 +1555,11 @@ router.post('/player/travel', async (req, res) => {
     const currentEnergy = Math.round((player.energy ?? 0) * 10) / 10;
     if (currentEnergy < energyCost) {
       return res.status(400).json({ success: false, message: '精力不足！' });
+    }
+
+    const maxTravelBySatiety = calculateMaxExecutableBySatiety(player, energyCost);
+    if (maxTravelBySatiety < 1) {
+      return res.status(400).json({ success: false, message: '飢渴中，無法行動！請先補充飲食。' });
     }
 
     const maxEnergy = player.maxEnergy ?? 4320;
@@ -1727,10 +1756,16 @@ router.post('/player/craft', async (req, res) => {
     }
 
     const maxByEnergy = singleEnergyCost > 0 ? Math.floor(currentEnergy / singleEnergyCost) : Infinity;
+    const maxBySatiety = calculateMaxExecutableBySatiety(player, singleEnergyCost);
 
-    // 計算實際執行次數（受限於精力、材料與工具耐久度）
-    const actualCraftQty = Math.max(1, Math.min(numCraftQty, maxByMaterials, maxByEnergy, maxByTools));
+    if (maxBySatiety <= 0) {
+      return res.status(400).json({ success: false, message: '飢渴中，無法行動！請先補充飲食。' });
+    }
+
+    // 計算實際執行次數（受限於精力、材料、工具耐久度與飽食水分存量）
+    const actualCraftQty = Math.max(1, Math.min(numCraftQty, maxByMaterials, maxByEnergy, maxByTools, maxBySatiety));
     const isLimitedByTools = maxByTools < numCraftQty && actualCraftQty === maxByTools;
+    const isLimitedBySatiety = maxBySatiety < numCraftQty && actualCraftQty === maxBySatiety;
 
     const baseEnergyCost = baseSingleEnergyCost * actualCraftQty;
     const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'CRAFT');
@@ -2032,14 +2067,12 @@ router.post('/player/craft', async (req, res) => {
     }
 
     // 日誌處理：工具耐久度不足以執行選擇次數時與工具損壞時輸出系統日誌
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
 
     const recipeName = recipe.name || '道具';
     const recipeNameEn = recipe.nameEn || recipeName;
 
     await GameLog.create({
-      time: timeStr,
       sender: '系統',
       senderEn: 'System',
       text: `製作${recipeName}${actualCraftQty}次，失敗${failCraftQty}次。`,
@@ -2051,11 +2084,22 @@ router.post('/player/craft', async (req, res) => {
 
     if (isLimitedByTools) {
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `只執行了${actualCraftQty}次，工具就壞了。`,
         textEn: `Only executed ${actualCraftQty} times before the tool broke.`,
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
+
+    if (isLimitedBySatiety) {
+      await GameLog.create({
+        sender: '系統',
+        senderEn: 'System',
+        text: `飢渴難耐，體能透支，只製作了${actualCraftQty}次便停止了。`,
+        textEn: `Famished and exhausted, only crafted ${actualCraftQty} times before stopping.`,
         type: 'system',
         locationId: '',
         targetPlayerId,
@@ -2067,7 +2111,6 @@ router.post('/player/craft', async (req, res) => {
       const toolName = bTool.customName || dbI?.name || bTool.itemId;
       const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
       await GameLog.create({
-        time: timeStr,
         sender: '系統',
         senderEn: 'System',
         text: `${toolName}已損壞。`,
@@ -2094,7 +2137,6 @@ router.post('/player/craft', async (req, res) => {
           const bName = dbB.name || b.buildingId;
           const bNameEn = dbB.nameEn || bName;
           await GameLog.create({
-            time: timeStr,
             sender: '系統',
             senderEn: 'System',
             text: `場景設施【${bName}】已耗盡耐久度並損壞！`,
@@ -2240,7 +2282,6 @@ router.post('/location/repair-building', async (req, res) => {
     }
 
     // 發布日誌
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const targetPlayerId = player._id ? player._id.toString() : (player.googleId || player.name || '');
     const dbItem = allDbItems.find((d) => d.itemId === repairItemId);
     const itemName = dbItem?.name || repairItemId;
@@ -2249,7 +2290,6 @@ router.post('/location/repair-building', async (req, res) => {
     const bNameEn = dbBuilding.nameEn || bName;
 
     await GameLog.create({
-      time: timeStr,
       sender: '系統',
       senderEn: 'System',
       text: `使用了 ${deductQty} 個【${itemName}】，修復了【${bName}】${Math.round((newDurability - curDur) * 10) / 10} 點耐久度。`,
@@ -2313,9 +2353,7 @@ router.post('/logs', async (req, res) => {
       return res.status(503).json({ success: false, message: '資料庫未連線！' });
     }
     const { sender, senderEn, text, textEn, type, locationId, targetPlayerId } = req.body;
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const logDoc = await GameLog.create({
-      time: timeStr,
       sender: sender || '系統',
       senderEn: senderEn || 'System',
       text: text || '',
@@ -2369,25 +2407,36 @@ router.post('/location/pickup-item', async (req, res) => {
       let matchingIndices = [];
       const exactIndex = (location.placedItems || []).findIndex((item) => item.instanceId === instanceId);
       if (exactIndex >= 0) {
-        matchingIndices = [exactIndex];
+        const targetItemId = location.placedItems[exactIndex].itemId;
+        const otherIndices = [];
+        (location.placedItems || []).forEach((item, idx) => {
+          if (idx !== exactIndex && item.itemId === targetItemId) {
+            otherIndices.push(idx);
+          }
+        });
+        otherIndices.sort((idxA, idxB) => {
+          const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
+          if (cmp !== 0) return cmp;
+          return idxA - idxB;
+        });
+        matchingIndices = [exactIndex, ...otherIndices];
       } else {
         (location.placedItems || []).forEach((item, idx) => {
           if (item.instanceId === instanceId || item.itemId === instanceId) {
             matchingIndices.push(idx);
           }
         });
+        // 預設選擇耐久度最高的，若耐久度相同則以資料庫順序為主
+        matchingIndices.sort((idxA, idxB) => {
+          const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
+          if (cmp !== 0) return cmp;
+          return idxA - idxB;
+        });
       }
 
       if (matchingIndices.length === 0) {
         return res.status(404).json({ success: false, message: '該物品已被其他人撿起或已不存在！' });
       }
-
-      // 預設選擇耐久度最高的，若耐久度相同則以資料庫順序為主
-      matchingIndices.sort((idxA, idxB) => {
-        const cmp = compareItemDurability(location.placedItems[idxA], location.placedItems[idxB], 'desc');
-        if (cmp !== 0) return cmp;
-        return idxA - idxB;
-      });
 
       const totalAvailable = matchingIndices.reduce(
         (sum, idx) => sum + (location.placedItems[idx].count || 1),
@@ -2508,25 +2557,36 @@ router.post('/player/drop-item', async (req, res) => {
       let matchingIndices = [];
       const exactIndex = player.inventory.findIndex((item) => item.instanceId === itemKey);
       if (exactIndex >= 0) {
-        matchingIndices = [exactIndex];
+        const targetItemId = player.inventory[exactIndex].itemId;
+        const otherIndices = [];
+        player.inventory.forEach((item, idx) => {
+          if (idx !== exactIndex && item.itemId === targetItemId) {
+            otherIndices.push(idx);
+          }
+        });
+        otherIndices.sort((idxA, idxB) => {
+          const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
+          if (cmp !== 0) return cmp;
+          return idxA - idxB;
+        });
+        matchingIndices = [exactIndex, ...otherIndices];
       } else {
         player.inventory.forEach((item, idx) => {
           if (item.instanceId === itemKey || item.itemId === itemKey) {
             matchingIndices.push(idx);
           }
         });
+        // 預設選擇耐久度最低的，若耐久度相同則以資料庫順序為主
+        matchingIndices.sort((idxA, idxB) => {
+          const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
+          if (cmp !== 0) return cmp;
+          return idxA - idxB;
+        });
       }
 
       if (matchingIndices.length === 0) {
         return res.status(400).json({ success: false, message: '背包中沒有該道具！' });
       }
-
-      // 預設選擇耐久度最低的，若耐久度相同則以資料庫順序為主
-      matchingIndices.sort((idxA, idxB) => {
-        const cmp = compareItemDurability(player.inventory[idxA], player.inventory[idxB]);
-        if (cmp !== 0) return cmp;
-        return idxA - idxB;
-      });
 
       const totalAvailable = matchingIndices.reduce(
         (sum, idx) => sum + (player.inventory[idx].count || 1),

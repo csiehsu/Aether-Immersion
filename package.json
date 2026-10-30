@@ -14,9 +14,10 @@
     "seed:sync": "node server/scripts/syncSeedsToDb.js",
     "seed:sync:prod": "node server/scripts/syncSeedsToDb.js --prod",
     "db:clone:dev": "node server/scripts/cloneProdToDev.js",
-    "db:clone:dev:compact": "node server/scripts/cloneProdToDev.js --compact",
-    "db:compact": "node server/scripts/consolidateDb.js",
-    "db:compact:prod": "node server/scripts/consolidateDb.js --prod",
+    "db:backup": "node server/scripts/backupDb.js",
+    "db:backup:prod": "node server/scripts/backupDb.js --prod",
+    "db:restore": "node server/scripts/restoreDb.js",
+    "db:restore:prod": "node server/scripts/restoreDb.js --prod",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

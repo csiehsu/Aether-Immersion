@@ -25,7 +25,7 @@ export const DEFAULT_INITIAL_STATS = Object.freeze({
 // 狀態判定固定數值門檻（不依據上限百分比浮動，固定為常數 80、60、30）
 export const STATUS_THRESHOLD_WELL_FED = 80; // 充沛飽足門檻（飽食 >= 80 且 水分 >= 80）
 export const STATUS_THRESHOLD_LIGHT_FED = 60; // 輕度飽足門檻（飽食 >= 60 且 水分 >= 60）
-export const STATUS_THRESHOLD_FAMISHED = 30; // 飢渴虛弱門檻（飽食 < 30 且 水分 < 30）
+export const STATUS_THRESHOLD_FAMISHED = 30; // 飢渴虛弱門檻（飽食 < 30 或 水分 < 30）
 
 // 精力相關規則常數
 export const ENERGY_RECOVERY_INTERVAL_MS = 15 * 60 * 1000; // 自然恢復週期（15 分鐘）

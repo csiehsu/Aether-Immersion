@@ -107,7 +107,7 @@ export const isPlayerComatose = (player) => {
  *    - 每消耗 10 點精力恢復 1 HP
  * 2. 輕度飽足 (LIGHT_FED)：飽食 >= 60 且 水分 >= 60（且未達 WELL_FED）。
  *    - 行動精力消耗 × 0.9
- * 3. 飢渴虛弱 (FAMISHED_DEHYDRATED)：飽食 < 30 且 水分 < 30（兩項皆低於 30）。
+ * 3. 飢渴虛弱 (FAMISHED_DEHYDRATED)：飽食 < 30 或 水分 < 30（任一項低於 30）。
  *    - 行動精力消耗 × 1.2
  * 4. 一般狀態 (NORMAL)：其餘情況。
  *    - 行動精力消耗 × 1.0
@@ -144,7 +144,7 @@ export const getStatusEffects = (player) => {
       description: `飽食與水分皆達 ${STATUS_THRESHOLD_LIGHT_FED} 以上：行動精力消耗 -10%`,
       descriptionEn: `Food and Water >= ${STATUS_THRESHOLD_LIGHT_FED}: Action energy cost -10%`,
     });
-  } else if (water < STATUS_THRESHOLD_FAMISHED && food < STATUS_THRESHOLD_FAMISHED) {
+  } else if (water < STATUS_THRESHOLD_FAMISHED || food < STATUS_THRESHOLD_FAMISHED) {
     effects.push({
       id: 'FAMISHED_DEHYDRATED',
       name: '飢渴虛弱',
@@ -152,8 +152,19 @@ export const getStatusEffects = (player) => {
       type: 'DEBUFF',
       energyCostMultiplier: STATUS_DEBUFF_MULTIPLIER,
       canRegenHp: false,
-      description: `飽食與水分皆低於 ${STATUS_THRESHOLD_FAMISHED}：行動精力消耗 +20%`,
-      descriptionEn: `Food and Water < ${STATUS_THRESHOLD_FAMISHED}: Action energy cost +20%`,
+      description: `飽食度或水分低於 ${STATUS_THRESHOLD_FAMISHED}：行動精力消耗 +20%`,
+      descriptionEn: `Food or Water < ${STATUS_THRESHOLD_FAMISHED}: Action energy cost +20%`,
+    });
+  } else {
+    effects.push({
+      id: 'NORMAL',
+      name: '普通',
+      nameEn: 'Normal',
+      type: 'NEUTRAL',
+      energyCostMultiplier: 1.0,
+      canRegenHp: false,
+      description: '飽食與水分維持正常水準：行動精力消耗維持正常 (100%)',
+      descriptionEn: 'Food and Water at normal levels: Normal energy cost (100%)',
     });
   }
 
@@ -269,4 +280,42 @@ export const applyEnergyConsumption = (player, energyCost) => {
   const isComatose = isPlayerComatose(player);
   return { drainCount, hpGain, isComatose };
 };
+
+/**
+ * 依據玩家目前的水分與飽食度存量（以及精力累積器），計算在飽食度與水分扣至 0 之前最多允許執行的行動次數（策略 A：極限扣至 0 停止）。
+ * 
+ * 規則（策略 A）：
+ * 1. 若玩家已處於昏迷狀態，或水分/飽食度 <= 0，可執行次數為 0。
+ * 2. 設目前較低的生存指標為 limitingStat = min(water, food)。
+ * 3. 每次觸發扣除（消耗滿 ENERGY_DRAIN_CYCLE = 15 點精力）扣除 1 水分與 1 飽食度。
+ *    在不扣到負數（<= 0 以下）的前提下，最多可允許扣除 maxDrains = Math.floor(limitingStat) 次。
+ * 4. 換算可消耗的最大精力上限：
+ *    maxAllowedEnergy = Math.max(0, (maxDrains + 1) * ENERGY_DRAIN_CYCLE - currentAccumulator - 0.001)
+ * 5. 由單次行動折算後的精力消耗 (singleEnergyCost) 計算最大允許次數：
+ *    若 singleEnergyCost <= 0，回傳 Infinity；否則回傳 Math.floor(maxAllowedEnergy / singleEnergyCost)。
+ * 
+ * @param {Object} player - 玩家物件。
+ * @param {number} singleEnergyCost - 單次行動折算後的實際精力消耗。
+ * @returns {number} 允許執行的最大次數 (>= 0)。
+ */
+export const calculateMaxExecutableBySatiety = (player, singleEnergyCost) => {
+  if (!player || isPlayerComatose(player)) return 0;
+  const cost = Number(singleEnergyCost);
+  if (cost <= 0) return Infinity;
+
+  const curWater = player.stats?.water ?? MAX_WATER;
+  const curFood = player.stats?.food ?? MAX_FOOD;
+  const limitingStat = Math.min(curWater, curFood);
+
+  if (limitingStat <= 0) return 0;
+
+  const maxDrains = Math.floor(limitingStat);
+  const currentAccumulator = Math.max(0, Number(player.energySpentAccumulator) || 0);
+
+  // 允許消耗的最大精力上限（保留 0.001 避免浮點數誤差剛好觸發第 maxDrains + 1 次扣除）
+  const maxAllowedEnergy = Math.max(0, (maxDrains + 1) * ENERGY_DRAIN_CYCLE - currentAccumulator - 0.001);
+
+  return Math.floor(maxAllowedEnergy / cost);
+};
+
 

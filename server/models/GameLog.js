@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const GameLogSchema = new mongoose.Schema(
   {
-    time: { type: String, required: true },
+    time: { type: String, default: '' },
     sender: { type: String, required: true },
     senderEn: { type: String, default: '' },
     text: { type: String, required: true },

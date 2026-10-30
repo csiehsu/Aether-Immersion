@@ -3,7 +3,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import { getLocalizedType } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
 import { getLocalizedName } from '../../utils/language';
-import { isPlayerComatose, calculateEffectiveEnergyCost, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo, compareItemDurability, calculateSuccessRate } from '../../utils/gameHelpers';
+import { isPlayerComatose, calculateEffectiveEnergyCost, calculateMaxExecutableBySatiety, getRequiredExpForNextLevel, roundExp, getMatchingToolsAscending, getItemDurabilityPercent, getDurabilityStatusInfo, compareItemDurability, calculateSuccessRate } from '../../utils/gameHelpers';
 import { QuantitySelector } from '../common/QuantitySelector';
 
 /**
@@ -157,10 +157,11 @@ export const CraftPanel = () => {
    * @param {React.MouseEvent} e - 點擊事件物件。
    * @param {boolean} isReady - 當前是否滿足製作條件。
    */
-  const handleStartCraft = async (rec, e, isReady) => {
+  const handleStartCraft = async (rec, e, isReady, actualQty) => {
     e.stopPropagation();
     if (!isReady) return;
-    const success = await performCraft(rec, effectiveSelectedMaterials, craftQty);
+    const finalQty = actualQty || craftQty;
+    const success = await performCraft(rec, effectiveSelectedMaterials, finalQty);
     if (success) {
       setSelectedMaterials({});
     }
@@ -217,6 +218,8 @@ export const CraftPanel = () => {
             const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
             const singleEnergyCost = calculateEffectiveEnergyCost(player, rec.energyCost || 0, 'CRAFT');
             const maxByEnergy = singleEnergyCost > 0 ? Math.floor(currentEnergy / singleEnergyCost) : Infinity;
+            const maxBySatiety = calculateMaxExecutableBySatiety(player, singleEnergyCost);
+            const hasSatiety = maxBySatiety >= 1;
 
             const materialLimits = reqItemsList.map((req, reqIdx) => {
               const selId = effectiveSelectedMaterials[reqIdx];
@@ -236,14 +239,14 @@ export const CraftPanel = () => {
               return maxInEligible.length > 0 ? Math.max(...maxInEligible) : 0;
             });
             const maxByMaterials = materialLimits.length > 0 ? Math.min(...materialLimits) : Infinity;
-            const calculatedMaxCraft = (!hasTools || isComatose)
+            const calculatedMaxCraft = (!hasTools || isComatose || maxBySatiety <= 0)
               ? 1
-              : Math.max(1, Math.min(maxByEnergy, maxByMaterials));
+              : Math.max(1, Math.min(maxByEnergy, maxByMaterials, maxBySatiety));
 
             const baseEnergyCost = (rec.energyCost || 0) * craftQty;
             const totalEnergyCost = calculateEffectiveEnergyCost(player, baseEnergyCost, 'CRAFT');
             const hasEnergy = currentEnergy >= totalEnergyCost;
-            const isReadyToCraft = !isComatose && hasTools && hasSelectedAllMaterials && hasEnergy;
+            const isReadyToCraft = !isComatose && hasSatiety && hasTools && hasSelectedAllMaterials && hasEnergy;
 
             const craftSkill = rec.skillType || 'COOKING';
             const skillObj = player?.lifeSkills?.[craftSkill] || { level: 0, exp: 0 };
@@ -537,12 +540,12 @@ export const CraftPanel = () => {
                   <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} max={calculatedMaxCraft} />
                   <button
                     type="button"
-                    className={`btn-craft ${isComatose ? 'btn-comatose' : ''}`}
+                    className={`btn-craft ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
                     disabled={!isReadyToCraft}
-                    title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : undefined}
-                    onClick={(e) => handleStartCraft(rec, e, isReadyToCraft)}
+                    title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : !hasSatiety ? (language === 'en' ? 'Famished, cannot act' : '飢渴中，無法行動') : undefined}
+                    onClick={(e) => handleStartCraft(rec, e, isReadyToCraft, Math.min(craftQty, calculatedMaxCraft))}
                   >
-                    {isComatose ? (t.comatose || '昏迷中') : t.startCraft}
+                    {isComatose ? (t.comatose || '昏迷中') : !hasSatiety ? (language === 'en' ? 'Famished' : '飢渴中') : t.startCraft}
                   </button>
                 </div>
               </div>

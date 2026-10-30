@@ -7,6 +7,7 @@ import {
   getNpcIcon,
   isPlayerComatose,
   calculateEffectiveEnergyCost,
+  calculateMaxExecutableBySatiety,
   getRequiredExpForNextLevel,
   roundExp,
   getMatchingToolsAscending,
@@ -550,6 +551,10 @@ export const GatherPanel = () => {
                   (t) => locBuildingTypes.includes(t) || getMatchingToolsAscending(inventory, t, items).length > 0
                 );
 
+                const singleCost = calculateEffectiveEnergyCost(player, unitCost, 'GATHER');
+                const maxBySatiety = calculateMaxExecutableBySatiety(player, singleCost);
+                const hasSatiety = maxBySatiety >= 1;
+
                 const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
                 const hasEnergy = currentEnergy >= totalCost;
                 const isComatose = isPlayerComatose(player);
@@ -564,10 +569,12 @@ export const GatherPanel = () => {
                   totalAvailableContainerCap = capInfo.totalAvailableCapacity;
                   hasAvailableContainer = totalAvailableContainerCap > 0;
                 }
-                const canGather = !isComatose && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
+                const canGather = !isComatose && hasSatiety && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
 
                 const buttonText = isComatose
                   ? (t.comatose || (language === 'en' ? 'Comatose' : '昏迷中'))
+                  : !hasSatiety
+                  ? (language === 'en' ? 'Famished' : '飢渴中')
                   : !hasNonConsumableTools
                   ? (t.missingTools || '缺少需求工具')
                   : !hasEnoughBait
@@ -598,13 +605,12 @@ export const GatherPanel = () => {
                 const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
                 const finalSuccessRate = calculateSuccessRate(baseChance, currentLevel);
 
-                const singleCost = calculateEffectiveEnergyCost(player, unitCost, 'GATHER');
                 const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
                 const maxByBait = hasBaitRequirement ? totalBaitCount : Infinity;
                 const maxByContainer = isLiquidResource ? totalAvailableContainerCap : Infinity;
-                const calculatedMaxGather = (!hasNonConsumableTools || isComatose || !hasAvailableContainer)
+                const calculatedMaxGather = (!hasNonConsumableTools || isComatose || !hasAvailableContainer || maxBySatiety <= 0)
                   ? 1
-                  : Math.max(1, Math.min(maxByEnergy, maxByBait, maxByContainer));
+                  : Math.max(1, Math.min(maxByEnergy, maxByBait, maxByContainer, maxBySatiety));
 
                 return (
                   <div className="gather-detail-window">
@@ -721,7 +727,7 @@ export const GatherPanel = () => {
                         </div>
                         <button
                           type="button"
-                          className={`btn-gather ${isComatose ? 'btn-comatose' : ''}`}
+                          className={`btn-gather ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
                           disabled={!canGather}
                           title={buttonText}
                           onClick={(e) => {
@@ -730,7 +736,7 @@ export const GatherPanel = () => {
                             performGather(
                               spot.itemId,
                               unitCost,
-                              gatherQty
+                              Math.min(gatherQty, calculatedMaxGather)
                             );
                           }}
                         >

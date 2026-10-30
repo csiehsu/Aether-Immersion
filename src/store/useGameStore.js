@@ -556,7 +556,6 @@ export const useGameStore = create((set, get) => ({
    */
   addLog: async (sender, senderEn, text, textEn, type = 'dialogue', locationId = null, targetPlayerId = null) => {
     const { player } = get();
-    const timeStr = new Date().toLocaleTimeString('zh-TW', { hour12: false });
     const locId = locationId || player?.location || 'AZURE_BAY_PORT';
     const pId = targetPlayerId || player?._id || player?.googleId || player?.name || '';
 
@@ -574,7 +573,7 @@ export const useGameStore = create((set, get) => ({
 
     const newEntry = {
       id: `${Date.now()}-${Math.random()}`,
-      time: timeStr,
+      createdAt: new Date().toISOString(),
       sender: actualSender,
       senderEn: actualSenderEn,
       text,

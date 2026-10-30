@@ -12,7 +12,7 @@ AetherImmersion/
 │   ├── models/                       # Mongoose 資料模型 (核心 Schema)
 │   │   ├── BattleSkill.js            # 戰鬥技能 Schema
 │   │   ├── Building.js               # 設施/建築物 Schema
-│   │   ├── GameLog.js                # 遊戲歷史日誌 Schema
+│   │   ├── GameLog.js                # 遊戲歷史日誌 Schema (以 UTC createdAt 為單一真實來源)
 │   │   ├── Item.js                   # 道具定義、耐久度、重量、類型與營養數值 Schema
 │   │   ├── Location.js               # 地點場景、路線連接、採集點與地面放置物品 (placedItems) Schema
 │   │   ├── Npc.js                    # NPC、生物、販售商品 (goodies)、收購清單 (purchase) 與掉落物 Schema
@@ -40,15 +40,15 @@ AetherImmersion/
 │   │   │   ├── CraftPanel.jsx        # 🔨 製作面板 (配方解鎖檢驗、材料投入槽位、設施檢驗、批量合成)
 │   │   │   ├── CreaturesPanel.jsx    # 🐾 區域生物面板 (生物狀態檢視、戰鬥攻擊發起)
 │   │   │   ├── GatherPanel.jsx       # 🌿 資源面板 (NPC 互動買賣/戰鬥、資源採集點、場景設施)
-│   │   │   ├── InventoryPanel.jsx    # 🎒 背包面板 (道具詳情、品質、耐久度、營養效果、批量食用、丟棄)
+│   │   │   ├── InventoryPanel.jsx    # 🎒 背包面板 (道具詳情、品質、耐久度、營養效果、批量食用、吃飽/喝飽快捷、丟棄)
 │   │   │   ├── LocationItemsPanel.jsx# 📍 物資面板 (地面掉落物拾取)
-│   │   │   ├── LogPanel.jsx          # 📜 紀錄面板 (分類篩選、發送對話、日誌滾動檢視)
+│   │   │   ├── LogPanel.jsx          # 📜 紀錄面板 (分類篩選、發送對話、日誌滾動檢視、依玩家本機時區動態顯示)
 │   │   │   └── MovePanel.jsx         # 🧭 移動面板 (相鄰場景路徑移動、負重判定、精力折算提示)
 │   │   ├── BottomToolbar.jsx         # 📱 底部行動版功能分頁切換列
 │   │   ├── CollapsiblePanel.jsx      # 📦 可折疊展開通用面板容器外殼 (Glassmorphism 視覺風格)
 │   │   ├── GameInterface.jsx         # 🎮 遊戲主要操作視圖與三欄桌面版/自適應行動版視口容器
 │   │   ├── GoogleLoginButton.jsx     # 🔑 Google OAuth 登入按鈕與帳號狀態頭像元件
-│   │   └── TopHUD.jsx                # 📊 頂部抬頭狀態列 (血條/精力條與恢復倒數/水分飽食/負重/狀態徽章/金錢/設定選單)
+│   │   └── TopHUD.jsx                # 📊 頂部抬頭狀態列 (常駐精力條與倒數/血條/水分/飽食；點擊頭像展開個人資料：金錢/負重/屬性/生活技能/設定)
 │   ├── constants/
 │   │   ├── gameConstants.js          # ⚖️ 重新導出 shared/constants/gameConstants.js 常數
 │   │   └── translations.js           # 🌐 雙語字典檔 (繁體中文 `zh-TW` / 英文 `en`)
@@ -81,10 +81,11 @@ AetherImmersion/
   - **精巧 (dexterity)**：專案全域統一使用 `dexterity`，影響戰鬥的命中率、製造類工作速度。
   - 創角時三維能力值每項最低為 1 點，總和必須精準等於 10 點。
 - **生存數值**：
-  - **生命值 (hp / maxHp)**：玩家當前生命與上限（基準值為 100），可透過食用營養加成提升上限。
+  - **生命值 (hp / maxHp)**：玩家目前生命與上限（基準值為 100），可透過食用營養加成提升上限。
   - **防禦力 (defense)**：減免戰鬥時所受到的物理傷害。
   - **精力值 (energy / maxEnergy)**：行動核心動力，預設最大值為 4320。進行地點移動、資源採集與物品製作時扣除。
   - **水分 (water)** 與 **飽食度 (food)**：生存核心指標，上限與初始預設值皆為 120（`MAX_WATER` / `MAX_FOOD`）。
+  - **介面狀態呈現 (HUD Layout)**：生命值 (HP)、水分、飽食度與精力條一律常駐顯示於頂部抬頭狀態列右側（精力條下方），具備即時紅綠黃動態漸層反饋；點擊頭像展開之個人資料頁面右上角顯示持有金錢，主體專注呈現負重狀況、基礎屬性與生活技能熟練度。
 - **週期累加器與生存衰減**：
   - **水分與飽食累加器 (`energySpentAccumulator`)**：每累積消耗 15 點精力（`ENERGY_DRAIN_CYCLE = 15`），扣除 1 點水分與 1 點飽食度。未滿 15 的消耗精準保留至下次行動。
   - **飽足回血累加器 (`hpRegenAccumulator`)**：處於充沛飽足狀態時，每累積消耗 10 點精力（`ENERGY_HP_REGEN_CYCLE = 10`），自動恢復 1 點生命值（不超過 `maxHp`）。
@@ -102,8 +103,8 @@ AetherImmersion/
 - **固定門檻判定 (80 / 60 / 30)**：
   - **充沛飽足 (`WELL_FED`)**：飽食度 >= 80 且 水分 >= 80。行動精力消耗折算 90%（`multiplier = 0.9`，節省 10% 精力），且每消耗 10 點精力恢復 1 點 HP（`canRegenHp = true`）。
   - **輕度飽足 (`LIGHT_FED`)**：飽食度 >= 60 且 水分 >= 60（且未達充沛飽足）。行動精力消耗折算 90%（`multiplier = 0.9`），無回血能力。
-  - **飢渴虛弱 (`FAMISHED_DEHYDRATED`)**：飽食度 < 30 且 水分 < 30（兩項皆低於 30）。行動精力消耗增加至 120%（`multiplier = 1.2`，多消耗 20% 精力）。
-  - **一般狀態 (`NORMAL`)**：其餘數值區間，行動精力消耗維持 1.0 倍率。
+  - **飢渴虛弱 (`FAMISHED_DEHYDRATED`)**：飽食度 < 30 或 水分 < 30（任一項低於 30）。行動精力消耗增加至 120%（`multiplier = 1.2`，多消耗 20% 精力）。
+  - **普通 / 一般狀態 (`NORMAL`)**：其餘數值區間，行動精力消耗維持 1.0 倍率。徽章按鈕常駐顯示於 TopHUD，任何非昏迷狀態下均不會消失。點選可彈出無 icon 的純文字說明框，樣式與個人資料選單一致且無關閉按鈕。
 - **動態精力折算與能力速度加成 (`calculateEffectiveEnergyCost`)**：
   - 行動精力消耗同時結合**飽食度狀態倍率**與**三維能力值加成倍率**：
     - **速度 (speed) 影響移動速度**：折減地點移動（`TRAVEL`）時消耗的精力。
@@ -129,7 +130,8 @@ AetherImmersion/
 - **後端權威結算與即時寫入 DB**：後端接收心跳或任何行動 API 前置均會自動調用 `settleEnergyRecovery(player)`，依真實時間戳補算離線週期並寫入資料庫；精力滿額時自動重錨定時間戳為當前時間以防溢補。前端收到回傳資料即時渲染最新精力條，資料庫與畫面 100% 同步。
 
 ### 5. 資源採集與液體灌裝機制 (Resource Gathering & Liquid Filling System)
-- **多重瓶頸綜合裁定**：綜合當前精力、肉餌儲量（如釣魚需要 `BAIT`）以及背包工具耐久度，計算單次最大允許執行的實際次數 `actualQty`。
+- **多重瓶頸綜合裁定**：綜合目前精力、肉餌儲量（如釣魚需要 `BAIT`）、背包工具耐久度、液體容器容量以及水分與飽食度存量（`maxBySatiety`），計算單次最大允許執行的實際次數 `actualQty`。
+- **體能防透支保護（策略 A：極限扣至 0 停止）**：當玩家飽食度或水分不足以支撐 1 次採集時，後端拒絕執行，前端採集按鈕禁用並顯示為「飢渴中」。若請求次數超出體能承受極限，系統僅執行允許次數並於扣至 0 時停止行動，發送體能透支日誌。
 - **液體採集專屬邏輯**：
   - 採集類型包含液體（`LIQUID`）的資源時，透過 `calculateLiquidContainerCapacity` 尋找背包中允許裝載該液體的容器（`CONTAINER`，空容器或已裝同種液體者）。
   - 採集成功後調用 `fillLiquidContainers` 直接將液體注入容器 `contents`，不生成背包散裝物品；若背包無可用容器容量則阻止採集並報錯。
@@ -175,11 +177,11 @@ AetherImmersion/
 
 ### 8. 地面放置物與遺留拾取機制 (Placed Items & Dropping System)
 - **丟棄道具 (`POST /player/drop-item`)**：
-  - 驗證玩家目前位置與地點一致，優先丟棄低耐久道具。
+  - 驗證玩家目前位置與地點一致，介面提供實體小卡供玩家手動點選目標實體丟棄；若未指定實體，預設優先丟棄低耐久道具。
   - 受後端玩家動作鎖（Action Mutex）保護，同檔位易腐道具自動加權合併進地面既有堆疊。
   - 前端丟棄按鈕具備防連點狀態（`isDropping`），發送中禁用按鈕防止重複送出。
 - **拾取道具 (`POST /location/pickup-item`)**：
-  - 前端以所選堆疊之特定 `instanceId` 精確拾取，受後端動作鎖串行排隊保護。
+  - 介面提供現場實體小卡供玩家手動點選目標道具；點選後精確傳遞 `instanceId` 拾取，若未指定則預設優先拾取最高耐久道具。受後端動作鎖串行排隊保護。
   - 前端拾取按鈕具備防連點狀態（`isSubmitting`），發送中禁用按鈕防止並發競態導致的道具增殖。
 
 ### 9. 配方解鎖機制 (Recipe Unlock System)
@@ -342,7 +344,7 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/player/gather')`
   - 核心輔助：`src/utils/gameHelpers.js` -> `calculateMaxExecutableByTools()`, `applyToolsDurabilityDeduction()`, `calculateSuccessRate()`, `addLifeSkillExp()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **多重瓶頸綜合裁定**：依據玩家當前精力、肉餌儲量（如釣魚需要 `BAIT`）以及背包中工具耐久度，計算單次最大允許執行的實際次數 `actualQty = min(addQty, maxByEnergy, maxByBait, maxByTools)`。
+  1. **多重瓶頸綜合裁定**：依據玩家目前精力 (`maxByEnergy`)、肉餌儲量 (`maxByBait`)、背包工具耐久度 (`maxByTools`)、容器容量 (`maxByContainer`) 以及飽食度與水分可支撐上限 (`maxBySatiety`)，計算單次最大允許執行的實際次數 `actualQty = min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer, maxBySatiety)`。若因飽食度/水分歸零停止，輸出日誌「飢渴難耐，體能透支，只執行了X次便停止了。」；若 `maxBySatiety <= 0`，前端按鈕禁用顯示「飢渴中」。
   2. **工具耐久扣除與損壞銷毀**：透過 `applyToolsDurabilityDeduction` 依耐久度升序選取的工具扣除耐久；耐久度扣至 `<= 0` 時自動自背包中移除，並於系統日誌中發布「[工具名稱]已損壞。」。
   3. **生活技能成功率加成**：調用 `calculateSuccessRate(baseChance, currentSkillLevel)`，生活技能每提升 1 級提供 +5% 成功率加成；每份採集產出皆逐一進行機率抽籤判定成功與失敗次數。
   4. **經驗累積與升級**：依產出數量與採集點設定之 `expPerUnit` 透過 `addLifeSkillExp` 累加對應生活技能經驗（採集 `GATHERING`、釣魚 `FISHING`、挖礦 `MINING`）。
@@ -442,6 +444,7 @@ sequenceDiagram
      - 製作成功後，依據 `totalEnergyCost` 實際消耗精力，以 **1:1** 扣除該地點建築物的 `currentDurability`（最低至 0）。
      - 若耐久度耗盡降至 0，發布系統日誌「場景設施【建築物名稱】已耗盡耐久度並損壞！」，並隨 API 回傳最新場景資料，前端建築物耐久度進度條即時更新。
   8. **製作產物觸發新配方解鎖**：若製作成功（`successCraftQty > 0`）獲得新產物，透過 `triggerRecipeUnlocks` 比對所有配方的 `triggerItem`。若符合且尚未擁有，自動加入玩家的 `unlockedRecipes`，並隨 API 回傳 `newlyUnlockedRecipes`，前端透過 `logNewlyUnlockedRecipes` 輸出提示日誌「這好像可以做成[配方名稱]。」。
+  9. **多重瓶頸綜合裁定與體能防透支（策略 A）**：實際製作次數 `actualCraftQty = min(numCraftQty, maxByMaterials, maxByEnergy, maxByTools, maxBySatiety)`。若因飽食度/水分歸零受限停止，輸出日誌「飢渴難耐，體能透支，只製作了X次便停止了。」；若 `maxBySatiety <= 0`，前端按鈕禁用顯示「飢渴中」。
 
 ---
 
@@ -584,12 +587,16 @@ sequenceDiagram
   - 前端視圖：`src/components/panels/InventoryPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `consumeItem(inventoryItemId, qty)`
   - 後端路由：`server/routes/api.js` -> `router.post('/player/consume')`
-  - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `settleItemDecay()`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `settleItemDecay()`, `checkNutritionOverLimit()`, `calculateMaxConsumableQty()`
 - **關鍵功能與運作機制**：
-  1. **後端低耐久優先消耗**：當玩家持有多份同類食品時，後端透過 `compareItemDurability` 排序，優先吃掉耐久度最低、最接近過期的食物實體。
-  2. **防溢防浪費驗證**：若食用該食物所帶來的飽食度或水分增加量會導致玩家當前數值超過上限 120 (`MAX_FOOD` / `MAX_WATER`)，後端自動拒絕操作並回傳提示「現在還不需要這個。」。
-  3. **營養數值累加機制 (Additive)**：食物所含的各項營養數值（包含道具基礎 `nutrition` 與客製化料理附加的 `bonusNutrition`）直接以加法累加至玩家的各項基礎能力值（力量、速度、精巧、防禦、最大生命、當前生命、水分、飽食度），非覆寫。
-  4. **日誌與原子持久化**：後端計算變動文字並直接 `player.save()` 寫入資料庫，前端接收回傳資料更新狀態並印出系統事件日誌。
+  1. **手動選取與低耐久優先消耗**：介面提供獨立實體小卡供玩家手動點選目標食物；若玩家未手動點選，後端透過 `compareItemDurability` 排序預設優先消耗耐久度最低、最接近過期的食物實體。
+  2. **獨立「吃飽」快捷按鈕**：
+     - 排列於「使用」按鈕左側，外觀採用與數量選擇器 MAX 按鈕一致的金黃光澤視覺風格。
+     - 透過共用核心函式 `calculateMaxConsumableQty`，結合玩家目前飽食度與持有數量，一鍵以最高安全數量直接食用。
+     - 專案禁用滑鼠懸停顯示（對行動裝置友善）；當無法再進食（`fillQty <= 0`）時，按鈕自動禁用並以灰字呈現「已飽」。
+  3. **防溢防浪費驗證**：若食用該食物所帶來的飽食度或水分增加量會導致玩家當前數值超過上限 120 (`MAX_FOOD` / `MAX_WATER`)，後端透過 `checkNutritionOverLimit` 自動拒絕操作並回傳提示「現在還不需要這個。」。
+  4. **營養數值累加機制 (Additive)**：食物所含的各項營養數值（包含道具基礎 `nutrition` 與客製化料理附加的 `bonusNutrition`）直接以加法累加至玩家的各項基礎能力值（力量、速度、精巧、防禦、最大生命、當前生命、水分、飽食度），非覆寫。
+  5. **日誌與原子持久化**：後端計算變動文字並直接 `player.save()` 寫入資料庫，前端接收回傳資料更新狀態並印出系統事件日誌。
 
 ---
 
@@ -604,10 +611,10 @@ sequenceDiagram
     participant API as server/routes/api.js (POST /player/consume)
     participant DB as MongoDB (Player)
 
-    Player->>View: 點擊背包中的盛水容器，點擊「飲用」
+    Player->>View: 點擊背包盛水容器與目標實體小卡，點擊「飲用」或「喝飽」
     View->>Store: consumeItem(inventoryItemId, qty)
     Store->>API: POST /api/player/consume { instanceId, itemId, qty }
-    Note over API: 後端識別為容器：檢查 contents.amount > 0<br/>驗證水分防溢門檻 (<= 120)
+    Note over API: 後端精準命中目標容器實體：檢查 contents.amount > 0<br/>透過 checkNutritionOverLimit 驗證水分防溢門檻 (<= 120)
     API->>API: 累加水分至 player.stats.water，扣減液體存量 (amount -= qty)
     API->>API: 容器實體永續保留於背包 (即使清空絕不刪除)
     API->>DB: player.save() 寫入資料庫
@@ -620,12 +627,17 @@ sequenceDiagram
   - 前端視圖：`src/components/panels/InventoryPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `consumeItem(inventoryItemId, qty)`
   - 後端路由：`server/routes/api.js` -> `router.post('/player/consume')`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `checkNutritionOverLimit()`, `calculateMaxConsumableQty()`
 - **關鍵功能與運作機制**：
   1. **容器與液體解構識別**：後端檢測到道具類型包含 `CONTAINER` 時，切換至容器飲用邏輯分支。
-  2. **內裝液體存量檢驗**：檢查容器內的 `contents: { itemId, amount }`。若存量 `<= 0` 或 `itemId` 為空，拒絕操作並提示「[...] 裡沒有任何液體，無法飲用。」。
-  3. **水分上限防溢控制**：讀取內裝液體的營養數據，若飲用後水分將超過上限 120，阻止操作並提示「現在還不需要這個。」。
-  4. **容器本體永續保留**：飲用僅扣除容器內部的液體存量 `contents.amount`（若全部喝完則將 `contents.itemId` 設為空字串），**容器實體本身完整保留於背包中**，絕不被刪除。
-  5. **原子儲存與日誌同步**：增加的水分累加至 `player.stats.water`，後端保存至 DB 並回傳日誌文字，前端呼叫 `applyPlayerData` 刷新介面。
+  2. **獨立「喝飽」快捷按鈕**：
+     - 排列於「飲用」按鈕左側，採用金黃高亮風格。
+     - 透過 `calculateMaxConsumableQty` 結合容器內液體存量與水分容許上限，一鍵喝滿至 120。
+     - 禁用滑鼠懸停顯示；水分達標時自動禁用並以灰字呈現「已飽」。
+  3. **內裝液體存量檢驗**：檢查容器內的 `contents: { itemId, amount }`。若存量 `<= 0` 或 `itemId` 為空，拒絕操作並提示「[...] 裡沒有任何液體，無法飲用。」。
+  4. **水分上限防溢控制**：讀取內裝液體的營養數據，後端透過共用函式 `checkNutritionOverLimit` 嚴格把關，若飲用後水分將超過上限 120，阻止操作並提示「現在還不需要這個。」。
+  5. **容器本體永續保留**：飲用僅扣除容器內部的液體存量 `contents.amount`（若全部喝完則將 `contents.itemId` 設為空字串），**容器實體本身完整保留於背包中**，絕不被刪除。
+  6. **原子儲存與日誌同步**：增加的水分累加至 `player.stats.water`，後端保存至 DB 並回傳日誌文字，前端呼叫 `applyPlayerData` 刷新介面。
 
 ---
 
@@ -680,12 +692,12 @@ sequenceDiagram
     participant Helper as gameHelpers.js
     participant DB as MongoDB (Player/Location)
 
-    Player->>View: 點擊背包道具的「丟棄」，選擇丟棄數量
+    Player->>View: 點選背包目標道具與特定實體小卡，點擊「丟棄」
     View->>Store: dropItem(locationId, itemKey, count)
     Store->>API: POST /api/player/drop-item { locationId, itemKey, count }
     API->>API: 驗證玩家當前位置與 locationId 一致
     API->>Helper: settlePlayerInventoryDecay / settleLocationPlacedItemsDecay
-    API->>Helper: compareItemDurability 排序，優先選取最低耐久道具
+    API->>Helper: 目標實體優先匹配；若未手動指定則依 compareItemDurability 排序優先選取最低耐久道具
     API->>API: 從玩家背包扣除數量 (歸零則自背包移除)
     API->>Helper: addItemToPlacedItems 保留道具完整 metadata 移至地面放置物
     API->>DB: 同步儲存 Location.placedItems 與 Player.inventory
@@ -701,7 +713,7 @@ sequenceDiagram
   - 核心輔助：`src/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemToPlacedItems()`
 - **關鍵功能與運作機制**：
   1. **位置防偽檢驗**：後端嚴格驗證玩家目前所在場景 `player.location` 必須與請求丟棄的地點 `locationId` 完全一致。
-  2. **優先丟棄低耐久道具**：透過 `compareItemDurability` 排序，優先扣減耐久度最低的實體道具。
+  2. **目標實體精確丟棄與預設低耐久**：支援玩家手動選定特定實體小卡進行丟棄；若未手動選定特定實體，則透過 `compareItemDurability` 排序，優先扣減耐久度最低的實體道具。
   3. **完整實體屬性封裝**：被丟棄的道具實體完整保留所有 metadata（包括 `instanceId`、目前與最大耐久度 `durability`/`maxDurability`、品質 `quality`、自訂修飾名稱 `customName`/`customNameEn`、料理附加營養 `bonusNutrition`、水壺容器內裝內容物 `contents` 以及腐敗基準時間戳 `lastDecayedAt`）。
   4. **保鮮分級桶與加權堆疊生成**：呼叫 `addItemToPlacedItems`：
      - 易腐消耗品：若地面已存在相同保鮮檔位（新鮮、普通、臨期）的物品，自動以**加權平均耐久度**合併數量。
@@ -722,13 +734,13 @@ sequenceDiagram
     participant API as server/routes/api.js
     participant Helper as gameHelpers.js
 
-    Player->>View: 點擊地面物品清單中的「撿起」
+    Player->>View: 點選地面物品與特定實體小卡，點擊「撿起」
     View->>View: 鎖定按鈕 (isSubmitting = true)
     View->>Store: pickUpPlacedItem(locationId, instanceId, count)
     Store->>API: POST /api/location/pickup-item { locationId, instanceId, count }
     API->>API: 進入玩家 Action Mutex 排隊鎖
     API->>Helper: settleLocationPlacedItemsDecay / settlePlayerInventoryDecay
-    API->>API: 精確以 instanceId 扣除地面該檔位堆疊
+    API->>API: 精確以所選手動目標 instanceId 扣除地面堆疊（未指定則預設選取最高耐久度實體）
     API->>API: grantItemsToPlayer 移入玩家背包 (同檔位加權平均堆疊並觸發配方解鎖)
     API-->>Store: 回傳更新後資料 (含 locations 與 newlyUnlockedRecipes)
     Store->>Store: applyPlayerData(data, { locations }), logNewlyUnlockedRecipes(newlyUnlockedRecipes)
@@ -741,7 +753,7 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/location/pickup-item')`, `grantItemsToPlayer()`
   - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **優選高品質與高耐久道具**：當地面存在多件同類物品時，前端優先指定耐久度最高（`sortedItems[0]`）的實體堆疊移入玩家背包。
+  1. **手動選取目標與預設最高耐久**：介面顯示現場實體小卡支援手動點選目標道具；若未手動點選，前端預設指定耐久度最高（`sortedItems[0]`）的實體堆疊移入玩家背包。
   2. **現場物品轉移與背包加權堆疊**：從場景 `location.placedItems` 陣列中精確扣減該堆疊，透過 `grantItemsToPlayer` 統一將其轉移入玩家背包 `player.inventory`；若背包已有同檔位物品則自動採**加權平均耐久度**合併，繼承原始 metadata。
   3. **拾取觸發配方解鎖**：透過 `grantItemsToPlayer` 統一發放道具，拾取入包時自動比對 `recipe.triggerItem`，若吻合即時解鎖新配方，並由前端輸出「這好像可以做成[配方名稱]。」提示日誌。
   4. **前後端並發防護**：前端啟用 `isSubmitting` 禁用按鈕，後端啟用玩家動作鎖串行排隊，徹底消除競態翻倍增殖。
@@ -867,7 +879,7 @@ flowchart TD
     Check80 -- 否 --> Check60{"water >= 60 且<br>food >= 60 ?"}
 
     Check60 -- 是 --> LightFed["【輕度飽足 (LIGHT_FED)】<br>• 行動精力消耗 × 0.9 (-10%)<br>• 無回血效果"]
-    Check60 -- 否 --> Check30{"water < 30 且<br>food < 30 ?"}
+    Check60 -- 否 --> Check30{"water < 30 或<br>food < 30 ?"}
 
     Check30 -- 是 --> Famished["【飢渴虛弱 (FAMISHED_DEHYDRATED)】<br>• 行動精力消耗 × 1.2 (+20%)<br>• 無回血效果"]
     Check30 -- 否 --> Normal["【一般狀態 (NORMAL)】<br>• 行動精力消耗 × 1.0<br>• 無回血效果"]
@@ -885,9 +897,9 @@ flowchart TD
 
 - **涉及檔案與函式**：
   - 核心常數（前後端 SSOT）：`src/constants/gameConstants.js`
-  - 前後端通用演算法：`server/utils/energyHelper.js` 與 `src/utils/gameHelpers.js` -> `getStatusEffects()`, `calculateEffectiveEnergyCost()`, `applyEnergyConsumption()`, `isPlayerComatose()`
+  - 前後端通用演算法：`shared/utils/energyHelper.js`（作為狀態與精力之唯一真實來源 SSOT）與 `src/utils/gameHelpers.js`（重新導出引用） -> `getStatusEffects()`, `calculateEffectiveEnergyCost()`, `applyEnergyConsumption()`, `isPlayerComatose()`
   - 前端狀態運算：`src/store/useGameStore.js` -> `calculateEnergyConsumption()`
-  - 前端介面呈現：`src/components/TopHUD.jsx` (頂部狀態徽章與 Tooltip 懸浮說明)
+  - 前端介面呈現：`src/components/TopHUD.jsx` (頂部常駐精力條、血條、水分條、飽食條；飽食狀態按鈕移除 Hover 懸停改為點擊展開說明框，純文字且背景框線比照個人資料選單，常駐顯示包含「普通」在內之四大狀態；個人資料頁面右上角顯示金錢，專注呈現負重與屬性技能)
 - **關鍵功能與運作機制**：
   1. **全域數值常數定義 (SSOT)**：
      - 水分上限 `MAX_WATER = 120`，飽食度上限 `MAX_FOOD = 120`。
@@ -896,7 +908,7 @@ flowchart TD
   2. **四大狀態效果判定 (`getStatusEffects`)**：
      - **充沛飽足 (WELL_FED)**：飽食度 `>= 80` 且 水分 `>= 80`。行動精力消耗 -10%（`multiplier = 0.9`），並具備回血能力（`canRegenHp = true`）。
      - **輕度飽足 (LIGHT_FED)**：飽食度 `>= 60` 且 水分 `>= 60`（且未達充沛飽足）。行動精力消耗 -10%（`multiplier = 0.9`），不具備回血能力。
-     - **飢渴虛弱 (FAMISHED_DEHYDRATED)**：飽食度 `< 30` 且 水分 `< 30`（兩項皆低於 30）。行動精力消耗 +20%（`multiplier = 1.2`）。
+     - **飢渴虛弱 (FAMISHED_DEHYDRATED)**：飽食度 `< 30` 或 水分 `< 30`（任一項低於 30）。行動精力消耗 +20%（`multiplier = 1.2`）。
      - **一般狀態 (NORMAL)**：其餘數值區間，行動精力消耗維持 1.0 倍率。
   3. **行動精力折算與能力速度加成 (calculateEffectiveEnergyCost)**:
      - 所有消耗精力的行動（地點移動、資源採集、物品製作）皆透過此函式整合**飽食度狀態倍率**與**三維能力值加成**。
@@ -907,6 +919,11 @@ flowchart TD
      - **水分與飽食扣除**：將當前精力消耗累加至 `player.energySpentAccumulator`，每滿 15 點扣除 1 水分與 1 飽食度，餘數保留至下次行動。
      - **飽足生命回復**：處於充沛飽足時，精力消耗累加至 `player.hpRegenAccumulator`，每滿 10 點恢復 1 點 HP（不超過 `maxHp`），餘數保留至下次行動。
   5. **昏迷判定與行動封鎖 (`isPlayerComatose`)**：當水分、飽食度或生命值任一項小於等於 0 時，判定玩家處於昏迷狀態。此時面板禁用移動、採集與製作按鈕，並於日誌發布「【角色名稱】處於昏迷中，無法行動！」。
+  6. **精力消耗體徵防透支截斷機制 (`calculateMaxExecutableBySatiety`)**：
+     - **策略 A（極限扣至 0 停止）**：防止大量操作透支生存數值。依據瓶頸指標 `limitingStat = Math.min(water, food)` 計算最大允許觸發之衰減週期 `maxDrains = Math.floor(limitingStat)`。
+     - 可消耗的最大精力：`maxAllowedEnergy = Math.max(0, (maxDrains + 1) * 15 - currentAccumulator - 0.001)`。
+     - 依單次消耗計算最大次數：`maxBySatiety = Math.floor(maxAllowedEnergy / singleCost)`。
+     - 當 `maxBySatiety <= 0` 時，行動（採集、製作、移動）前端按鈕一律禁用並統一顯示為「**飢渴中**」，後端予以阻擋（HTTP 400）。若請求次數超過 `maxBySatiety`，後端只執行至上限次數（扣至 0 為止）並於日誌提示中斷。
 
 ---
 
@@ -948,39 +965,44 @@ node server/scripts/syncSeedsToDb.js locations --prod
 ```
 
 ### 4. 正式資料鏡像至測試庫 (Clone Prod to Dev)
-若需將線上真實玩家與地面散落物品複製至本機測試庫進行除錯或堆疊測試：
+若需將線上正式資料庫的完整資料鏡像複製至本機測試庫進行除錯或堆疊測試：
 ```bash
-# 單向鏡像複製 (locations, players, gamelogs) 至 AetherImmersion_dev
+# 單向鏡像複製所有集合（亦可於後方指定特定集合名稱）至 AetherImmersion_dev
 npm run db:clone:dev
-
-# 複製並自動對測試庫現存散落物執行加權平均整併測試
-npm run db:clone:dev:compact
 ```
 
-### 5. 線上資料庫批次整併與清理 (Database Consolidation)
-若需對資料庫中現存的散落物品（地面放置物與玩家背包）進行一次性加權堆疊大掃除：
+### 5. 資料庫全量備份與安全還原 (Backup & Restore)
+採用 BSON EJSON 原生格式序列化，確保 ObjectId、Date 等型別 100% 精準保存（備份檔存放於本機 `backups/` 並已受 `.gitignore` 保護）：
 ```bash
-# 整理【本機測試庫】(AetherImmersion_dev)
-npm run db:compact
+# 備份【線上正式庫】(AetherImmersion)
+npm run db:backup:prod
+# 備份並加上自訂標籤
+node server/scripts/backupDb.js --prod --name before_update
 
-# 整理【線上正式庫】(AetherImmersion)
-npm run db:compact:prod
+# 備份【本機測試庫】(AetherImmersion_dev)
+npm run db:backup
+
+# 還原最新一筆備份至【本機測試庫】
+npm run db:restore
+
+# 還原最新一筆備份至【線上正式庫】(具備 --confirm 防手滑保護)
+npm run db:restore:prod -- --confirm
 ```
 
-### 6. 啟動後端 Express API 伺服器
+### 7. 啟動後端 Express API 伺服器
 ```bash
 node server/index.js
 ```
 - API 服務網址：`http://localhost:5000`
 - 健康檢查端點：`http://localhost:5000/api/health`
 
-### 7. 啟動前端 Vite 開發伺服器
+### 8. 啟動前端 Vite 開發伺服器
 ```bash
 npm run dev
 ```
 - 前端網頁介面：`http://localhost:5173`
 
-### 8. 語法檢查與生產環境打包測試
+### 9. 語法檢查與生產環境打包測試
 ```bash
 # 執行 ESLint 程式碼檢查
 npm run lint

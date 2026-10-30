@@ -2,6 +2,7 @@ import { useGameStore, translations } from '../../store/useGameStore';
 import {
   isPlayerComatose,
   calculateEffectiveEnergyCost,
+  calculateMaxExecutableBySatiety,
   isPlayerOverburdened,
   calculateCurrentWeight,
   calculateMaxWeight,
@@ -71,18 +72,27 @@ export const MovePanel = () => {
           const travelCheck = checkTravelRequirements(connection, inventory, items);
           const hasRequiredItem = travelCheck.canTravel;
           const isMissingItem = !isCurrent && !hasRequiredItem;
-          const isDisabled = isCurrent || isComatose || isOverburdened || !hasRequiredItem;
           const baseCost = connection?.energyCost ?? 1;
           const cost = calculateEffectiveEnergyCost(player, baseCost, 'TRAVEL');
+          const maxTravelBySatiety = calculateMaxExecutableBySatiety(player, cost);
+          const hasSatiety = maxTravelBySatiety >= 1;
+          const isStarvingOrThirsty = !isCurrent && !isComatose && !hasSatiety;
+          const currentEnergy = Math.round((player?.energy ?? 0) * 10) / 10;
+          const hasEnergy = currentEnergy >= cost;
+          const isDisabled = isCurrent || isComatose || isStarvingOrThirsty || isOverburdened || !hasRequiredItem || !hasEnergy;
 
           const buttonLabel = isCurrent
             ? t.currentLocation
             : isComatose
             ? (t.comatose || '昏迷中')
+            : isStarvingOrThirsty
+            ? (language === 'en' ? 'Famished' : '飢渴中')
             : isOverburdened
             ? (t.overburdened || (language === 'en' ? 'Overburdened' : '負重超載'))
             : isMissingItem
             ? (language === 'en' ? `Need ${travelCheck.requiredItemNameEn || 'Item'}` : `需要${travelCheck.requiredItemName || '道具'}`)
+            : !hasEnergy
+            ? (t.notEnoughEnergy || (language === 'en' ? 'Not enough energy' : '精力不足'))
             : t.goToLocation;
 
           return (
@@ -105,7 +115,7 @@ export const MovePanel = () => {
               </div>
               <button
                 type="button"
-                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''} ${isMissingItem ? 'btn-missing-item' : ''} ${isComatose && !isCurrent ? 'btn-comatose' : ''}`}
+                className={`btn-move ${isCurrent ? 'btn-active' : ''} ${isOverburdened && !isCurrent ? 'btn-overburdened' : ''} ${isMissingItem ? 'btn-missing-item' : ''} ${isComatose && !isCurrent ? 'btn-comatose' : ''} ${isStarvingOrThirsty ? 'btn-famished' : ''}`}
                 disabled={isDisabled}
                 onClick={(e) => {
                   e.stopPropagation();

@@ -18,7 +18,7 @@ import { MAX_WATER, MAX_FOOD, ENERGY_RECOVERY_INTERVAL_MS } from '../constants/g
 
 /**
  * 頂部抬頭顯示器 (Top HUD) 元件。
- * 顯示玩家頭像、詳細能力下拉視窗、設定選單、精力條與當前持有金錢。
+ * 顯示玩家頭像、詳細能力下拉視窗（個人資料頁面：金錢/負重/屬性/技能）、設定選單、常駐精力條/血條/水分條/飽食條。
  * @returns {JSX.Element}
  */
 export const TopHUD = () => {
@@ -37,6 +37,7 @@ export const TopHUD = () => {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [playerDetailsOpen, setPlayerDetailsOpen] = useState(false);
+  const [statusInfoOpen, setStatusInfoOpen] = useState(false);
 
   const maxHp = player?.stats?.maxHp ?? player?.maxHp ?? 100;
   const maxEnergy = player?.maxEnergy ?? 4320;
@@ -61,16 +62,9 @@ export const TopHUD = () => {
     if (!eff) return '';
     if (eff.id === 'WELL_FED') return t.statusWellFed || '充沛飽足';
     if (eff.id === 'LIGHT_FED') return t.statusLightFed || '輕度飽足';
+    if (eff.id === 'NORMAL') return t.statusNormal || '普通';
     if (eff.id === 'FAMISHED_DEHYDRATED') return t.statusFamishedDehydrated || '飢渴虛弱';
     return language === 'en' ? eff.nameEn : eff.name;
-  };
-
-  const getStatusDesc = (eff) => {
-    if (!eff) return '';
-    if (eff.id === 'WELL_FED') return t.statusWellFedDesc || eff.description;
-    if (eff.id === 'LIGHT_FED') return t.statusLightFedDesc || eff.description;
-    if (eff.id === 'FAMISHED_DEHYDRATED') return t.statusFamishedDehydratedDesc || eff.description;
-    return language === 'en' ? eff.descriptionEn : eff.description;
   };
 
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -124,6 +118,22 @@ export const TopHUD = () => {
     };
   }, [player?._id, player?.name, settleInventoryDecay, settleGroundItemsDecay, settleEnergyRecovery]);
 
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.avatar-wrapper')) {
+        setPlayerDetailsOpen(false);
+      }
+      if (!e.target.closest('.gear-wrapper')) {
+        setSettingsOpen(false);
+      }
+      if (!e.target.closest('.status-badge-wrapper') && !e.target.closest('.satiety-status-dropdown-menu')) {
+        setStatusInfoOpen(false);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
+
   const formatCountdown = (secs) => {
     if (secs <= 0) return '00:00';
     const mins = Math.floor(secs / 60);
@@ -142,7 +152,10 @@ export const TopHUD = () => {
             onClick={() => {
               const nextState = !playerDetailsOpen;
               setPlayerDetailsOpen(nextState);
-              if (nextState) setSettingsOpen(false);
+              if (nextState) {
+                setSettingsOpen(false);
+                setStatusInfoOpen(false);
+              }
             }}
             title="查看角色資料"
           >
@@ -177,64 +190,20 @@ export const TopHUD = () => {
                     {primaryStatus && (
                       <span
                         className={`hud-status-badge mini status-${primaryStatus.id.toLowerCase()}`}
-                        title={getStatusDesc(primaryStatus)}
                       >
                         {getStatusLabel(primaryStatus)}
                       </span>
                     )}
                   </div>
                 </div>
+
+                <div className="player-details-money" title={`${language === 'en' ? 'Money' : '金錢'}: ${player?.money ?? 0}`}>
+                  <span>💰</span>
+                  <span>{player?.money ?? 0}</span>
+                </div>
               </div>
 
               <div className="player-details-body" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div className="status-bar-group hp-group details-hp">
-                  <div className="status-bar-info">
-                    <span className="bar-label">{t.hp}</span>
-                    <span className="bar-val">{player?.hp ?? 0} / {maxHp}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div
-                      className="bar-fill"
-                      style={{
-                        width: `${hpPercent}%`,
-                        background: getDurabilityColor(hpPercent),
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="status-bar-group details-water">
-                  <div className="status-bar-info">
-                    <span className="bar-label">{t.waterLabel || (language === 'en' ? 'Water' : '水分')}</span>
-                    <span className="bar-val">{waterVal} / {MAX_WATER}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div
-                      className="bar-fill"
-                      style={{
-                        width: `${waterPercent}%`,
-                        background: getDurabilityColor(waterPercent),
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="status-bar-group details-food">
-                  <div className="status-bar-info">
-                    <span className="bar-label">{t.foodLabel || (language === 'en' ? 'Food' : '飽食')}</span>
-                    <span className="bar-val">{foodVal} / {MAX_FOOD}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div
-                      className="bar-fill"
-                      style={{
-                        width: `${foodPercent}%`,
-                        background: getDurabilityColor(foodPercent),
-                      }}
-                    />
-                  </div>
-                </div>
-
                 <div className="status-bar-group details-weight">
                   <div className="status-bar-info">
                     <span className="bar-label">{language === 'en' ? 'Weight' : '負重'}</span>
@@ -330,7 +299,10 @@ export const TopHUD = () => {
             onClick={() => {
               const nextState = !settingsOpen;
               setSettingsOpen(nextState);
-              if (nextState) setPlayerDetailsOpen(false);
+              if (nextState) {
+                setPlayerDetailsOpen(false);
+                setStatusInfoOpen(false);
+              }
             }}
             title={t.settingsTitle || '系統設定'}
           >
@@ -400,14 +372,25 @@ export const TopHUD = () => {
           )}
         </div>
 
-        {primaryStatus && (
-          <div
-            className={`hud-status-badge status-${primaryStatus.id.toLowerCase()}`}
-            title={getStatusDesc(primaryStatus)}
-          >
-            {getStatusLabel(primaryStatus)}
-          </div>
-        )}
+        <div className="status-badge-wrapper">
+          {primaryStatus && (
+            <button
+              type="button"
+              className={`hud-status-badge status-${primaryStatus.id.toLowerCase()}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                const nextState = !statusInfoOpen;
+                setStatusInfoOpen(nextState);
+                if (nextState) {
+                  setPlayerDetailsOpen(false);
+                  setSettingsOpen(false);
+                }
+              }}
+            >
+              {getStatusLabel(primaryStatus)}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="hud-right-bars">
@@ -430,11 +413,119 @@ export const TopHUD = () => {
             <div className="bar-fill energy-fill" style={{ width: `${energyPercent}%` }}></div>
           </div>
         </div>
-        <div className="hud-money-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '0.8125rem', fontWeight: 'bold', color: '#fbbf24' }}>
-          <span>💰</span>
-          <span>{player?.money ?? 0}</span>
+
+        <div className="status-bar-group hp-group" title={`${t.hp}: ${player?.hp ?? 0} / ${maxHp}`}>
+          <div className="status-bar-info">
+            <span className="bar-label">{t.hp}</span>
+            <span className="bar-val">{player?.hp ?? 0} / {maxHp}</span>
+          </div>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{
+                width: `${hpPercent}%`,
+                background: getDurabilityColor(hpPercent),
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="status-bar-group water-group" title={`${t.waterLabel || (language === 'en' ? 'Water' : '水分')}: ${waterVal} / ${MAX_WATER}`}>
+          <div className="status-bar-info">
+            <span className="bar-label">{t.waterLabel || (language === 'en' ? 'Water' : '水分')}</span>
+            <span className="bar-val">{waterVal} / {MAX_WATER}</span>
+          </div>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{
+                width: `${waterPercent}%`,
+                background: getDurabilityColor(waterPercent),
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="status-bar-group food-group" title={`${t.foodLabel || (language === 'en' ? 'Food' : '飽食')}: ${foodVal} / ${MAX_FOOD}`}>
+          <div className="status-bar-info">
+            <span className="bar-label">{t.foodLabel || (language === 'en' ? 'Food' : '飽食')}</span>
+            <span className="bar-val">{foodVal} / {MAX_FOOD}</span>
+          </div>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{
+                width: `${foodPercent}%`,
+                background: getDurabilityColor(foodPercent),
+              }}
+            />
+          </div>
         </div>
       </div>
+
+      {statusInfoOpen && (
+        <div
+          className="satiety-status-dropdown-menu"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="satiety-status-title">
+            {t.satietyStatusTitle || (language === 'en' ? 'Satiety Status Details' : '飽食狀態說明')}
+          </div>
+          <div className="satiety-status-list">
+            {[
+              {
+                id: 'WELL_FED',
+                name: t.statusWellFed || (language === 'en' ? 'Well Fed' : '充沛飽足'),
+                condition: language === 'en' ? 'Food & Water >= 80' : '飽食與水分皆達 80 以上',
+                effect: language === 'en' ? 'Action energy cost -10%, restore 1 HP for every 10 energy spent' : '行動精力消耗 -10%，每消耗 10 點精力恢復 1 HP',
+              },
+              {
+                id: 'LIGHT_FED',
+                name: t.statusLightFed || (language === 'en' ? 'Light Fed' : '輕度飽足'),
+                condition: language === 'en' ? 'Food & Water >= 60' : '飽食與水分皆達 60 以上',
+                effect: language === 'en' ? 'Action energy cost -10%' : '行動精力消耗 -10%',
+              },
+              {
+                id: 'NORMAL',
+                name: t.statusNormal || (language === 'en' ? 'Normal' : '普通'),
+                condition: language === 'en' ? 'Normal Levels' : '正常數值區間',
+                effect: language === 'en' ? 'Normal energy cost (100%)' : '行動精力正常消耗 (100%)',
+              },
+              {
+                id: 'FAMISHED_DEHYDRATED',
+                name: t.statusFamishedDehydrated || (language === 'en' ? 'Famished & Dehydrated' : '飢渴虛弱'),
+                condition: language === 'en' ? 'Food or Water < 30' : '飽食度或水分低於 30',
+                effect: language === 'en' ? 'Action energy cost +20%' : '行動精力消耗 +20%',
+              },
+            ].map((item) => {
+              const isActive = primaryStatus?.id === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={`satiety-status-item ${isActive ? 'active' : ''}`}
+                >
+                  <div className="satiety-status-header">
+                    <span className={`satiety-status-name status-${item.id.toLowerCase()}`}>
+                      {item.name}
+                    </span>
+                    {isActive && (
+                      <span className="satiety-status-active-badge">
+                        {t.currentStatusTag || (language === 'en' ? 'Current' : '目前狀態')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="satiety-status-condition">
+                    {item.condition}
+                  </div>
+                  <div className="satiety-status-effect">
+                    {item.effect}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </header>
   );
 };
