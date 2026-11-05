@@ -33,6 +33,7 @@ export const TopHUD = () => {
   const settleEnergyRecovery = useGameStore((state) => state.settleEnergyRecovery);
   const settleInventoryDecay = useGameStore((state) => state.settleInventoryDecay);
   const settleGroundItemsDecay = useGameStore((state) => state.settleGroundItemsDecay);
+  const getTotalArmorDefense = useGameStore((state) => state.getTotalArmorDefense);
   const t = translations[language] || translations['zh-TW'];
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -54,6 +55,7 @@ export const TopHUD = () => {
   const foodVal = player?.stats?.food ?? MAX_FOOD;
   const waterPercent = Math.min(100, Math.max(0, (waterVal / MAX_WATER) * 100));
   const foodPercent = Math.min(100, Math.max(0, (foodVal / MAX_FOOD) * 100));
+  const armorDefense = getTotalArmorDefense ? getTotalArmorDefense() : 0;
 
   const statusEffects = player ? getStatusEffects(player) : [];
   const primaryStatus = statusEffects[0] || null;
@@ -241,7 +243,9 @@ export const TopHUD = () => {
                     </div>
                     <div>
                       <span style={{ color: '#94a3b8' }}>{t.defLabel || (language === 'en' ? 'Defense' : '防禦')}{language === 'en' ? ': ' : '：'}</span>
-                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{player?.stats?.defense ?? 0}</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>
+                        {player?.stats?.defense ?? 0}{armorDefense > 0 ? ` (+${armorDefense})` : ''}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -272,6 +276,46 @@ export const TopHUD = () => {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
                             <span style={{ color: '#e2e8f0', fontWeight: 500 }}>
                               {s.icon} {skillName} <strong style={{ color: '#38bdf8' }}>LV.{currentLevel}{isMax ? ' (MAX)' : ''}</strong>
+                            </span>
+                            <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                              {isMax ? roundExp(skillData.exp) : `${roundExp(skillData.exp)} / ${reqExp}`}
+                            </span>
+                          </div>
+                          {!isMax && (
+                            <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden' }}>
+                              <div style={{ width: `${percent}%`, height: '100%', background: '#38bdf8', transition: 'width 0.3s ease' }}></div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="player-details-combat-skills-section" style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 600, marginBottom: '6px' }}>
+                    {language === 'en' ? 'Combat Skills' : '戰鬥技能'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {[
+                      { key: 'SWORD', nameZh: '劍術', nameEn: 'Sword Mastery' },
+                      { key: 'UNARMED', nameZh: '徒手格鬥', nameEn: 'Unarmed Combat' },
+                    ].map((s) => {
+                      const skillData = player?.combatSkills?.[s.key] || { level: 0, exp: 0 };
+                      const currentLevel = skillData.level ?? 0;
+                      const isMax = currentLevel >= MAX_SKILL_LEVEL;
+                      const reqExp = getRequiredExpForNextLevel(currentLevel);
+                      const prevExp = SKILL_EXP_THRESHOLDS[currentLevel] || 0;
+                      const percent = isMax
+                        ? 100
+                        : Math.min(100, Math.max(0, ((skillData.exp - prevExp) / (reqExp - prevExp)) * 100));
+                      const skillName = language === 'en' ? s.nameEn : s.nameZh;
+
+                      return (
+                        <div key={s.key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
+                            <span style={{ color: '#e2e8f0', fontWeight: 500 }}>
+                              {skillName} <strong style={{ color: '#38bdf8' }}>LV.{currentLevel}{isMax ? ' (MAX)' : ''}</strong>
                             </span>
                             <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
                               {isMax ? roundExp(skillData.exp) : `${roundExp(skillData.exp)} / ${reqExp}`}

@@ -2,6 +2,7 @@ import { useState, Fragment } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { TOOL_TYPE_LABELS } from '../../constants/translations';
 import { CollapsiblePanel } from '../CollapsiblePanel';
+import { CombatPanel } from './CombatPanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import {
   getNpcIcon,
@@ -144,6 +145,7 @@ export const GatherPanel = () => {
         </div>
       ) : (
         <div className="gather-panel-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {isBattling && <CombatPanel />}
           {visibleCreatures.length > 0 && (
             <Fragment>
               <div className="creatures-horizontal-grid">
@@ -198,8 +200,36 @@ export const GatherPanel = () => {
                             const gName = dbItem ? getLocalizedName(dbItem, language) : goodie.itemId;
                             const currentQty = buyQtys[goodie.itemId] || 1;
                             const unitPrice = goodie.price || 0;
-                            const maxAffordableQty = unitPrice > 0 ? Math.floor((player.money ?? 0) / unitPrice) : Infinity;
-                            const isAffordable = unitPrice === 0 || (currentQty * unitPrice <= (player.money ?? 0));
+                            const reqItems = Array.isArray(goodie.requiredItems) ? goodie.requiredItems : [];
+                            const playerInv = player.inventory || [];
+
+                            let maxByMaterials = Infinity;
+                            const reqItemsStatus = reqItems.map((req) => {
+                              const reqDbItem = items.find((i) => i.itemId === req.itemId);
+                              const reqName = reqDbItem ? getLocalizedName(reqDbItem, language) : req.itemId;
+                              const reqUnitCount = Math.max(1, Number(req.count) || 1);
+                              const ownedCount = playerInv
+                                .filter((inv) => inv.itemId === req.itemId)
+                                .reduce((sum, inv) => sum + (inv.count || 1), 0);
+                              const affordableQty = Math.floor(ownedCount / reqUnitCount);
+                              if (affordableQty < maxByMaterials) {
+                                maxByMaterials = affordableQty;
+                              }
+                              const hasEnoughForCurrent = ownedCount >= reqUnitCount * currentQty;
+                              return {
+                                itemId: req.itemId,
+                                name: reqName,
+                                reqUnitCount,
+                                ownedCount,
+                                hasEnoughForCurrent,
+                              };
+                            });
+
+                            const maxByMoney = unitPrice > 0 ? Math.floor((player.money ?? 0) / unitPrice) : Infinity;
+                            const maxAffordableQty = Math.min(maxByMoney, maxByMaterials);
+                            const hasEnoughMoney = unitPrice === 0 || (currentQty * unitPrice <= (player.money ?? 0));
+                            const hasEnoughMaterials = reqItemsStatus.every((status) => status.hasEnoughForCurrent);
+                            const isAffordable = hasEnoughMoney && hasEnoughMaterials && (maxAffordableQty > 0 || (unitPrice === 0 && reqItems.length === 0));
 
                             return (
                               <div
@@ -221,12 +251,48 @@ export const GatherPanel = () => {
                                     {language === 'en' ? `Price: ${unitPrice}` : `單價: ${unitPrice}`}
                                   </span>
                                 </div>
+                                {reqItemsStatus.length > 0 && (
+                                  <div
+                                    style={{
+                                      fontSize: '0.8rem',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '2px',
+                                      padding: '4px 6px',
+                                      background: 'rgba(0, 0, 0, 0.2)',
+                                      borderRadius: '4px',
+                                    }}
+                                  >
+                                    <span style={{ color: '#94a3b8' }}>
+                                      {language === 'en' ? 'Required Materials:' : '需求材料:'}
+                                    </span>
+                                    {reqItemsStatus.map((status) => (
+                                      <div
+                                        key={status.itemId}
+                                        style={{
+                                          display: 'flex',
+                                          justifyContent: 'space-between',
+                                          color: status.hasEnoughForCurrent ? '#cbd5e1' : '#f87171',
+                                        }}
+                                      >
+                                        <span>
+                                          {status.name} x{status.reqUnitCount * currentQty}
+                                        </span>
+                                        <span>
+                                          {language === 'en'
+                                            ? `(Owned: ${status.ownedCount})`
+                                            : `(持有: ${status.ownedCount})`}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                                   <QuantitySelector
                                     value={currentQty}
                                     onChange={(val) => handleBuyQtyChange(goodie.itemId, val)}
                                     min={1}
-                                    max={maxAffordableQty}
+                                    max={maxAffordableQty > 0 ? maxAffordableQty : 1}
                                   />
                                   <button
                                     type="button"

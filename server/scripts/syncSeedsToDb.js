@@ -8,6 +8,7 @@ import { Npc } from '../models/Npc.js';
 import { Recipe } from '../models/Recipe.js';
 import { BattleSkill } from '../models/BattleSkill.js';
 import { Quest } from '../models/Quest.js';
+import { StatusEffect } from '../models/StatusEffect.js';
 
 import { initialBuildings } from '../seeds/seedBuildings.js';
 import { initialLocations } from '../seeds/seedLocations.js';
@@ -16,6 +17,7 @@ import { initialNpcs } from '../seeds/seedNpcs.js';
 import { initialRecipes } from '../seeds/seedRecipes.js';
 import { initialBattleSkills } from '../seeds/seedBattleSkills.js';
 import { initialQuests } from '../seeds/seedQuests.js';
+import { initialStatusEffects } from '../seeds/seedStatusEffects.js';
 
 dotenv.config();
 
@@ -205,6 +207,27 @@ export async function syncQuests() {
 }
 
 /**
+ * 獨立同步狀態效果資料 (seedStatusEffects.js -> statuseffects)
+ * @returns {Promise<{ name: string, updated: number, inserted: number, total: number }>}
+ */
+export async function syncStatusEffects() {
+  let updated = 0;
+  let inserted = 0;
+  for (const effect of initialStatusEffects) {
+    const res = await StatusEffect.updateOne(
+      { statusId: effect.statusId },
+      { $set: effect },
+      { upsert: true }
+    );
+    if (res.upsertedCount > 0) inserted++;
+    else if (res.modifiedCount > 0) updated++;
+  }
+  const result = { name: 'StatusEffects', updated, inserted, total: initialStatusEffects.length };
+  console.log(`[Sync] StatusEffects 同步完成：更新 ${updated} 筆，新增 ${inserted} 筆，總計 ${initialStatusEffects.length} 筆。`);
+  return result;
+}
+
+/**
  * 支援的同步模組映射表
  */
 export const SYNC_REGISTRY = {
@@ -223,6 +246,10 @@ export const SYNC_REGISTRY = {
   skill: syncBattleSkills,
   quests: syncQuests,
   quest: syncQuests,
+  statuseffects: syncStatusEffects,
+  statuseffect: syncStatusEffects,
+  effects: syncStatusEffects,
+  effect: syncStatusEffects,
 };
 
 /**
@@ -248,15 +275,18 @@ export async function syncSeeds(targets = []) {
     let handlersToRun = [];
 
     if (cleanTargets.length === 0 || cleanTargets.includes('all')) {
-      // 預設核心同步集合
+      // 預設核心同步集合（包含所有基礎模組、技能、任務與狀態效果）
       handlersToRun = [
         syncBuildings,
         syncLocations,
         syncItems,
         syncNpcs,
         syncRecipes,
+        syncBattleSkills,
+        syncQuests,
+        syncStatusEffects,
       ];
-      console.log('[Sync] 未指定特定模組，將依序同步全部主要集合 (buildings, locations, items, npcs, recipes)...');
+      console.log('[Sync] 未指定特定模組，將依序同步全部主要集合 (buildings, locations, items, npcs, recipes, battleskills, quests, statuseffects)...');
     } else {
       for (const target of cleanTargets) {
         const handler = SYNC_REGISTRY[target];

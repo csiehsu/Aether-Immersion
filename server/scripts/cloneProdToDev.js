@@ -31,7 +31,7 @@ export async function cloneProdToDev(targetCollections = null) {
         .filter((name) => !name.startsWith('system.'));
 
       if (colsToClone.length === 0) {
-        colsToClone = ['locations', 'players', 'gamelogs', 'items', 'npcs', 'recipes', 'buildings', 'quests', 'battleskills'];
+        colsToClone = ['locations', 'players', 'gamelogs', 'items', 'npcs', 'recipes', 'buildings', 'quests', 'battleskills', 'statuseffects'];
       }
     }
 

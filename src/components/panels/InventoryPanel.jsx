@@ -27,6 +27,11 @@ export const InventoryPanel = () => {
   const items = useGameStore((state) => state.items || []);
   const consumeItem = useGameStore((state) => state.consumeItem);
   const dropItem = useGameStore((state) => state.dropItem);
+  const equipWeapon = useGameStore((state) => state.equipWeapon);
+  const unequipWeapon = useGameStore((state) => state.unequipWeapon);
+  const equipArmor = useGameStore((state) => state.equipArmor);
+  const unequipArmor = useGameStore((state) => state.unequipArmor);
+  const isBattling = useGameStore((state) => state.isBattling);
   const language = useGameStore((state) => state.language);
   const t = translations[language] || translations['zh-TW'];
 
@@ -155,13 +160,40 @@ export const InventoryPanel = () => {
               const imageUrl = dbItem?.imageUrl;
               const quality = repItem.quality || '普通';
               const isSelected = selectedItemId === group.itemId;
+              const eq = player?.equipment || {};
+              const hasEquippedInGroup = group.items.some(
+                (it) => it.instanceId && (
+                  it.instanceId === eq.weaponInstanceId ||
+                  it.instanceId === eq.chestInstanceId ||
+                  it.instanceId === eq.legInstanceId
+                )
+              );
 
               return (
                 <div
                   key={group.itemId}
                   className={`inventory-item-card quality-${quality} ${isSelected ? 'selected' : ''}`}
                   onClick={() => handleSelectItem(group.itemId)}
+                  style={{ position: 'relative' }}
                 >
+                  {hasEquippedInGroup && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '4px',
+                        left: '4px',
+                        backgroundColor: '#0284c7',
+                        color: '#ffffff',
+                        fontSize: '0.62rem',
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        fontWeight: 600,
+                        zIndex: 2,
+                      }}
+                    >
+                      {language === 'en' ? 'Equipped' : '裝備中'}
+                    </span>
+                  )}
                   <div className="item-icon-box">
                     {imageUrl ? (
                       <img src={imageUrl} alt={itemName} className="inventory-item-img" />
@@ -368,13 +400,28 @@ export const InventoryPanel = () => {
 
                 <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
                   <span>
-                    ⚖️ {language === 'en' ? 'Weight' : '重量'}: {singleActualWeight} kg{repLiquidWeight > 0 ? ` (${language === 'en' ? 'Base' : '本體'} ${baseWeight} kg + ${language === 'en' ? 'Liquid' : '液體'} ${repLiquidWeight} kg)` : ''}{(selectedGroup.totalCount || 1) > 1 ? ` (${language === 'en' ? 'Total' : '總重'}: ${totalItemWeight} kg)` : ''}
+                    {language === 'en' ? 'Weight' : '重量'}: {singleActualWeight} kg{repLiquidWeight > 0 ? ` (${language === 'en' ? 'Base' : '本體'} ${baseWeight} kg + ${language === 'en' ? 'Liquid' : '液體'} ${repLiquidWeight} kg)` : ''}{(selectedGroup.totalCount || 1) > 1 ? ` (${language === 'en' ? 'Total' : '總重'}: ${totalItemWeight} kg)` : ''}
                   </span>
                 </div>
+                {dbItem?.attack !== undefined && dbItem.attack > 0 && (
+                  <div style={{ fontSize: '0.78rem', color: '#f87171', fontWeight: 600, marginTop: '3px' }}>
+                    <span>{language === 'en' ? 'Attack' : '攻擊力'}: +{dbItem.attack}</span>
+                  </div>
+                )}
+                {dbItem?.defense !== undefined && dbItem.defense > 0 && (
+                  <div style={{ fontSize: '0.78rem', color: '#38bdf8', fontWeight: 600, marginTop: '3px' }}>
+                    <span>
+                      {language === 'en' ? 'Defense' : '防禦力'}: +{dbItem.defense}
+                      {Array.isArray(dbItem?.type) && (dbItem.type.includes('CHEST') || dbItem.type.includes('LEG'))
+                        ? ` (${dbItem.type.includes('CHEST') ? (language === 'en' ? 'Chest' : '胸部') : (language === 'en' ? 'Leg' : '腿部')})`
+                        : ''}
+                    </span>
+                  </div>
+                )}
                 {isContainer && (
                   <div style={{ fontSize: '0.78rem', color: '#94a3b8', fontWeight: 500, marginTop: '3px' }}>
                     <span>
-                      💧 {language === 'en' ? 'Stored Liquid' : '內存液體'}: {
+                      {language === 'en' ? 'Stored Liquid' : '內存液體'}: {
                         repLiquidDbItem
                           ? `${getLocalizedName(repLiquidDbItem, language)} (${repItem.contents?.amount ?? 0}/${dbItem?.capacity || 10})`
                           : `${language === 'en' ? 'Empty' : '無'} (0/${dbItem?.capacity || 10})`
@@ -403,7 +450,7 @@ export const InventoryPanel = () => {
 
                 {isOverLimit && (
                   <div style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: 600, marginTop: '4px' }}>
-                    <span>⚠️ {t.notNeededNow || (language === 'en' ? "You don't need this right now." : '現在還不需要這個。')}</span>
+                    <span>{t.notNeededNow || (language === 'en' ? "You don't need this right now." : '現在還不需要這個。')}</span>
                   </div>
                 )}
 
@@ -484,6 +531,89 @@ export const InventoryPanel = () => {
                           : (t.useBtn || (language === 'en' ? 'Use' : '使用'))}
                       </button>
                     )}
+                    {Array.isArray(dbItem?.type) && dbItem.type.includes('WEAPON') && (() => {
+                      const isEquipped = Boolean(
+                        repItem.instanceId && repItem.instanceId === player?.equipment?.weaponInstanceId
+                      );
+                      return (
+                        <button
+                          type="button"
+                          className="btn-equip-weapon"
+                          disabled={isBattling}
+                          style={{
+                            background: isBattling ? '#334155' : isEquipped ? '#475569' : '#0284c7',
+                            color: isBattling ? '#94a3b8' : '#ffffff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '6px 12px',
+                            fontSize: '0.8125rem',
+                            fontWeight: 600,
+                            cursor: isBattling ? 'not-allowed' : 'pointer',
+                            opacity: isBattling ? 0.6 : 1,
+                          }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (isBattling) return;
+                            if (isEquipped) {
+                              await unequipWeapon();
+                            } else {
+                              await equipWeapon(repItem.instanceId);
+                            }
+                          }}
+                        >
+                          {isBattling
+                            ? (language === 'en' ? 'Locked in Combat' : '戰鬥中鎖定')
+                            : isEquipped
+                            ? (language === 'en' ? 'Unequip' : '卸下武器')
+                            : (language === 'en' ? 'Equip' : '裝備武器')}
+                        </button>
+                      );
+                    })()}
+                    {Array.isArray(dbItem?.type) && dbItem.type.includes('ARMOR') && (() => {
+                      const eq = player?.equipment || {};
+                      const isLeg = dbItem.type.includes('LEG');
+                      const currentSlotKey = isLeg ? 'legInstanceId' : 'chestInstanceId';
+                      const isEquipped = Boolean(
+                        repItem.instanceId && repItem.instanceId === eq[currentSlotKey]
+                      );
+                      const slotLabel = isLeg
+                        ? (language === 'en' ? 'Leg' : '腿甲')
+                        : (language === 'en' ? 'Chest' : '胸甲');
+
+                      return (
+                        <button
+                          type="button"
+                          className="btn-equip-armor"
+                          disabled={isBattling}
+                          style={{
+                            background: isBattling ? '#334155' : isEquipped ? '#475569' : '#0284c7',
+                            color: isBattling ? '#94a3b8' : '#ffffff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '6px 12px',
+                            fontSize: '0.8125rem',
+                            fontWeight: 600,
+                            cursor: isBattling ? 'not-allowed' : 'pointer',
+                            opacity: isBattling ? 0.6 : 1,
+                          }}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (isBattling) return;
+                            if (isEquipped) {
+                              await unequipArmor(repItem.instanceId);
+                            } else {
+                              await equipArmor(repItem.instanceId);
+                            }
+                          }}
+                        >
+                          {isBattling
+                            ? (language === 'en' ? 'Locked in Combat' : '戰鬥中鎖定')
+                            : isEquipped
+                            ? (language === 'en' ? `Unequip (${slotLabel})` : `卸下${slotLabel}`)
+                            : (language === 'en' ? `Equip (${slotLabel})` : `裝備${slotLabel}`)}
+                        </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       className="btn-drop-item"

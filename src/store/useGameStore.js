@@ -11,6 +11,10 @@ import {
   settleItemDecay,
   isDecayItem,
   checkTravelRequirements,
+  selectSkillByTactics,
+  getAvailableBattleSkills,
+  calculateSkillLevel,
+  roundExp,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -19,9 +23,14 @@ import {
   DEFAULT_INITIAL_STATS,
   ENERGY_DRAIN_CYCLE,
   ENERGY_HP_REGEN_CYCLE,
+  COMBAT_TURN_TIMEOUT,
+  DEFAULT_ATTACK_SKILL_ID,
 } from '../constants/gameConstants';
 
 export { translations };
+
+// 全域戰鬥時鐘計時器引用
+let combatIntervalTimer = null;
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const STORAGE_PLAYER_ID_KEY = 'aether_player_id';
@@ -195,9 +204,36 @@ export const useGameStore = create((set, get) => ({
 
   questsList: [],
 
+  statusEffects: [],
+
   logs: [],
 
   isBattling: false,
+
+  // 戰鬥狀態機狀態（支援手動決策、30秒倒數、自動戰術與多人擴充）
+  combatState: {
+    isBattling: false,
+    isAutoBattle: false,
+    turnTimeRemaining: COMBAT_TURN_TIMEOUT,
+    currentTurn: 'player',
+    turnCount: 1,
+    participants: {
+      player: null,
+      enemy: null,
+    },
+    enemyCreature: null,
+  },
+
+  // 玩家自訂戰鬥設定（自動戰鬥開關、戰術優先條件清單）
+  battleSettings: {
+    isAutoBattle: false,
+    tactics: [
+      { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+      { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+      { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+      { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+    ],
+  },
 
   /**
    * 統一將後端回傳的玩家資料同步寫入 Zustand Store。
@@ -234,7 +270,16 @@ export const useGameStore = create((set, get) => ({
           stats,
           skills: Array.isArray(dbP.skills) && dbP.skills.length > 0
             ? dbP.skills
-            : [{ skillId: 'NORMAL_ATTACK', level: 0 }],
+            : [{ skillId: DEFAULT_ATTACK_SKILL_ID, level: 0 }],
+          combatSkills: dbP.combatSkills || state.player?.combatSkills || {
+            SWORD: { level: 0, exp: 0 },
+            UNARMED: { level: 0, exp: 0 },
+          },
+          equipment: dbP.equipment || state.player?.equipment || {
+            weaponInstanceId: null,
+            chestInstanceId: null,
+            legInstanceId: null,
+          },
           str: stats.strength,
           spd: stats.speed,
           dex: stats.dexterity,
@@ -259,7 +304,9 @@ export const useGameStore = create((set, get) => ({
             MINING: { level: 0, exp: 0 },
             COOKING: { level: 0, exp: 0 },
           },
+          battleSettings: dbP.battleSettings || state.player?.battleSettings || state.battleSettings,
         },
+        battleSettings: dbP.battleSettings || state.battleSettings,
       };
     });
   },
@@ -443,6 +490,8 @@ export const useGameStore = create((set, get) => ({
   fetchBattleSkills: () => fetchCollection('/battle-skills', 'battleSkills', set),
   /** 載入全域任務集合清單 */
   fetchQuests: () => fetchCollection('/quests', 'questsList', set),
+  /** 載入全域戰鬥狀態效果集合清單 */
+  fetchStatusEffects: () => fetchCollection('/status-effects', 'statusEffects', set),
 
   /**
    * 與後端 MongoDB 同步所有遊戲資料（道具、地點、配方、NPC、技能、任務、玩家資料與日誌）。
@@ -464,6 +513,7 @@ export const useGameStore = create((set, get) => ({
         get().fetchBuildings(),
         get().fetchBattleSkills(),
         get().fetchQuests(),
+        get().fetchStatusEffects(),
       ]);
 
       let storedPlayerId = '';
@@ -1154,6 +1204,18 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 是否成功丟棄。
    */
   dropItem: async (locationId, itemKey, count = 1) => {
+    const eq = get().player?.equipment || {};
+    const isEquippedItem = itemKey === eq.weaponInstanceId || itemKey === eq.chestInstanceId || itemKey === eq.legInstanceId;
+    if ((get().isBattling || get().combatState?.isBattling) && isEquippedItem) {
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '戰鬥中禁止丟棄已裝備之武器或防具！',
+        'Cannot drop equipped weapon or armor during combat!',
+        'system'
+      );
+      return false;
+    }
     try {
       const res = await fetch(`${API_BASE}/player/drop-item`, {
         method: 'POST',
@@ -1177,6 +1239,332 @@ export const useGameStore = create((set, get) => ({
       console.error('[Drop Item Error]', err);
     }
     return false;
+  },
+
+  /**
+   * 取得玩家當前裝備之武器道具物件（整合背包實例與物品基礎數值，含 attack 攻擊力）。
+   * 若未裝備或背包中找不到該武器實體，回傳 null。
+   * @returns {Object|null}
+   */
+  getEquippedWeaponItem: () => {
+    const { player, inventory, items } = get();
+    const weaponInstanceId = player?.equipment?.weaponInstanceId;
+    if (!weaponInstanceId) return null;
+    const invItem = (inventory || []).find((i) => i.instanceId === weaponInstanceId);
+    if (!invItem) return null;
+    const baseItem = (items || []).find((i) => i.itemId === invItem.itemId);
+    if (!baseItem) return null;
+    return {
+      ...baseItem,
+      ...invItem,
+      attack: Number(baseItem.attack) || 0,
+    };
+  },
+
+  /**
+   * 裝備背包中的特定武器道具。
+   * @param {string} instanceId - 背包物品之唯一 instanceId。
+   * @returns {Promise<boolean>}
+   */
+  equipWeapon: async (instanceId) => {
+    if (get().isBattling || get().combatState?.isBattling) {
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '戰鬥中禁止更換或裝備武器！',
+        'Cannot change or equip weapon during combat!',
+        'system'
+      );
+      return false;
+    }
+    const { inventory, items, player } = get();
+    const invItem = (inventory || []).find((i) => i.instanceId === instanceId);
+    if (!invItem) return false;
+    const baseItem = (items || []).find((i) => i.itemId === invItem.itemId);
+    const types = baseItem?.type || [];
+    if (!types.includes('WEAPON')) {
+      return false;
+    }
+
+    const updatedEquipment = {
+      ...(player?.equipment || {}),
+      weaponInstanceId: instanceId,
+    };
+
+    set((s) => ({
+      player: s.player ? { ...s.player, equipment: updatedEquipment } : s.player,
+    }));
+
+    try {
+      const pId = player?._id || '';
+      if (pId) {
+        const res = await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ equipment: updatedEquipment }),
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success && resData.data) {
+            get().applyPlayerData(resData.data);
+          }
+        }
+      }
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        `已裝備武器【${baseItem?.name || '武器'}】（攻擊力 +${baseItem?.attack || 0}）。`,
+        `Equipped weapon [${baseItem?.nameEn || baseItem?.name || 'Weapon'}] (Attack +${baseItem?.attack || 0}).`,
+        'system'
+      );
+      return true;
+    } catch (err) {
+      console.error('[Equip Weapon Error]', err);
+      return false;
+    }
+  },
+
+  /**
+   * 卸下當前已裝備的武器。
+   * @returns {Promise<boolean>}
+   */
+  unequipWeapon: async () => {
+    if (get().isBattling || get().combatState?.isBattling) {
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '戰鬥中禁止卸下武器！',
+        'Cannot unequip weapon during combat!',
+        'system'
+      );
+      return false;
+    }
+    const { player } = get();
+    const updatedEquipment = {
+      ...(player?.equipment || {}),
+      weaponInstanceId: null,
+    };
+
+    set((s) => ({
+      player: s.player ? { ...s.player, equipment: updatedEquipment } : s.player,
+    }));
+
+    try {
+      const pId = player?._id || '';
+      if (pId) {
+        const res = await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ equipment: updatedEquipment }),
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success && resData.data) {
+            get().applyPlayerData(resData.data);
+          }
+        }
+      }
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '已卸下當前裝備的武器，恢復為徒手狀態。',
+        'Unequipped weapon, returned to unarmed state.',
+        'system'
+      );
+      return true;
+    } catch (err) {
+      console.error('[Unequip Weapon Error]', err);
+      return false;
+    }
+  },
+
+  /**
+   * 取得玩家當前裝備之防具道具清單（包含實體屬性與基礎 defense 防禦力）。
+   * @returns {Array<Object>} 已裝備防具清單。
+   */
+  getEquippedArmorItems: () => {
+    const { player, inventory, items } = get();
+    const eq = player?.equipment || {};
+    const equipped = [];
+    const slots = [
+      { key: 'chestInstanceId', slotName: 'CHEST' },
+      { key: 'legInstanceId', slotName: 'LEG' },
+    ];
+
+    for (const { key, slotName } of slots) {
+      const instId = eq[key];
+      if (!instId) continue;
+      const invItem = (inventory || []).find((i) => i.instanceId === instId);
+      if (!invItem) continue;
+      const baseItem = (items || []).find((i) => i.itemId === invItem.itemId);
+      if (!baseItem) continue;
+      equipped.push({
+        ...baseItem,
+        ...invItem,
+        slot: slotName,
+        defense: Number(baseItem.defense) || 0,
+      });
+    }
+
+    return equipped;
+  },
+
+  /**
+   * 取得玩家當前裝備防具的總防禦力加成。
+   * @returns {number} 總防禦加成點數。
+   */
+  getTotalArmorDefense: () => {
+    const armors = get().getEquippedArmorItems();
+    return armors.reduce((sum, item) => sum + (Number(item.defense) || 0), 0);
+  },
+
+  /**
+   * 裝備背包中的特定防具道具。依道具 type 中的部位 (CHEST / LEG) 自動決定槽位。
+   * @param {string} instanceId - 背包道具唯一 instanceId。
+   * @returns {Promise<boolean>}
+   */
+  equipArmor: async (instanceId) => {
+    if (get().isBattling || get().combatState?.isBattling) {
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '戰鬥中禁止更換或裝備防具！',
+        'Cannot change or equip armor during combat!',
+        'system'
+      );
+      return false;
+    }
+    const { inventory, items, player } = get();
+    const invItem = (inventory || []).find((i) => i.instanceId === instanceId);
+    if (!invItem) return false;
+    const baseItem = (items || []).find((i) => i.itemId === invItem.itemId);
+    const types = baseItem?.type || [];
+    if (!types.includes('ARMOR')) {
+      return false;
+    }
+
+    let slotKey = 'chestInstanceId';
+    let slotDisplayName = '胸甲';
+    if (types.includes('LEG')) {
+      slotKey = 'legInstanceId';
+      slotDisplayName = '腿甲';
+    } else if (types.includes('CHEST')) {
+      slotKey = 'chestInstanceId';
+      slotDisplayName = '胸甲';
+    }
+
+    const updatedEquipment = {
+      ...(player?.equipment || {}),
+      [slotKey]: instanceId,
+    };
+
+    set((s) => ({
+      player: s.player ? { ...s.player, equipment: updatedEquipment } : s.player,
+    }));
+
+    try {
+      const pId = player?._id || '';
+      if (pId) {
+        const res = await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ equipment: updatedEquipment }),
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success && resData.data) {
+            get().applyPlayerData(resData.data);
+          }
+        }
+      }
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        `已裝備${slotDisplayName}【${baseItem?.name || '防具'}】（防禦力 +${baseItem?.defense || 0}）。`,
+        `Equipped armor [${baseItem?.nameEn || baseItem?.name || 'Armor'}] (Defense +${baseItem?.defense || 0}).`,
+        'system'
+      );
+      return true;
+    } catch (err) {
+      console.error('[Equip Armor Error]', err);
+      return false;
+    }
+  },
+
+  /**
+   * 卸下特定防具槽位或特定 instanceId 之防具。
+   * @param {string} targetKey - 部位代碼 ('CHEST' | 'LEG') 或道具 instanceId。
+   * @returns {Promise<boolean>}
+   */
+  unequipArmor: async (targetKey) => {
+    if (get().isBattling || get().combatState?.isBattling) {
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        '戰鬥中禁止卸下防具！',
+        'Cannot unequip armor during combat!',
+        'system'
+      );
+      return false;
+    }
+    const { player } = get();
+    const currentEq = { ...(player?.equipment || {}) };
+    let unequippedSlot;
+
+    if (targetKey === 'CHEST' || currentEq.chestInstanceId === targetKey) {
+      currentEq.chestInstanceId = null;
+      unequippedSlot = '胸甲';
+    } else if (targetKey === 'LEG' || currentEq.legInstanceId === targetKey) {
+      currentEq.legInstanceId = null;
+      unequippedSlot = '腿甲';
+    } else {
+      currentEq.chestInstanceId = null;
+      unequippedSlot = '防具';
+    }
+
+    set((s) => ({
+      player: s.player ? { ...s.player, equipment: currentEq } : s.player,
+    }));
+
+    try {
+      const pId = player?._id || '';
+      if (pId) {
+        const res = await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ equipment: currentEq }),
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success && resData.data) {
+            get().applyPlayerData(resData.data);
+          }
+        }
+      }
+      get().addLog(
+        '裝備系統',
+        'Equipment System',
+        `已卸下${unequippedSlot}。`,
+        `Unequipped ${unequippedSlot || 'armor'}.`,
+        'system'
+      );
+      return true;
+    } catch (err) {
+      console.error('[Unequip Armor Error]', err);
+      return false;
+    }
   },
 
   /**
@@ -1283,9 +1671,605 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 與野外生物發起即時回合制戰鬥，依照敏捷速度決定先手順序並結算戰利品。
+   * 觸發戰鬥每秒時鐘輪詢 (Combat Clock Tick)。
+   * 在手動模式下進行 30 秒思考倒數，超時自動普通攻擊；在自動戰鬥模式下以 1 秒週期自動依戰術出招。
+   */
+  tickCombat: async () => {
+    const state = get();
+    const combat = state.combatState;
+    if (!combat || !combat.isBattling) {
+      if (combatIntervalTimer) {
+        clearInterval(combatIntervalTimer);
+        combatIntervalTimer = null;
+      }
+      return;
+    }
+
+    if (combat.isResolvingAction) return;
+
+    if (combat.currentTurn === 'enemy') {
+      await get().executeCombatAction('enemy', 'player', null);
+    } else if (combat.currentTurn === 'player') {
+      if (combat.isAutoBattle) {
+        await get().executeCombatAction('player', 'enemy', null);
+      } else {
+        const nextTime = (combat.turnTimeRemaining ?? COMBAT_TURN_TIMEOUT) - 1;
+        if (nextTime <= 0) {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${state.player?.name || '冒險者'}】思考時間已到，自動使用【普通攻擊】！`,
+            `[${state.player?.name || 'Player'}] turn timed out, automatically used [Normal Attack]!`,
+            'event'
+          );
+          await get().executeCombatAction('player', 'enemy', DEFAULT_ATTACK_SKILL_ID);
+        } else {
+          set((s) => ({
+            combatState: {
+              ...s.combatState,
+              turnTimeRemaining: nextTime,
+            },
+          }));
+        }
+      }
+    }
+  },
+
+  /**
+   * 玩家手動選擇並施放戰鬥技能。
+   * @param {string} skillId - 欲施放之技能識別碼。
+   * @returns {Promise<boolean>} 成功出招回傳 true，否則回傳 false。
+   */
+  chooseCombatSkill: async (skillId) => {
+    const { combatState } = get();
+    if (!combatState || !combatState.isBattling || combatState.currentTurn !== 'player' || combatState.isResolvingAction) {
+      return false;
+    }
+    return await get().executeCombatAction('player', 'enemy', skillId);
+  },
+
+  /**
+   * 切換手動戰鬥與自動戰鬥模式。
+   * 自動模式下維持 1 秒 1 回合依戰術策略出招；手動模式下每回合倒數 30 秒。
+   */
+  toggleAutoBattle: () => {
+    const currentAuto = Boolean(get().combatState?.isAutoBattle);
+    const nextAuto = !currentAuto;
+
+    set((s) => ({
+      combatState: {
+        ...s.combatState,
+        isAutoBattle: nextAuto,
+        turnTimeRemaining: COMBAT_TURN_TIMEOUT,
+      },
+      battleSettings: {
+        ...s.battleSettings,
+        isAutoBattle: nextAuto,
+      },
+    }));
+
+    get().addLog(
+      '戰鬥系統',
+      'Combat System',
+      `戰鬥模式切換：【${nextAuto ? '自動戰鬥' : '手動操作'}】（${nextAuto ? '每秒自動依戰術出招' : '每回合倒數 30 秒'}）。`,
+      `Combat mode switched to [${nextAuto ? 'Auto Battle' : 'Manual Control'}].`,
+      'system'
+    );
+
+    get().updateBattleSettings({ isAutoBattle: nextAuto });
+  },
+
+  /**
+   * 更新並持久化玩家自動戰鬥設定（包含戰術優先順序與施放條件清單）。
+   * @param {Object} newSettings - 包含 isAutoBattle 或 tactics 的設定物件。
+   */
+  updateBattleSettings: async (newSettings = {}) => {
+    const current = get().battleSettings || {};
+    const updated = {
+      ...current,
+      ...newSettings,
+      tactics: newSettings.tactics || current.tactics || [],
+    };
+
+    set((s) => ({
+      battleSettings: updated,
+      player: s.player ? { ...s.player, battleSettings: updated } : s.player,
+    }));
+
+    try {
+      const pId = get().player?._id || '';
+      if (pId) {
+        await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ battleSettings: updated }),
+        });
+      }
+    } catch (err) {
+      console.error('[Update Battle Settings Error]', err);
+    }
+  },
+
+  /**
+   * 脫離/逃跑戰鬥，並將當前血量持久化寫回資料庫。
+   * @returns {Promise<boolean>}
+   */
+  fleeBattle: async () => {
+    const { combatState, player } = get();
+    if (!combatState || !combatState.isBattling) return false;
+
+    if (combatIntervalTimer) {
+      clearInterval(combatIntervalTimer);
+      combatIntervalTimer = null;
+    }
+
+    const currentHp = Math.max(0, combatState.participants?.player?.hp ?? player?.hp ?? 0);
+    const pName = player?.name || '冒險者';
+    get().addLog(
+      '戰鬥系統',
+      'Combat System',
+      `【${pName}】脫離了戰鬥。(剩餘 HP: ${currentHp})`,
+      `[${pName}] fled from combat. (Remaining HP: ${currentHp})`,
+      'event'
+    );
+
+    set((s) => ({
+      isBattling: false,
+      player: s.player ? { ...s.player, hp: currentHp } : s.player,
+      combatState: {
+        ...s.combatState,
+        isBattling: false,
+        isResolvingAction: false,
+      },
+    }));
+
+    try {
+      const pId = player?._id || '';
+      if (pId) {
+        const res = await fetch(`${API_BASE}/player`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-player-id': pId,
+          },
+          body: JSON.stringify({ hp: currentHp }),
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success && resData.data) {
+            get().applyPlayerData(resData.data);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Battle Flee Sync Error]', err);
+    }
+    return true;
+  },
+
+  /**
+   * 執行戰鬥行動核心通用結算器 (Universal Combat Action Resolver)。
+   * 具備參與者抽象與隊營分離，完整支援單人手動、自動戰術與未來多人連線擴充。
+   * @param {string} actorId - 行動方識別碼 ('player' | 'enemy' | 未来 'player_2' 等)。
+   * @param {string} targetId - 目標方識別碼。
+   * @param {string|null} [manualSkillId=null] - 手動指定施放的技能 ID，若為 null 則啟動戰術決策。
+   */
+  executeCombatAction: async (actorId, targetId, manualSkillId = null) => {
+    const state = get();
+    const combat = state.combatState;
+    if (!combat || !combat.isBattling) return false;
+
+    set((s) => ({ combatState: { ...s.combatState, isResolvingAction: true } }));
+
+    const participants = { ...combat.participants };
+    const actor = participants[actorId];
+    const target = participants[targetId];
+
+    if (!actor || !target) {
+      set((s) => ({ combatState: { ...s.combatState, isResolvingAction: false } }));
+      return false;
+    }
+
+    const allSkills = state.battleSkills || [];
+    const normalAttackSkill = allSkills.find(
+      (s) => s.skillId === DEFAULT_ATTACK_SKILL_ID || s.skillId === 'NORMAL_ATTACK'
+    ) || {
+      skillId: DEFAULT_ATTACK_SKILL_ID,
+      name: '普通攻擊',
+      nameEn: 'Normal Attack',
+      hitRateFormula: '(attacker.dexterity - defender.speed) / defender.speed * 0.25 + 0.5',
+      damageFormula: 'attacker.strength - defender.defense',
+      coolDown: 0,
+    };
+
+    if (actor.id === 'player') {
+      actor.weaponAttack = get().getEquippedWeaponItem()?.attack || 0;
+      actor.armorDefense = get().getTotalArmorDefense();
+    }
+    if (target.id === 'player') {
+      target.armorDefense = get().getTotalArmorDefense();
+    }
+
+    // 1. 控場檢定 (如暈眩判定)
+    const stunEffect = (actor.statuses || []).find((s) => s.canAct === false);
+    if (stunEffect) {
+      get().addLog(
+        '戰鬥系統',
+        'Combat System',
+        `【${actor.name}】處於【${stunEffect.name || '暈眩'}】狀態中，本回合無法行動！`,
+        `[${actor.nameEn || actor.name}] is affected by [${stunEffect.nameEn || 'Stunned'}], cannot act this turn!`,
+        'event'
+      );
+    } else {
+      // 2. 決定施放招式
+      let selectedSkill;
+      if (actor.team === 'ALLY') {
+        const equippedWeapon = get().getEquippedWeaponItem();
+        const combatSkills = state.player?.combatSkills || {};
+        const availableSkills = getAvailableBattleSkills(allSkills, equippedWeapon, combatSkills);
+
+        if (manualSkillId) {
+          const found = availableSkills.find((s) => s.skillId === manualSkillId);
+          if (found && (actor.cooldowns[found.skillId] || 0) <= 0) {
+            selectedSkill = found;
+          } else {
+            if (found && (actor.cooldowns[found.skillId] || 0) > 0) {
+              get().addLog(
+                '戰鬥系統',
+                'Combat System',
+                `【${found.name}】冷卻中（剩餘 ${actor.cooldowns[found.skillId]} 回合），退回普通攻擊！`,
+                `[${found.nameEn || found.name}] is on cooldown, defaulted to Normal Attack!`,
+                'system'
+              );
+            }
+            selectedSkill = normalAttackSkill;
+          }
+        } else {
+          // 自動戰鬥：依據玩家配置的戰術策略清單進行條件決策
+          const tactics = state.battleSettings?.tactics || [];
+          selectedSkill = selectSkillByTactics(
+            tactics,
+            availableSkills,
+            actor.statuses,
+            target.statuses,
+            actor.cooldowns
+          );
+        }
+      } else {
+        // 敵方怪物預設使用普通攻擊
+        selectedSkill = normalAttackSkill;
+      }
+
+      // 設置冷卻計時
+      if (selectedSkill.coolDown > 0) {
+        actor.cooldowns[selectedSkill.skillId] = selectedSkill.coolDown;
+      }
+
+      // 3. 戰鬥回合行動結算
+      const turnResult = calculateCombatTurn(
+        actor,
+        target,
+        selectedSkill,
+        actor.statuses,
+        target.statuses
+      );
+
+      const skillDisplayName = selectedSkill.name || selectedSkill.skillId;
+      const skillDisplayNameEn = selectedSkill.nameEn || selectedSkill.name || selectedSkill.skillId;
+
+      if (selectedSkill.damageFormula === '0') {
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `【${actor.name}】施展了【${skillDisplayName}】！`,
+          `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}]!`,
+          'event'
+        );
+      } else if (turnResult.isHit) {
+        target.hp = Math.max(0, target.hp - turnResult.totalDamage);
+        if (target.id === 'player') {
+          set((s) => ({ player: { ...s.player, hp: target.hp } }));
+        }
+
+        if (turnResult.hitCount > 1) {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${actor.name}】施展【${skillDisplayName}】，連續發動 ${turnResult.hitCount} 次攻擊！造成總計 ${turnResult.totalDamage} 點傷害！(${target.name}剩餘 HP: ${target.hp}/${target.maxHp})`,
+            `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}], landing ${turnResult.hitCount} hits for ${turnResult.totalDamage} total damage! (${target.nameEn || target.name} HP: ${target.hp}/${target.maxHp})`,
+            'event'
+          );
+        } else {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${actor.name}】使用【${skillDisplayName}】命中【${target.name}】，造成 ${turnResult.totalDamage} 點傷害！(${target.name}剩餘 HP: ${target.hp}/${target.maxHp})`,
+            `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}] on [${target.nameEn || target.name}] for ${turnResult.totalDamage} damage! (${target.nameEn || target.name} HP: ${target.hp}/${target.maxHp})`,
+            'event'
+          );
+        }
+      } else {
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `【${actor.name}】使用【${skillDisplayName}】攻擊【${target.name}】，未命中！`,
+          `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}] on [${target.nameEn || target.name}], missed!`,
+          'event'
+        );
+      }
+
+      // 4. 狀態效果 100% 施加判定
+      if (Array.isArray(turnResult.appliedEffects) && turnResult.appliedEffects.length > 0) {
+        const dbStatuses = state.statusEffects || [];
+        for (const eff of turnResult.appliedEffects) {
+          const statusDef = dbStatuses.find((s) => s.statusId === eff.statusId);
+          const sName = statusDef?.name || eff.statusId;
+          const sNameEn = statusDef?.nameEn || eff.statusId;
+
+          const isSelf = eff.target === 'SELF';
+          const effectReceiver = isSelf ? actor : target;
+          effectReceiver.statuses = effectReceiver.statuses || [];
+
+          const existingIdx = effectReceiver.statuses.findIndex((s) => s.statusId === eff.statusId);
+          if (existingIdx >= 0) {
+            effectReceiver.statuses[existingIdx].remainingTurns = Math.max(
+              effectReceiver.statuses[existingIdx].remainingTurns,
+              eff.duration
+            );
+          } else {
+            effectReceiver.statuses.push({
+              statusId: eff.statusId,
+              name: sName,
+              nameEn: sNameEn,
+              canAct: statusDef?.canAct !== false,
+              statModifiers: statusDef?.statModifiers || {},
+              remainingTurns: eff.duration,
+            });
+          }
+
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${effectReceiver.name}】受到【${sName}】狀態影響，持續 ${eff.duration} 回合！`,
+            `[${effectReceiver.nameEn || effectReceiver.name}] is affected by [${sNameEn}] for ${eff.duration} turns!`,
+            'event'
+          );
+        }
+      }
+
+      // 5. 勝利與戰敗結算
+      if (participants.enemy.hp <= 0) {
+        if (combatIntervalTimer) {
+          clearInterval(combatIntervalTimer);
+          combatIntervalTimer = null;
+        }
+
+        const enemyCreature = combat.enemyCreature || {};
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `戰鬥結束！【${participants.player.name}】擊敗了【${participants.enemy.name}】，獲得勝利！(剩餘 HP: ${participants.player.hp})`,
+          `Combat ended! [${participants.player.name}] defeated [${participants.enemy.name}]! (Remaining HP: ${participants.player.hp})`,
+          'event'
+        );
+
+        let updatedInv = [...(get().inventory || [])];
+        const drops = enemyCreature.drops || [];
+        for (const drop of drops) {
+          const min = Math.max(0, Number(drop.min) || 0);
+          const max = Math.max(min, Number(drop.max) || 0);
+          if (max <= 0 && min <= 0) continue;
+          const dropQty = Math.floor(Math.random() * (max - min + 1)) + min;
+          if (dropQty > 0) {
+            const dbItem = get().items.find((i) => i.itemId === drop.itemId);
+            const itemName = dbItem ? dbItem.name : drop.itemId;
+            const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : drop.itemId;
+            const dropDur = (dbItem?.durability !== undefined && dbItem.durability > 0) ? dbItem.durability : -1;
+
+            updatedInv = addItemsToInventory(updatedInv, drop.itemId, dropQty, {
+              durability: dropDur,
+              maxDurability: dropDur,
+            });
+
+            get().addLog(
+              '戰鬥系統',
+              'Combat System',
+              `獲得戰利品：[${itemName}] x${dropQty}！`,
+              `Obtained loot: [${itemNameEn}] x${dropQty}!`,
+              'event'
+            );
+          }
+        }
+
+        // 戰鬥技能熟練度經驗累積（嚴格依據本場戰鬥鎖定之武器系別結算）
+        const weaponSkillType = combat.battleWeaponType || (() => {
+          const equippedWeapon = get().getEquippedWeaponItem();
+          if (equippedWeapon && Array.isArray(equippedWeapon.type)) {
+            const matched = equippedWeapon.type.find((t) => t !== 'WEAPON');
+            if (matched) return matched;
+          }
+          return 'UNARMED';
+        })();
+
+        // 獲得該特定生物身上設定之專屬經驗值
+        const expGain = Number(enemyCreature.exp) || 0;
+        let currentCombatSkills = state.player?.combatSkills || {};
+
+        if (expGain > 0) {
+          currentCombatSkills = { ...currentCombatSkills };
+          const currentExp = Number(currentCombatSkills[weaponSkillType]?.exp) || 0;
+          const newExp = roundExp(currentExp + expGain);
+          const oldLevel = calculateSkillLevel(currentExp);
+          const newLevel = calculateSkillLevel(newExp);
+
+          currentCombatSkills[weaponSkillType] = {
+            level: newLevel,
+            exp: newExp,
+          };
+
+          const skillNameZh = weaponSkillType === 'SWORD' ? '劍術' : '徒手格鬥';
+          const skillNameEn = weaponSkillType === 'SWORD' ? 'Sword Mastery' : 'Unarmed Combat';
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `獲得【${skillNameZh}】戰鬥經驗值 +${expGain}！`,
+            `Gained [${skillNameEn}] Combat EXP +${expGain}!`,
+            'event'
+          );
+
+          if (newLevel > oldLevel) {
+            get().addLog(
+              '戰鬥系統',
+              'Combat System',
+              `恭喜！您的【${skillNameZh}】等級提升至 Lv.${newLevel}！`,
+              `Congratulations! Your [${skillNameEn}] level increased to Lv.${newLevel}!`,
+              'system'
+            );
+          }
+        }
+
+        set((s) => ({
+          inventory: updatedInv,
+          isBattling: false,
+          player: s.player ? { ...s.player, hp: participants.player.hp, combatSkills: currentCombatSkills } : s.player,
+          combatState: {
+            ...s.combatState,
+            isBattling: false,
+            isResolvingAction: false,
+            participants,
+          },
+        }));
+
+        try {
+          const pId = state.player?._id || '';
+          if (pId) {
+            const res = await fetch(`${API_BASE}/player`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-player-id': pId,
+              },
+              body: JSON.stringify({
+                hp: participants.player.hp,
+                inventory: updatedInv,
+                combatSkills: currentCombatSkills,
+              }),
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              if (resData.success && resData.data) {
+                get().applyPlayerData(resData.data);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[Battle Victory Sync Error]', err);
+        }
+        return true;
+      }
+
+      if (participants.player.hp <= 0) {
+        if (combatIntervalTimer) {
+          clearInterval(combatIntervalTimer);
+          combatIntervalTimer = null;
+        }
+
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `戰鬥結束！【${participants.player.name}】不敵【${participants.enemy.name}】，戰敗了...`,
+          `Combat ended! [${participants.player.name}] was defeated by [${participants.enemy.name}]...`,
+          'event'
+        );
+
+        set((s) => ({
+          isBattling: false,
+          player: s.player ? { ...s.player, hp: 0 } : s.player,
+          combatState: {
+            ...s.combatState,
+            isBattling: false,
+            isResolvingAction: false,
+            participants,
+          },
+        }));
+
+        try {
+          const pId = state.player?._id || '';
+          if (pId) {
+            const res = await fetch(`${API_BASE}/player`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-player-id': pId,
+              },
+              body: JSON.stringify({ hp: 0 }),
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              if (resData.success && resData.data) {
+                get().applyPlayerData(resData.data);
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[Battle HP Sync Error]', err);
+        }
+        return true;
+      }
+    }
+
+    // 6. 回合結束維護：衰減行動方狀態與技能冷卻
+    const remainingStatuses = [];
+    for (const s of (actor.statuses || [])) {
+      s.remainingTurns -= 1;
+      if (s.remainingTurns <= 0) {
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `【${actor.name}】身上的【${s.name}】狀態已解除。`,
+          `[${actor.nameEn || actor.name}]'s [${s.nameEn || s.name}] status has worn off.`,
+          'event'
+        );
+      } else {
+        remainingStatuses.push(s);
+      }
+    }
+    actor.statuses = remainingStatuses;
+
+    for (const k of Object.keys(actor.cooldowns || {})) {
+      if (actor.cooldowns[k] > 0) {
+        actor.cooldowns[k] -= 1;
+      }
+    }
+
+    // 7. 切換下一行動方
+    const nextTurn = actorId === 'player' ? 'enemy' : 'player';
+
+    set((s) => ({
+      combatState: {
+        ...s.combatState,
+        isResolvingAction: false,
+        currentTurn: nextTurn,
+        turnTimeRemaining: COMBAT_TURN_TIMEOUT,
+        turnCount: (s.combatState.turnCount || 1) + 1,
+        participants: {
+          ...s.combatState.participants,
+          [actorId]: actor,
+          [targetId]: target,
+        },
+      },
+    }));
+
+    return true;
+  },
+
+  /**
+   * 與野外生物發起即時回合制戰鬥，初始化戰鬥狀態機與時鐘計時器。
    * @param {Object} creature - 敵方生物/NPC 資料物件。
-   * @returns {boolean} 成功進入戰鬥回傳 true，無法發起戰鬥（如體力耗盡或戰鬥中）回傳 false。
+   * @returns {boolean} 成功進入戰鬥回傳 true，無法發起戰鬥回傳 false。
    */
   startBattle: (creature) => {
     const { player, isBattling } = get();
@@ -1300,17 +2284,72 @@ export const useGameStore = create((set, get) => ({
     const enemyNameEn = creature.nameEn || creature.name || 'Creature';
 
     const pSpeed = player.stats?.speed ?? player.spd ?? 1;
-
     const eSpeed = creature.stats?.speed ?? 1;
     const eMaxHp = creature.stats?.maxHP ?? creature.hp ?? 50;
 
-    let pCurrentHp = player.hp;
-    let eCurrentHp = eMaxHp;
-
     const playerGoesFirst = pSpeed >= eSpeed;
-    let currentTurn = playerGoesFirst ? 'player' : 'enemy';
+    const initialTurn = playerGoesFirst ? 'player' : 'enemy';
 
-    set({ isBattling: true });
+    const savedBattleSettings = get().battleSettings || {
+      isAutoBattle: false,
+      tactics: [
+        { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+        { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+        { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+        { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+      ],
+    };
+
+    const initialEquippedWeapon = get().getEquippedWeaponItem();
+    let initialWeaponSkillType = 'UNARMED';
+    if (initialEquippedWeapon && Array.isArray(initialEquippedWeapon.type)) {
+      const matched = initialEquippedWeapon.type.find((t) => t !== 'WEAPON');
+      if (matched) initialWeaponSkillType = matched;
+    }
+
+    const initialCombatState = {
+      isBattling: true,
+      isAutoBattle: Boolean(savedBattleSettings.isAutoBattle),
+      turnTimeRemaining: COMBAT_TURN_TIMEOUT,
+      currentTurn: initialTurn,
+      turnCount: 1,
+      battleWeaponType: initialWeaponSkillType,
+      isResolvingAction: false,
+      participants: {
+        player: {
+          id: 'player',
+          name: player.name || '冒險者',
+          nameEn: player.name || 'Player',
+          team: 'ALLY',
+          hp: player.hp,
+          maxHp: player.stats?.maxHp || player.maxHp || 100,
+          stats: { ...player.stats },
+          weaponAttack: get().getEquippedWeaponItem()?.attack || 0,
+          armorDefense: get().getTotalArmorDefense(),
+          statuses: [],
+          cooldowns: {},
+          isPlayerControlled: true,
+        },
+        enemy: {
+          id: 'enemy',
+          name: enemyName,
+          nameEn: enemyNameEn,
+          team: 'ENEMY',
+          hp: eMaxHp,
+          maxHp: eMaxHp,
+          stats: { ...creature.stats },
+          statuses: [],
+          cooldowns: {},
+          isPlayerControlled: false,
+        },
+      },
+      enemyCreature: creature,
+    };
+
+    set({
+      isBattling: true,
+      combatState: initialCombatState,
+    });
 
     const firstAttackerStr = playerGoesFirst
       ? `我方先手 (我方 SPD: ${pSpeed}, 敵方 SPD: ${eSpeed})`
@@ -1327,155 +2366,13 @@ export const useGameStore = create((set, get) => ({
       'event'
     );
 
-    const intervalId = setInterval(async () => {
-      const state = get();
-      if (!state.isBattling) {
-        clearInterval(intervalId);
-        return;
-      }
+    if (combatIntervalTimer) {
+      clearInterval(combatIntervalTimer);
+      combatIntervalTimer = null;
+    }
 
-      if (currentTurn === 'player') {
-        const { isHit, damage } = calculateCombatTurn(player, creature);
-
-        if (isHit) {
-          eCurrentHp = Math.max(0, eCurrentHp - damage);
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `【${player.name}】使用【普通攻擊】命中【${enemyName}】，造成 ${damage} 點傷害！(敵方剩餘 HP: ${eCurrentHp}/${eMaxHp})`,
-            `[${player.name}] used [Normal Attack] on [${enemyNameEn}] for ${damage} damage! (Enemy HP: ${eCurrentHp}/${eMaxHp})`,
-            'event'
-          );
-        } else {
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `【${player.name}】使用【普通攻擊】攻擊【${enemyName}】，未命中！`,
-            `[${player.name}] used [Normal Attack] on [${enemyNameEn}], missed!`,
-            'event'
-          );
-        }
-
-        if (eCurrentHp <= 0) {
-          clearInterval(intervalId);
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `戰鬥結束！【${player.name}】擊敗了【${enemyName}】，獲得勝利！(剩餘 HP: ${pCurrentHp})`,
-            `Combat ended! [${player.name}] defeated [${enemyNameEn}]! (Remaining HP: ${pCurrentHp})`,
-            'event'
-          );
-
-          let updatedInv = [...(get().inventory || [])];
-          const drops = creature.drops || [];
-          for (const drop of drops) {
-            const min = Math.max(0, Number(drop.min) || 0);
-            const max = Math.max(min, Number(drop.max) || 0);
-            if (max <= 0 && min <= 0) continue;
-            const dropQty = Math.floor(Math.random() * (max - min + 1)) + min;
-            if (dropQty > 0) {
-              const dbItem = get().items.find((i) => i.itemId === drop.itemId);
-              const itemName = dbItem ? dbItem.name : drop.itemId;
-              const itemNameEn = dbItem ? (dbItem.nameEn || dbItem.name) : drop.itemId;
-
-              const dropDur = (dbItem?.durability !== undefined && dbItem.durability > 0)
-                ? dbItem.durability
-                : -1;
-              updatedInv = addItemsToInventory(updatedInv, drop.itemId, dropQty, {
-                durability: dropDur,
-                maxDurability: dropDur,
-              });
-
-              get().addLog(
-                '戰鬥系統',
-                'Combat System',
-                `獲得戰利品：[${itemName}] x${dropQty}！`,
-                `Obtained loot: [${itemNameEn}] x${dropQty}!`,
-                'event'
-              );
-            }
-          }
-
-          set({ inventory: updatedInv, isBattling: false });
-
-          try {
-            const res = await fetch(`${API_BASE}/player`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-player-id': player._id || get().player?._id || '',
-              },
-              body: JSON.stringify({ hp: pCurrentHp, inventory: updatedInv }),
-            });
-            if (res.ok) {
-              const result = await res.json();
-              if (result.success && result.data) {
-                get().applyPlayerData(result.data);
-              }
-            }
-          } catch (err) {
-            console.error('[Battle Victory Sync Error]', err);
-          }
-          return;
-        }
-
-        currentTurn = 'enemy';
-      } else {
-        const { isHit, damage } = calculateCombatTurn(creature, player);
-
-        if (isHit) {
-          pCurrentHp = Math.max(0, pCurrentHp - damage);
-          set((s) => ({ player: { ...s.player, hp: pCurrentHp } }));
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `【${enemyName}】使用【普通攻擊】命中【${player.name}】，造成 ${damage} 點傷害！(玩家剩餘 HP: ${pCurrentHp})`,
-            `[${enemyNameEn}] used [Normal Attack] on [${player.name}] for ${damage} damage! (Player HP: ${pCurrentHp})`,
-            'event'
-          );
-        } else {
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `【${enemyName}】使用【普通攻擊】攻擊【${player.name}】，未命中！`,
-            `[${enemyNameEn}] used [Normal Attack] on [${player.name}], missed!`,
-            'event'
-          );
-        }
-
-        if (pCurrentHp <= 0) {
-          clearInterval(intervalId);
-          set({ isBattling: false });
-          get().addLog(
-            '戰鬥系統',
-            'Combat System',
-            `戰鬥結束！【${player.name}】不敵【${enemyName}】，戰敗了...`,
-            `Combat ended! [${player.name}] was defeated by [${enemyNameEn}]...`,
-            'event'
-          );
-          try {
-            const res = await fetch(`${API_BASE}/player`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-player-id': player._id || get().player?._id || '',
-              },
-              body: JSON.stringify({ hp: pCurrentHp }),
-            });
-            if (res.ok) {
-              const result = await res.json();
-              if (result.success && result.data) {
-                get().applyPlayerData(result.data);
-              }
-            }
-          } catch (err) {
-            console.error('[Battle HP Sync Error]', err);
-          }
-          return;
-        }
-
-        currentTurn = 'player';
-      }
+    combatIntervalTimer = setInterval(() => {
+      get().tickCombat();
     }, 1000);
 
     return true;

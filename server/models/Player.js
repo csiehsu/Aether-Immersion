@@ -51,8 +51,57 @@ const StatsSchema = new mongoose.Schema(
 
 const PlayerSkillSchema = new mongoose.Schema(
   {
-    skillId: { type: String, default: 'NORMAL_ATTACK' },
+    skillId: { type: String, default: 'SKILL_NORMAL_ATTACK' },
     level: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const CombatSkillsSchema = new mongoose.Schema(
+  {
+    SWORD: {
+      level: { type: Number, default: 0 },
+      exp: { type: Number, default: 0 },
+    },
+    UNARMED: {
+      level: { type: Number, default: 0 },
+      exp: { type: Number, default: 0 },
+    },
+  },
+  { _id: false }
+);
+
+const EquipmentSchema = new mongoose.Schema(
+  {
+    weaponInstanceId: { type: String, default: null },
+    chestInstanceId: { type: String, default: null },
+    legInstanceId: { type: String, default: null },
+  },
+  { _id: false }
+);
+
+const BattleTacticSchema = new mongoose.Schema(
+  {
+    priority: { type: Number, default: 1 },
+    skillId: { type: String, required: true },
+    condition: { type: String, default: 'ALWAYS' },
+    targetStatusId: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const BattleSettingsSchema = new mongoose.Schema(
+  {
+    isAutoBattle: { type: Boolean, default: false },
+    tactics: {
+      type: [BattleTacticSchema],
+      default: () => [
+        { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+        { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+        { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+        { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+      ],
+    },
   },
   { _id: false }
 );
@@ -120,7 +169,7 @@ const PlayerSchema = new mongoose.Schema(
     },
     skills: {
       type: [PlayerSkillSchema],
-      default: () => [{ skillId: 'NORMAL_ATTACK', level: 0 }],
+      default: () => [{ skillId: 'SKILL_NORMAL_ATTACK', level: 0 }],
     },
     lifeSkills: {
       type: LifeSkillsSchema,
@@ -129,6 +178,21 @@ const PlayerSchema = new mongoose.Schema(
         FISHING: { level: 0, exp: 0 },
         MINING: { level: 0, exp: 0 },
         COOKING: { level: 0, exp: 0 },
+      }),
+    },
+    combatSkills: {
+      type: CombatSkillsSchema,
+      default: () => ({
+        SWORD: { level: 0, exp: 0 },
+        UNARMED: { level: 0, exp: 0 },
+      }),
+    },
+    equipment: {
+      type: EquipmentSchema,
+      default: () => ({
+        weaponInstanceId: null,
+        chestInstanceId: null,
+        legInstanceId: null,
       }),
     },
     level: { type: Number, default: 1 },
@@ -157,6 +221,18 @@ const PlayerSchema = new mongoose.Schema(
     inventory: [InventoryItemSchema],
     unlockedRecipes: [UnlockedRecipeSchema],
     quests: [PlayerQuestSchema],
+    battleSettings: {
+      type: BattleSettingsSchema,
+      default: () => ({
+        isAutoBattle: false,
+        tactics: [
+          { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+          { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+          { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+          { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+        ],
+      }),
+    },
   },
   { timestamps: true, versionKey: false }
 );

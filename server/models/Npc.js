@@ -24,8 +24,16 @@ const DropSchema = new mongoose.Schema(
 
 const SkillSchema = new mongoose.Schema(
   {
-    skillId: { type: String, default: 'NORMAL_ATTACK' },
+    skillId: { type: String, default: 'SKILL_NORMAL_ATTACK' },
     level: { type: Number, default: 1 },
+  },
+  { _id: false }
+);
+
+const RequiredItemSchema = new mongoose.Schema(
+  {
+    itemId: { type: String, default: '' },
+    count: { type: Number, default: 1 },
   },
   { _id: false }
 );
@@ -34,6 +42,7 @@ const GoodieSchema = new mongoose.Schema(
   {
     itemId: { type: String, default: '' },
     price: { type: Number, default: 0 },
+    requiredItems: [RequiredItemSchema],
   },
   { _id: false }
 );
@@ -57,6 +66,7 @@ const NpcSchema = new mongoose.Schema(
     icon: { type: String, default: '🐾' },
     type: { type: String, default: 'MONSTER' },
     stats: { type: StatsSchema, default: () => ({}) },
+    exp: { type: Number, default: 0 },
     drops: [DropSchema],
     skills: [SkillSchema],
     goodies: [GoodieSchema],

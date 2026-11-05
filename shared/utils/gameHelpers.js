@@ -1058,22 +1058,380 @@ export const addItemsToInventory = (inventory = [], itemId, count = 1, options =
 };
 
 /**
- * 戰鬥回合行動計算：計算命中機率、是否命中及傷害數值。
+ * 安全解析並動態執行戰鬥公式（如命中率 hitRateFormula、傷害 damageFormula）。
+ * @param {string|number} formulaStr - 公式字串或數值。
+ * @param {Object} attacker - 攻擊方屬性上下文字典。
+ * @param {Object} defender - 防守方屬性上下文字典。
+ * @param {number} [fallback=0] - 異常或無效時退回之兜底預設值。
+ * @returns {number} 公式求值結果。
+ */
+export const evaluateCombatFormula = (formulaStr, attacker = {}, defender = {}, fallback = 0) => {
+  if (formulaStr === undefined || formulaStr === null) return fallback;
+  if (typeof formulaStr === 'number') return formulaStr;
+
+  const trimmed = String(formulaStr).trim();
+  if (!trimmed) return fallback;
+
+  // 純數字字串直接轉數值回傳
+  const parsedNum = Number(trimmed);
+  if (!isNaN(parsedNum)) return parsedNum;
+
+  // 安全字元檢驗：僅允許常見數學符號、數字、英文字母識別碼、空白、括號與三元運算符
+  const isSafe = /^[\w\s.+\-*/()?:><=]+$/.test(trimmed);
+  if (!isSafe) {
+    console.warn('[Combat Formula Warning] 不合規的公式字串:', formulaStr);
+    return fallback;
+  }
+
+  try {
+    const fn = new Function('attacker', 'defender', 'Math', `return (${trimmed});`);
+    const val = fn(attacker, defender, Math);
+    return typeof val === 'number' && !isNaN(val) && isFinite(val) ? val : fallback;
+  } catch (err) {
+    console.error('[Combat Formula Error] 公式執行失敗:', formulaStr, err);
+    return fallback;
+  }
+};
+
+/**
+ * 戰鬥回合行動計算：支援多段連擊、動態技能傷害與命中公式解析、狀態效果（Buff/Debuff）屬性加成與控場檢驗。
  * @param {Object} [attacker={}] - 攻擊方角色/生物物件。
  * @param {Object} [defender={}] - 防守方角色/生物物件。
- * @returns {{ isHit: boolean, damage: number, hitRate: number, atkSpeed: number, defSpeed: number, atkStr: number, defDef: number }} 回合計算結果物件。
+ * @param {Object} [skill=null] - 本回合施放之戰鬥技能定義物件。
+ * @param {Array<Object>} [attackerStatuses=[]] - 攻擊方當前生效中狀態清單。
+ * @param {Array<Object>} [defenderStatuses=[]] - 防守方當前生效中狀態清單。
+ * @returns {{
+ *   canAct: boolean,
+ *   isHit: boolean,
+ *   damage: number,
+ *   totalDamage: number,
+ *   hitCount: number,
+ *   hits: Array<{ hitIndex: number, isHit: boolean, damage: number }>,
+ *   appliedEffects: Array<{ target: string, statusId: string, duration: number }>,
+ *   stunReason?: string,
+ *   hitRate: number,
+ *   atkSpeed: number,
+ *   defSpeed: number,
+ *   atkStr: number,
+ *   defDef: number,
+ *   atkDex: number,
+ *   defDex: number
+ * }} 回合計算結果物件。
  */
-export const calculateCombatTurn = (attacker = {}, defender = {}) => {
-  const atkSpeed = attacker.stats?.speed ?? attacker.spd ?? 1;
-  const defSpeed = defender.stats?.speed ?? defender.spd ?? 1;
-  const atkStr = attacker.stats?.strength ?? attacker.stats?.str ?? attacker.str ?? 1;
-  const defDef = defender.stats?.defense ?? defender.stats?.def ?? defender.def ?? 0;
+export const calculateCombatTurn = (
+  attacker = {},
+  defender = {},
+  skill = null,
+  attackerStatuses = [],
+  defenderStatuses = []
+) => {
+  // 1. 控場檢驗：若攻擊方處於禁止行動狀態（如 STATUS_STUN）
+  const stunEffect = attackerStatuses.find((s) => s?.canAct === false);
+  if (stunEffect) {
+    return {
+      canAct: false,
+      isHit: false,
+      damage: 0,
+      totalDamage: 0,
+      hitCount: 0,
+      hits: [],
+      appliedEffects: [],
+      stunReason: stunEffect.name || stunEffect.statusId || '暈眩',
+      hitRate: 0,
+      atkSpeed: attacker.stats?.speed ?? 1,
+      defSpeed: defender.stats?.speed ?? 1,
+      atkStr: attacker.stats?.strength ?? 1,
+      defDef: defender.stats?.defense ?? 0,
+      atkDex: attacker.stats?.dexterity ?? 1,
+      defDex: defender.stats?.dexterity ?? 1,
+    };
+  }
 
-  const hitRate = Math.min(1, Math.max(0.1, ((atkSpeed - defSpeed) / defSpeed) * 0.5 + 0.5));
-  const isHit = Math.random() <= hitRate;
-  const damage = isHit ? Math.max(1, atkStr - defDef) : 0;
+  // 2. 基礎屬性解析 (含裝備武器攻擊力與防具防禦力加成，一律使用全名)
+  const weaponAttack = Number(attacker.weaponAttack ?? attacker.weapon?.attack ?? 0);
+  const armorDefense = Number(defender.armorDefense ?? defender.armor?.defense ?? 0);
 
-  return { isHit, damage, hitRate, atkSpeed, defSpeed, atkStr, defDef };
+  let atkSpeed = attacker.stats?.speed ?? 1;
+  let defSpeed = defender.stats?.speed ?? 1;
+
+  let atkDex = attacker.stats?.dexterity ?? 1;
+  let defDex = defender.stats?.dexterity ?? 1;
+
+  let atkStr = (attacker.stats?.strength ?? 1) + weaponAttack;
+  let defStr = defender.stats?.strength ?? 1;
+
+  let atkSpi = attacker.stats?.spiritual ?? 0;
+  let defSpi = defender.stats?.spiritual ?? 0;
+
+  let atkDef = (attacker.stats?.defense ?? 0) + Number(attacker.armorDefense ?? 0);
+  let defDef = (defender.stats?.defense ?? 0) + armorDefense;
+
+  let hitRateBonus = 0;
+
+  // 3. 疊加攻擊方狀態增益/減益 (Buff/Debuff)
+  for (const s of attackerStatuses) {
+    if (s?.statModifiers) {
+      if (s.statModifiers.hitRate) hitRateBonus += Number(s.statModifiers.hitRate) || 0;
+      if (s.statModifiers.strength) atkStr += Number(s.statModifiers.strength) || 0;
+      if (s.statModifiers.speed) atkSpeed += Number(s.statModifiers.speed) || 0;
+      if (s.statModifiers.dexterity) atkDex += Number(s.statModifiers.dexterity) || 0;
+      if (s.statModifiers.spiritual) atkSpi += Number(s.statModifiers.spiritual) || 0;
+      if (s.statModifiers.defense) atkDef += Number(s.statModifiers.defense) || 0;
+    }
+  }
+
+  // 4. 疊加防守方狀態效果
+  for (const s of defenderStatuses) {
+    if (s?.statModifiers) {
+      if (s.statModifiers.defense) defDef += Number(s.statModifiers.defense) || 0;
+      if (s.statModifiers.speed) defSpeed += Number(s.statModifiers.speed) || 0;
+      if (s.statModifiers.dexterity) defDex += Number(s.statModifiers.dexterity) || 0;
+      if (s.statModifiers.spiritual) defSpi += Number(s.statModifiers.spiritual) || 0;
+      if (s.statModifiers.evasion) hitRateBonus -= Number(s.statModifiers.evasion) || 0;
+    }
+  }
+
+  // 建立公式求值之攻擊方與防守方上下文（一律採用全名，無縮寫別名）
+  const attackerCtx = {
+    strength: atkStr,
+    dexterity: atkDex,
+    speed: atkSpeed,
+    spiritual: atkSpi,
+    defense: atkDef,
+    hp: attacker.hp ?? 100,
+    maxHp: attacker.maxHp ?? attacker.stats?.maxHp ?? 100,
+    weaponAttack,
+  };
+
+  const defenderCtx = {
+    strength: defStr,
+    dexterity: defDex,
+    speed: defSpeed,
+    spiritual: defSpi,
+    defense: defDef,
+    hp: defender.hp ?? 100,
+    maxHp: defender.maxHp ?? defender.stats?.maxHp ?? 100,
+    armorDefense,
+  };
+
+  // 5. 命中率動態公式計算
+  let baseHitRate = 0.5;
+  if (skill?.hitRateFormula === '1') {
+    baseHitRate = 1.0;
+  } else if (skill?.hitRateFormula) {
+    baseHitRate = evaluateCombatFormula(skill.hitRateFormula, attackerCtx, defenderCtx, 0.5);
+  } else {
+    baseHitRate = ((atkDex - defSpeed) / Math.max(1, defSpeed)) * 0.25 + 0.5;
+  }
+
+  const finalHitRate = Math.min(1.0, Math.max(0.1, baseHitRate + hitRateBonus));
+
+  // 6. 連擊與傷害動態公式計算
+  const hitCount = Math.max(1, Number(skill?.hitCount) || 1);
+  const hits = [];
+  const isPureBuff = skill?.damageFormula === '0';
+
+  const evaluateDamage = () => {
+    if (isPureBuff) return 0;
+    if (skill?.damageFormula) {
+      const rawDmg = evaluateCombatFormula(
+        skill.damageFormula,
+        attackerCtx,
+        defenderCtx,
+        atkStr - defDef
+      );
+      return Math.max(1, Math.round(rawDmg));
+    }
+    return Math.max(1, Math.round(atkStr - defDef));
+  };
+
+  for (let i = 0; i < hitCount; i++) {
+    const isHit = isPureBuff || Math.random() <= finalHitRate;
+    const dmg = isHit ? evaluateDamage() : 0;
+    hits.push({ hitIndex: i + 1, isHit, damage: dmg });
+  }
+
+  const totalDamage = hits.reduce((sum, h) => sum + h.damage, 0);
+  const anyHit = hits.some((h) => h.isHit);
+
+  // 7. 狀態效果施加判定 (若技能命中或為自身純增益招式，100% 生成附加狀態)
+  const appliedEffects = [];
+  if (Array.isArray(skill?.effects) && (anyHit || isPureBuff)) {
+    for (const eff of skill.effects) {
+      if (eff?.statusId) {
+        appliedEffects.push({
+          target: eff.target || 'ENEMY',
+          statusId: eff.statusId,
+          duration: Math.max(1, Number(eff.duration) || 1),
+        });
+      }
+    }
+  }
+
+  return {
+    canAct: true,
+    isHit: anyHit,
+    damage: totalDamage,
+    totalDamage,
+    hitCount,
+    hits,
+    appliedEffects,
+    hitRate: finalHitRate,
+    atkSpeed,
+    defSpeed,
+    atkStr,
+    defDef,
+    atkDex,
+    defDex,
+  };
+};
+
+/**
+ * 評估單項自動戰鬥戰術條件是否滿足。
+ * @param {Object} tactic - 戰術規則物件 { condition, targetStatusId }。
+ * @param {Array<Object>} [actorStatuses=[]] - 行動方當前生效中狀態清單。
+ * @param {Array<Object>} [targetStatuses=[]] - 目標方當前生效中狀態清單。
+ * @returns {boolean} 條件是否成立。
+ */
+export const evaluateTacticCondition = (tactic = {}, actorStatuses = [], targetStatuses = []) => {
+  const cond = tactic.condition || 'ALWAYS';
+  const statusId = tactic.targetStatusId || '';
+
+  switch (cond) {
+    case 'SELF_NOT_HAS_STATUS':
+      if (!statusId) return true;
+      return !actorStatuses.some((s) => s.statusId === statusId);
+
+    case 'SELF_HAS_STATUS':
+      if (!statusId) return true;
+      return actorStatuses.some((s) => s.statusId === statusId);
+
+    case 'TARGET_NOT_HAS_STATUS':
+      if (!statusId) return true;
+      return !targetStatuses.some((s) => s.statusId === statusId);
+
+    case 'TARGET_HAS_STATUS':
+      if (!statusId) return true;
+      return targetStatuses.some((s) => s.statusId === statusId);
+
+    case 'ALWAYS':
+    default:
+      return true;
+  }
+};
+
+/**
+ * 依據裝備武器類型與戰鬥技能熟練度等級，判定並取得當前可用的戰鬥技能清單（無須學習過程）。
+ * @param {Array<Object>} [allBattleSkills=[]] - 全域戰鬥技能定義清單。
+ * @param {Object|null} [equippedWeaponItem=null] - 當前裝備之武器道具物件（含 type 與 attack 等）。
+ * @param {Object} [combatSkills={}] - 玩家當前各系別戰鬥技能等級字典（如 { SWORD: { level: 1 }, UNARMED: { level: 1 } }）。
+ * @returns {Array<Object>} 當前可用的戰鬥技能清單。
+ */
+export const getAvailableBattleSkills = (
+  allBattleSkills = [],
+  equippedWeaponItem = null,
+  combatSkills = {}
+) => {
+  // 1. 推導當前裝備之武器系別清單（若未裝備任何武器，預設為 UNARMED 徒手）
+  const weaponTypes = [];
+  if (equippedWeaponItem && Array.isArray(equippedWeaponItem.type)) {
+    for (const t of equippedWeaponItem.type) {
+      if (t !== 'WEAPON') {
+        weaponTypes.push(t);
+      }
+    }
+  }
+  if (weaponTypes.length === 0) {
+    weaponTypes.push('UNARMED');
+  }
+
+  // 2. 招式過濾與去重
+  const seenSkillIds = new Set();
+  const available = [];
+
+  for (const skill of allBattleSkills) {
+    if (!skill || !skill.skillId) continue;
+    if (seenSkillIds.has(skill.skillId)) continue;
+
+    // 基礎普通攻擊：任何武器或空手狀態下皆隨時可用
+    if (skill.skillId === 'SKILL_NORMAL_ATTACK' || skill.skillId === 'NORMAL_ATTACK') {
+      seenSkillIds.add(skill.skillId);
+      available.push(skill);
+      continue;
+    }
+
+    // 特殊招式判定：
+    // a. 武器類型檢驗：招式要求的武器類型陣列中，必須至少包含當前裝備的一種武器類型
+    const reqWeapons = Array.isArray(skill.requiredWeaponTypes) ? skill.requiredWeaponTypes : [];
+    const isWeaponMatched = reqWeapons.length === 0 || reqWeapons.some((w) => weaponTypes.includes(w));
+    if (!isWeaponMatched) continue;
+
+    // b. 戰鬥技能等級檢驗：檢查當前匹配之武器系別在玩家身上對應的熟練度等級
+    const matchedWeaponType = reqWeapons.find((w) => weaponTypes.includes(w)) || weaponTypes[0];
+    const skillLevel = combatSkills?.[matchedWeaponType]?.level ?? 0;
+    const reqLevel = Number(skill.requiredLevel) || 1;
+
+    if (skillLevel >= reqLevel) {
+      seenSkillIds.add(skill.skillId);
+      available.push(skill);
+    }
+  }
+
+  return available;
+};
+
+/**
+ * 依據自訂戰術優先順序與條件清單，自可用技能中挑選最優先且就緒之技能。
+ * @param {Array<Object>} [tactics=[]] - 戰術優先順序清單（依優先度升序排序）。
+ * @param {Array<Object>} [availableSkills=[]] - 角色已解鎖/可用的技能定義清單。
+ * @param {Array<Object>} [actorStatuses=[]] - 行動方當前狀態清單。
+ * @param {Array<Object>} [targetStatuses=[]] - 目標方當前狀態清單。
+ * @param {Object} [cooldowns={}] - 技能冷卻字典 { skillId: remainingTurns }。
+ * @returns {Object} 決定施放的技能定義物件（若皆不符合則退回普通攻擊）。
+ */
+export const selectSkillByTactics = (
+  tactics = [],
+  availableSkills = [],
+  actorStatuses = [],
+  targetStatuses = [],
+  cooldowns = {}
+) => {
+  const normalAttackSkill = availableSkills.find(
+    (s) => s.skillId === 'SKILL_NORMAL_ATTACK' || s.skillId === 'NORMAL_ATTACK'
+  ) || {
+    skillId: 'SKILL_NORMAL_ATTACK',
+    name: '普通攻擊',
+    nameEn: 'Normal Attack',
+    hitRateFormula: '(attacker.dexterity - defender.speed) / defender.speed * 0.25 + 0.5',
+    damageFormula: 'attacker.strength - defender.defense',
+    coolDown: 0,
+  };
+
+  if (!Array.isArray(tactics) || tactics.length === 0) {
+    // 預設智能兜底策略：心眼 -> 刀背擊 -> 破空斬 -> 迴旋斬 -> 普攻
+    const defaultTactics = [
+      { skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+      { skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+      { skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS' },
+      { skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS' },
+    ];
+    return selectSkillByTactics(defaultTactics, availableSkills, actorStatuses, targetStatuses, cooldowns);
+  }
+
+  for (const t of tactics) {
+    if (!t || !t.skillId || t.skillId === 'SKILL_NORMAL_ATTACK' || t.skillId === 'NORMAL_ATTACK') continue;
+    // 檢查冷卻
+    if ((cooldowns[t.skillId] || 0) > 0) continue;
+    // 檢查角色是否具備此技能
+    const skillDef = availableSkills.find((s) => s.skillId === t.skillId);
+    if (!skillDef) continue;
+    // 評估條件
+    if (evaluateTacticCondition(t, actorStatuses, targetStatuses)) {
+      return skillDef;
+    }
+  }
+
+  return normalAttackSkill;
 };
 
 /**
@@ -1494,6 +1852,17 @@ export const calculateMaxConsumableQty = (playerOrStats = {}, singleNutrition = 
   if (allowable <= 0) return 0;
 
   return Math.min(maxAvailable, allowable);
+};
+
+/**
+ * 計算已裝備防具道具清單之總防禦力加成。
+ * @param {Array<Object>|Object} equippedArmors - 已裝備的防具道具陣列或單一防具物件。
+ * @returns {number} 總防禦力加成點數。
+ */
+export const calculateTotalArmorDefense = (equippedArmors = []) => {
+  if (!equippedArmors) return 0;
+  const list = Array.isArray(equippedArmors) ? equippedArmors : [equippedArmors];
+  return list.reduce((sum, item) => sum + (Number(item?.defense) || 0), 0);
 };
 
 

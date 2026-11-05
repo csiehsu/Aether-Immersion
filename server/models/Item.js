@@ -31,6 +31,8 @@ const ItemSchema = new mongoose.Schema(
     descriptionEn: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
     type: [{ type: String }],
+    attack: { type: Number, default: 0 },
+    defense: { type: Number, default: 0 },
     durability: { type: Number, default: -1 },
     weight: { type: Number, default: 1 },
     capacity: { type: Number, default: 0 },

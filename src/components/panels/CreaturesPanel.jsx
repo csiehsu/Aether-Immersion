@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameStore, translations } from '../../store/useGameStore';
 import { CollapsiblePanel } from '../CollapsiblePanel';
+import { CombatPanel } from './CombatPanel';
 import { getLocalizedName, getLocalizedDesc } from '../../utils/language';
 import { getNpcIcon } from '../../utils/gameHelpers';
 import {
@@ -71,6 +72,7 @@ export const CreaturesPanel = () => {
 
   return (
     <CollapsiblePanel title={t.creaturesTitle} className="creatures-panel">
+      {isBattling && <div style={{ marginBottom: '14px' }}><CombatPanel /></div>}
       {visibleCreatures.length === 0 ? (
         <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
           {language === 'en' ? 'No creatures or NPCs at this location.' : '此地點暫無生物或NPC。'}

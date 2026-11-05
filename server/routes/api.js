@@ -9,6 +9,7 @@ import { Npc } from '../models/Npc.js';
 import { Building } from '../models/Building.js';
 import { BattleSkill } from '../models/BattleSkill.js';
 import { Quest } from '../models/Quest.js';
+import { StatusEffect } from '../models/StatusEffect.js';
 import { getSeedData } from '../utils/seedLoader.js';
 import { isDbConnected, fetchCollectionData, generateInstanceId } from '../utils/dbHelper.js';
 
@@ -20,6 +21,7 @@ const {
   initialBuildings,
   initialBattleSkills,
   initialQuests,
+  initialStatusEffects,
 } = await getSeedData();
 import {
   settleEnergyRecovery,
@@ -85,6 +87,7 @@ const collectionRoutes = [
   { path: '/buildings', model: Building, initialData: initialBuildings },
   { path: '/battle-skills', model: BattleSkill, initialData: initialBattleSkills },
   { path: '/quests', model: Quest, initialData: initialQuests },
+  { path: '/status-effects', model: StatusEffect, initialData: initialStatusEffects },
 ];
 
 collectionRoutes.forEach(({ path, model, initialData }) => {
@@ -483,7 +486,7 @@ const formatPlayerResponse = (playerDoc) => {
   p.dex = dexVal;
   p.skills = Array.isArray(p.skills) && p.skills.length > 0
     ? p.skills
-    : [{ skillId: 'NORMAL_ATTACK', level: 0 }];
+    : [{ skillId: 'SKILL_NORMAL_ATTACK', level: 0 }];
   p.lifeSkills = {
     GATHERING: {
       level: calculateSkillLevel(p.lifeSkills?.GATHERING?.exp || 0),
@@ -502,6 +505,21 @@ const formatPlayerResponse = (playerDoc) => {
       exp: roundExp(p.lifeSkills?.COOKING?.exp || 0),
     },
   };
+  p.combatSkills = {
+    SWORD: {
+      level: calculateSkillLevel(p.combatSkills?.SWORD?.exp || 0),
+      exp: roundExp(p.combatSkills?.SWORD?.exp || 0),
+    },
+    UNARMED: {
+      level: calculateSkillLevel(p.combatSkills?.UNARMED?.exp || 0),
+      exp: roundExp(p.combatSkills?.UNARMED?.exp || 0),
+    },
+  };
+  p.equipment = {
+    weaponInstanceId: p.equipment?.weaponInstanceId || null,
+    chestInstanceId: p.equipment?.chestInstanceId || null,
+    legInstanceId: p.equipment?.legInstanceId || null,
+  };
   p.money = p.money ?? 0;
   p.mentor = p.mentor || '';
   p.unlockedRecipes = sanitizeUnlockedRecipes(p.unlockedRecipes);
@@ -510,6 +528,15 @@ const formatPlayerResponse = (playerDoc) => {
     : new Date().toISOString();
   p.energySpentAccumulator = Number(p.energySpentAccumulator) || 0;
   p.hpRegenAccumulator = Number(p.hpRegenAccumulator) || 0;
+  p.battleSettings = p.battleSettings || {
+    isAutoBattle: false,
+    tactics: [
+      { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
+      { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
+      { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+      { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
+    ],
+  };
   p.statusEffects = getStatusEffects(p);
   return p;
 };
@@ -559,6 +586,52 @@ router.get('/player', async (req, res) => {
           }
         }
       });
+    }
+
+    if (!player.combatSkills) {
+      player.combatSkills = {
+        SWORD: { level: 0, exp: 0 },
+        UNARMED: { level: 0, exp: 0 },
+      };
+      player.markModified('combatSkills');
+      updated = true;
+    } else {
+      ['SWORD', 'UNARMED'].forEach((key) => {
+        if (!player.combatSkills[key]) {
+          player.combatSkills[key] = { level: 0, exp: 0 };
+          player.markModified('combatSkills');
+          updated = true;
+        } else {
+          const currentExp = roundExp(player.combatSkills[key].exp || 0);
+          const correctLevel = calculateSkillLevel(currentExp);
+          if (player.combatSkills[key].level !== correctLevel || player.combatSkills[key].exp !== currentExp) {
+            player.combatSkills[key].level = correctLevel;
+            player.combatSkills[key].exp = currentExp;
+            player.markModified('combatSkills');
+            updated = true;
+          }
+        }
+      });
+    }
+
+    if (!player.equipment) {
+      player.equipment = { weaponInstanceId: null, chestInstanceId: null, legInstanceId: null };
+      player.markModified('equipment');
+      updated = true;
+    } else {
+      let eqMod = false;
+      if (player.equipment.chestInstanceId === undefined) {
+        player.equipment.chestInstanceId = null;
+        eqMod = true;
+      }
+      if (player.equipment.legInstanceId === undefined) {
+        player.equipment.legInstanceId = null;
+        eqMod = true;
+      }
+      if (eqMod) {
+        player.markModified('equipment');
+        updated = true;
+      }
     }
 
     if (updated) {
@@ -654,12 +727,21 @@ router.post('/player/create-character', async (req, res) => {
         water: MAX_WATER,
         food: MAX_FOOD,
       },
-      skills: [{ skillId: 'NORMAL_ATTACK', level: 0 }],
+      skills: [{ skillId: 'SKILL_NORMAL_ATTACK', level: 0 }],
       lifeSkills: {
         GATHERING: { level: 0, exp: 0 },
         FISHING: { level: 0, exp: 0 },
         MINING: { level: 0, exp: 0 },
         COOKING: { level: 0, exp: 0 },
+      },
+      combatSkills: {
+        SWORD: { level: 0, exp: 0 },
+        UNARMED: { level: 0, exp: 0 },
+      },
+      equipment: {
+        weaponInstanceId: null,
+        chestInstanceId: null,
+        legInstanceId: null,
       },
       level: 1,
       isCharacterCreated: true,
@@ -681,6 +763,8 @@ router.post('/player/create-character', async (req, res) => {
       player.stats = characterData.stats;
       player.skills = characterData.skills;
       player.lifeSkills = characterData.lifeSkills;
+      player.combatSkills = characterData.combatSkills;
+      player.equipment = characterData.equipment;
       player.level = characterData.level;
       player.isCharacterCreated = characterData.isCharacterCreated;
       player.hp = characterData.hp;
@@ -721,6 +805,11 @@ router.put('/player', async (req, res) => {
     let player = await getPlayerFromReq(req);
     if (player) {
       settleEnergyRecovery(player);
+
+      if (typeof updateData.hp === 'number') {
+        const maxHp = player.stats?.maxHp ?? MAX_HP;
+        updateData.hp = Math.max(0, Math.min(maxHp, Math.round(updateData.hp)));
+      }
 
       if (typeof updateData.energy === 'number') {
         const roundedEnergy = Math.round(updateData.energy * 10) / 10;
@@ -763,6 +852,37 @@ router.put('/player', async (req, res) => {
         player.lifeSkills = merged;
         player.markModified('lifeSkills');
         delete updateData.lifeSkills;
+      }
+      if (updateData.combatSkills) {
+        const merged = {
+          ...player.combatSkills?.toObject(),
+          ...updateData.combatSkills,
+        };
+        ['SWORD', 'UNARMED'].forEach((k) => {
+          if (merged[k]) {
+            merged[k].exp = roundExp(merged[k].exp || 0);
+            merged[k].level = calculateSkillLevel(merged[k].exp);
+          }
+        });
+        player.combatSkills = merged;
+        player.markModified('combatSkills');
+        delete updateData.combatSkills;
+      }
+      if (updateData.equipment) {
+        player.equipment = {
+          ...player.equipment?.toObject(),
+          ...updateData.equipment,
+        };
+        player.markModified('equipment');
+        delete updateData.equipment;
+      }
+      if (updateData.battleSettings) {
+        player.battleSettings = {
+          ...player.battleSettings?.toObject(),
+          ...updateData.battleSettings,
+        };
+        player.markModified('battleSettings');
+        delete updateData.battleSettings;
       }
       Object.assign(player, updateData);
       if (updateData.quests) {
@@ -855,7 +975,53 @@ router.post('/player/buy', async (req, res) => {
       return res.status(400).json({ success: false, message: '金錢不足！' });
     }
 
+    const requiredItems = Array.isArray(goodie.requiredItems) ? goodie.requiredItems : [];
+    player.inventory = sanitizeInventoryItems(player.inventory);
+
+    // 驗證購買所需的各項材料
+    for (const reqItem of requiredItems) {
+      const reqCountPerUnit = Math.max(1, Number(reqItem.count) || 1);
+      const totalReqCount = reqCountPerUnit * buyQty;
+      const totalOwned = (player.inventory || [])
+        .filter((inv) => inv.itemId === reqItem.itemId)
+        .reduce((sum, inv) => sum + (inv.count || 1), 0);
+
+      if (totalOwned < totalReqCount) {
+        const dbItem = allDbItems.find((i) => i.itemId === reqItem.itemId);
+        const itemName = dbItem?.name || reqItem.itemId;
+        return res.status(400).json({
+          success: false,
+          message: `所需材料不足：${itemName} 還缺少 ${totalReqCount - totalOwned} 個！`,
+        });
+      }
+    }
+
     player.money = currentMoney - totalCost;
+
+    // 扣除材料
+    if (requiredItems.length > 0) {
+      let updatedInv = sanitizeInventoryItems(player.inventory);
+      for (const reqItem of requiredItems) {
+        const reqCountPerUnit = Math.max(1, Number(reqItem.count) || 1);
+        let remainingDeduct = reqCountPerUnit * buyQty;
+        for (let idx = 0; idx < updatedInv.length; idx++) {
+          if (remainingDeduct <= 0) break;
+          if (updatedInv[idx].itemId === reqItem.itemId) {
+            const curCount = updatedInv[idx].count || 1;
+            if (curCount <= remainingDeduct) {
+              remainingDeduct -= curCount;
+              updatedInv[idx].count = 0;
+            } else {
+              updatedInv[idx].count = curCount - remainingDeduct;
+              remainingDeduct = 0;
+            }
+          }
+        }
+      }
+      player.inventory = updatedInv.filter((inv) => (inv.count || 0) > 0);
+      player.markModified('inventory');
+    }
+
     const newlyUnlockedRecipes = await grantItemsToPlayer(player, [{ itemId, count: buyQty }], allDbItems);
 
     await player.save();

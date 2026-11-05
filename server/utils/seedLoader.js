@@ -18,7 +18,8 @@ const seedsDir = path.join(__dirname, '../seeds');
  *   initialNpcs: Array<Object>,
  *   initialBuildings: Array<Object>,
  *   initialBattleSkills: Array<Object>,
- *   initialQuests: Array<Object>
+ *   initialQuests: Array<Object>,
+ *   initialStatusEffects: Array<Object>
  * }>} 種子資料物件
  */
 export async function getSeedData() {
@@ -30,6 +31,7 @@ export async function getSeedData() {
     initialBuildings: [],
     initialBattleSkills: [],
     initialQuests: [],
+    initialStatusEffects: [],
   };
 
   if (!fs.existsSync(seedsDir)) {
@@ -54,6 +56,7 @@ export async function getSeedData() {
       initialBuildings,
       initialBattleSkills,
       initialQuests,
+      initialStatusEffects,
     ] = await Promise.all([
       loadSeed('seedItems.js', 'initialItems'),
       loadSeed('seedLocations.js', 'initialLocations'),
@@ -62,6 +65,7 @@ export async function getSeedData() {
       loadSeed('seedBuildings.js', 'initialBuildings'),
       loadSeed('seedBattleSkills.js', 'initialBattleSkills'),
       loadSeed('seedQuests.js', 'initialQuests'),
+      loadSeed('seedStatusEffects.js', 'initialStatusEffects'),
     ]);
 
     return {
@@ -72,6 +76,7 @@ export async function getSeedData() {
       initialBuildings,
       initialBattleSkills,
       initialQuests,
+      initialStatusEffects,
     };
   } catch (err) {
     console.warn('[SeedLoader Warning] 載入本機種子資料失敗，安全降級為純資料庫模式：', err.message);

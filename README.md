@@ -10,14 +10,16 @@ AetherImmersion/
 │   ├── config/
 │   │   └── db.js                     # MongoDB Mongoose 連線與 Fallback 處理
 │   ├── models/                       # Mongoose 資料模型 (核心 Schema)
-│   │   ├── BattleSkill.js            # 戰鬥技能 Schema
+│   │   ├── BattleSkill.js            # 戰鬥技能 Schema (冷卻、多段攻擊 hitCount、武器與等級限制、狀態效果)
 │   │   ├── Building.js               # 設施/建築物 Schema
 │   │   ├── GameLog.js                # 遊戲歷史日誌 Schema (以 UTC createdAt 為單一真實來源)
 │   │   ├── Item.js                   # 道具定義、耐久度、重量、類型與營養數值 Schema
 │   │   ├── Location.js               # 地點場景、路線連接、採集點與地面放置物品 (placedItems) Schema
 │   │   ├── Npc.js                    # NPC、生物、販售商品 (goodies)、收購清單 (purchase) 與掉落物 Schema
 │   │   ├── Player.js                 # 玩家角色資料、三維屬性、生存數值、精力恢復時間戳、背包與解鎖配方 Schema
-│   │   └── Recipe.js                 # 合成製作配方、耐久公式、材料修飾詞 (modifiers) 與解鎖觸發物 Schema
+│   │   ├── Quest.js                  # 任務系統 Schema (目標、進度、獎勵)
+│   │   ├── Recipe.js                 # 合成製作配方、耐久公式、材料修飾詞 (modifiers) 與解鎖觸發物 Schema
+│   │   └── StatusEffect.js           # 戰鬥狀態效果 Schema (BUFF/DEBUFF、控場 canAct、屬性修飾詞字典)
 │   ├── routes/                       # Express RESTful 路由模組
 │   │   ├── api.js                    # 遊戲核心 API (心跳同步/創角/購買/出售/食用/採集/移動/合成/拾取/丟棄/日誌)
 │   │   └── auth.js                   # Google OAuth 憑證驗證與本機 Fallback 登入路由
@@ -37,13 +39,15 @@ AetherImmersion/
 │   │   ├── common/
 │   │   │   └── QuantitySelector.jsx  # 🔢 數量增減調節選擇器元件 (+1/-1, +10/-10, 手動輸入與邊界限制)
 │   │   ├── panels/                   # 遊戲主要操作功能面板
+│   │   │   ├── CombatPanel.jsx       # ⚔️ 戰鬥操作面板 (30s 思考倒數條、技能出招按鈕、即時狀態徽章、自動切換與逃跑)
 │   │   │   ├── CraftPanel.jsx        # 🔨 製作面板 (配方解鎖檢驗、材料投入槽位、設施檢驗、批量合成)
 │   │   │   ├── CreaturesPanel.jsx    # 🐾 區域生物面板 (生物狀態檢視、戰鬥攻擊發起)
 │   │   │   ├── GatherPanel.jsx       # 🌿 資源面板 (NPC 互動買賣/戰鬥、資源採集點、場景設施)
 │   │   │   ├── InventoryPanel.jsx    # 🎒 背包面板 (道具詳情、品質、耐久度、營養效果、批量食用、吃飽/喝飽快捷、丟棄)
 │   │   │   ├── LocationItemsPanel.jsx# 📍 物資面板 (地面掉落物拾取)
 │   │   │   ├── LogPanel.jsx          # 📜 紀錄面板 (分類篩選、發送對話、日誌滾動檢視、依玩家本機時區動態顯示)
-│   │   │   └── MovePanel.jsx         # 🧭 移動面板 (相鄰場景路徑移動、負重判定、精力折算提示)
+│   │   │   ├── MovePanel.jsx         # 🧭 移動面板 (相鄰場景路徑移動、負重判定、精力折算提示)
+│   │   │   └── TacticsModal.jsx      # ⚙️ 自動戰鬥戰術策略配置彈窗 (技能優先順序拖曳、我方/敵方狀態觸發條件)
 │   │   ├── BottomToolbar.jsx         # 📱 底部行動版功能分頁切換列
 │   │   ├── CollapsiblePanel.jsx      # 📦 可折疊展開通用面板容器外殼 (Glassmorphism 視覺風格)
 │   │   ├── GameInterface.jsx         # 🎮 遊戲主要操作視圖與三欄桌面版/自適應行動版視口容器
@@ -192,17 +196,49 @@ AetherImmersion/
 
 ### 10. 商店交易系統 (NPC Trading System)
 - **後端權威安全交易**：
-  - 購買道具（`POST /api/player/buy`）：由後端驗證 NPC 販售商品、單價與玩家持有金錢，原子扣款並發放道具，自動檢驗新配方解鎖。
+  - 購買道具（`POST /api/player/buy`）：由後端驗證 NPC 販售商品、單價與玩家持有金錢，並支援複合購買條件（收取金錢 ＋ 指定材料 `requiredItems`，如野豬皮衣需 200 元 ＋ 2 個野豬皮），原子扣款、依序扣減背包材料並發放道具，自動檢驗新配方解鎖。
   - 出售道具（`POST /api/player/sell`）：由後端驗證玩家背包持有數量與 NPC 收購價，原子扣除道具並發放金錢。
-- 整合 `QuantitySelector` 數量選擇器進行批量買賣；購買容器道具自動初始化 `contents`；杜絕前端透過萬能更新任意竄改資產。
+- 整合 `QuantitySelector` 數量選擇器進行批量買賣，並依據金錢與材料持有量動態計算購買上限；購買容器道具自動初始化 `contents`；杜絕前端透過萬能更新任意竄改資產。
 
 ### 11. 即時回合制戰鬥系統 (Turn-Based Combat System)
-- 在區域資源面板中對野外怪物發起戰鬥（`startBattle`）。
-- **先手判定與閃避**：比較雙方速度（`speed`），速度影響先手順序與閃避率。
-- **動態命中率**：精巧（`dexterity`）影響戰鬥的命中率。
-- **傷害計算**：物理攻擊力受力量（`strength`）加成：`damage = Math.max(1, atkStr - defDef)`。
-- **戰利品掉落結算**：擊敗生物後隨機從敵方 `drops` 掉落清單產生物品並加入背包。
-- *備註：戰鬥功能尚未完成，相關核心數值與戰鬥流程暫緩更動實際程式碼。*
+- 在區域生物/資源面板中對野外生物發起戰鬥（`startBattle`）。
+- **先手順序與時序控制**：
+  - 比較雙方速度（`speed`），速度較高者取得先手；若速度相同則預設玩家先攻。
+- **雙模式運作機制 (Manual & Auto Combat)**：
+  - **手動模式 (Manual Mode)**：輪到玩家行動時，介面啟動 30 秒思考倒數計時條（`COMBAT_TURN_TIMEOUT = 30`）。玩家可自由點選已就緒技能出招；若未在時間內完成選擇，系統將於倒數歸零時自動施放【普通攻擊】。
+  - **自動戰鬥模式 (Auto Mode)**：維持 1 秒 1 回合的流暢推進，系統自動依據玩家自訂之「戰術策略優先清單（Gambits）」進行條件決策出招。
+  - **模式無縫切換**：戰鬥進行中玩家可隨時點擊一鍵切換手動/自動狀態，切換為手動立即重設 30 秒倒數，切換為自動則立即恢復 1 秒節奏。
+- **自動戰鬥戰術策略系統 (Gambits / Tactics System)**：
+  - 玩家可在 `TacticsModal` 中自由調整技能優先順序（Priority）與施放條件（Condition）：
+    - `ALWAYS`：無條件（冷卻完畢即放）。
+    - `SELF_NOT_HAS_STATUS` / `SELF_HAS_STATUS`：我方未持有/持有指定狀態時（如自身未擁有「專注」時優先開心眼）。
+    - `TARGET_NOT_HAS_STATUS` / `TARGET_HAS_STATUS`：敵方未持有/持有指定狀態時（如敵方未受「暈眩」時施放刀背擊）。
+  - 若所有自訂戰術條件皆不符合或技能均在冷卻中，平滑退回普通攻擊。設定支援即時寫入玩家資料庫持久化儲存。
+- **多人戰鬥擴充架構 (Multiplayer Extensibility Architecture)**：
+  - **參與者實體抽象 (Participant Map)**：將戰鬥雙方抽象為 `participants: { [actorId]: { id, name, team, hp, maxHp, stats, statuses, cooldowns } }`，不再綁死二元變數，未來組隊多人連線或多敵人群戰可無縫擴充至陣列。
+  - **行動意圖與出招解耦 (Decoupled Action Resolver)**：透過通用結算器 `executeCombatAction(actorId, targetId, skillId)` 統一處理出招、命中計算、狀態施加與回合成熟，客戶端手動點擊、超時普攻、AI 戰術或是未來遠端玩家發送之行動指令均共享同一底層核心。
+- **武器與防具裝備、攻防加成與熟練度系統 (Weapon & Armor Equipment & Combat Skills)**：
+  - **武器與防具道具數值**：武器道具（`type` 包含 `WEAPON`）具備獨立攻擊力 `attack`（如石劍 `item035` 攻擊力 +5）；防具道具（`type` 包含 `ARMOR`）具備獨立防禦力 `defense` 與部位類型（如胸甲 `item036` 野豬皮衣防禦力 +3、腿甲 `item037` 野豬皮褲防禦力 +3）。背包面板中物品詳情區**純文字無圖示呈現**屬性與防禦加成，並提供「裝備/卸下」切換，格子與晶片明確標示「裝備中」徽章。
+  - **戰鬥攻防加成計算**：計算戰鬥傷害時，攻擊方裝備武器之攻擊力自動疊加至基礎力量（`atkStr = (stats.str) + weaponAttack`）；防守方所有裝備防具之防禦力總和亦自動疊加至基礎防禦（`defDef = (stats.def) + armorDefense`），使防具切實減免所受之技能與普通攻擊傷害。
+  - **動態招式判定（免學習）**：捨棄傳統技能學習門檻，改以「裝備對應武器類型」且「達到該武器系別的戰鬥技能等級」動態判定可用招式（`getAvailableBattleSkills`）。空手時為徒手（`UNARMED`），無法施展劍術招式；裝備劍（`SWORD`）且劍術等級 $\ge$ 1 時，刀背擊等專屬招式自動就緒可用；普通攻擊（`SKILL_NORMAL_ATTACK`）隨時可用。
+  - **戰鬥中鎖定裝備（防洗機制）**：戰鬥進行期間全面鎖定裝備欄位，背包面板中「裝備/卸下武器」與「裝備/卸下防具」按鈕自動禁用並顯示「戰鬥中鎖定」狀態，禁止更換、卸下或丟棄當前裝備之武器與防具；前端狀態庫（`equipWeapon` / `equipArmor` / `unequipWeapon` / `unequipArmor`）亦設有防禦守衛，阻絕任何戰鬥中途換裝洗經驗或洗防禦之漏洞。
+  - **生物專屬經驗與熟練度提升**：擊敗特定野外生物時，獲得該生物定義之專屬戰鬥經驗值（`Npc.exp`），並嚴格依據該場戰鬥鎖定使用之武器系別（`combatState.battleWeaponType`，如持劍提升劍術 `SWORD`、空手提升徒手 `UNARMED`）累加熟練度；預設起始等級為 Lv.0，升級經驗比照生活技能門檻（`SKILL_EXP_THRESHOLDS`）；`TopHUD.jsx` 玩家選單中以純文字與進度條呈現，無圖示且無滑鼠懸停依賴，並即時反映基礎防禦與防具加成總和（如 `DEF: 0 (+6)`）。
+- **技能系統、公式動態求值與多段連擊 (Battle Skills & Dynamic Formula Evaluation)**：
+  - 戰鬥技能資料模型（`BattleSkill`）支援冷卻回合（`coolDown`）、連擊打擊次數（`hitCount`）、武器類型需求（`requiredWeaponTypes`）、角色等級門檻（`requiredLevel`）與附加狀態效果清單（`effects`）。
+  - **資料驅動動態公式解析 (`evaluateCombatFormula`)**：命中公式（`hitRateFormula`）與傷害公式（`damageFormula`）統一透過沙盒化動態求值器直接解析執行，自動代入攻擊方與防守方經狀態增益與裝備加成後的上下文字典（嚴格採用全名：`strength`、`dexterity`、`speed`、`spiritual`、`defense`、`hp`、`maxHp` 等），杜絕傳統硬編碼變數。
+  - **命中率判定**：依據技能公式動態求值（如普通攻擊 `(attacker.dexterity - defender.speed) / defender.speed * 0.25 + 0.5`，當攻擊方靈巧為 8、防守方速度為 1 時命中率達 100%），並疊加專注等狀態修飾詞，邊界安全限制於 0.1 ～ 1.0 之間。
+  - **多段打擊招式**（如迴旋斬 `SKILL_SPINNING_SLASH` 3 段攻擊）：每段攻擊皆獨立進行命中判定與動態傷害求值，日誌精準回報連擊次數與累計總傷害。
+  - **招式冷卻管理**（Cooldown）：施放具冷卻時間的招式後，冷卻計數於角色個人回合結束時逐回合遞減；冷卻期間智能輪替使用其他就緒技能或退回普通攻擊。
+- **狀態效果與控場/增減益系統 (Status Effects & Buff/Debuff)**：
+  - 獨立狀態效果資料模型（`StatusEffect`）統一管理所有狀態定義，具備唯一識別碼 `statusId`、類型（`BUFF` / `DEBUFF`）、分類（`CROWD_CONTROL` / `STAT_MODIFIER`）、行動能力（`canAct`）與屬性修飾詞字典（`statModifiers`）。
+  - **控場機制 (Crowd Control)**：若角色身上存在 `canAct: false` 的狀態（如刀背擊 `SKILL_FLAT_STRIKE` 造成的 `STATUS_STUN` 暈眩），該回合直接跳過出招行動，輸出無法行動提示日誌。
+  - **屬性修飾詞動態疊加 (Stat Modifiers)**：增益招式（如心眼 `SKILL_MINDS_EYE` 造成的 `STATUS_FOCUSED` 專注）可提升攻擊命中率（`hitRate +0.3`），並支援力量、防禦、速度與閃避率等多維度屬性疊加。
+  - **狀態生命週期管理 (Turn Maintenance)**：狀態持續時間（`remainingTurns`）於持有者的個人行動回合結束時扣減 1 回合；歸零時自動自狀態池移除並發布狀態解除日誌。
+- **戰利品掉落結算與持久化**：
+  - 擊敗生物後隨機自 `drops` 清單依數量區間產生物品，若為裝備則自動初始化耐久度並加入背包。
+  - 戰鬥結束（獲勝、戰敗或主動逃脫）後立即透過 `PUT /api/player` 將最新 HP（獲勝時含戰利品與戰鬥經驗值）持久化寫入 MongoDB。
+- **純資料庫架構與安全隔離**：
+  - 戰鬥技能與狀態資料於執行期一律由後端 REST API（`/api/battle-skills` 與 `/api/status-effects`）自 MongoDB 讀取，種子檔案（seeds）不被打包上傳至生產環境，客戶端嚴禁直接 import 種子檔案。
 
 ### 12. 初始起點與探索地圖 (Starting Location & Exploration)
 - 創角流程配置 10 點三維能力值（力量、速度、精巧），完成角色命名。
@@ -511,8 +547,8 @@ sequenceDiagram
     Player->>View: 在 NPC 販售清單 (goodies) 選擇商品與數量，點擊「購買」
     View->>Store: performBuy(npc, itemId, price, qty)
     Store->>API: POST /api/player/buy { npcId, itemId, qty }
-    Note over API: 後端原子校驗：驗證 NPC 庫存、價格、玩家金錢 >= totalCost
-    API->>API: 扣除玩家金錢 (money -= totalCost)
+    Note over API: 後端原子校驗：驗證 NPC 庫存、價格、玩家金錢 >= totalCost 與材料 (requiredItems) 持有量
+    API->>API: 扣除玩家金錢 (money -= totalCost) 與所需材料
     API->>API: addItemsToInventory 加入背包 (容器自動初始化 contents)
     API->>API: checkRecipeUnlocks 比對是否解鎖新製作配方
     API->>DB: player.save() 寫入資料庫
@@ -522,12 +558,12 @@ sequenceDiagram
 ```
 
 - **涉及檔案與函式**：
-  - 前端視圖：`src/components/panels/GatherPanel.jsx` (NPC 交易彈窗)
+  - 前端視圖：`src/components/panels/GatherPanel.jsx` (NPC 交易視窗)
   - 前端狀態：`src/store/useGameStore.js` -> `performBuy(npc, itemId, price, qty)`
   - 後端路由：`server/routes/api.js` -> `router.post('/player/buy')`
   - 核心輔助：`shared/utils/gameHelpers.js` -> `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **後端原子性扣款與驗證**：計算總花費 `totalCost = unitPrice * buyQty`，由後端直接檢驗玩家資料庫金錢 `player.money >= totalCost`，不足時拒絕交易，徹底防止用戶端竄改金額。
+  1. **後端原子性扣款與材料驗證**：計算總花費 `totalCost = unitPrice * buyQty` 與材料總量 `req.count * buyQty`，由後端直接檢驗玩家資料庫金錢與背包材料是否充足，不足時拒絕交易，徹底防止用戶端竄改金額或繞過材料。驗證通過後同時原子扣減金錢與消耗指定材料（支援跨多堆疊扣除）。
   2. **容器道具自動初始化**：若購入物品為容器（包含 `CONTAINER` 類型或定義有 `capacity` 容量），後端自動為其附加容器結構 `contents: { itemId: '', amount: 0 }`。
   3. **購物觸發配方解鎖**：調用 `checkRecipeUnlocks`，若購買的道具為特定配方的前置解鎖道具（`recipe.triggerItem`），自動將該配方加入 `unlockedRecipes`，並於回應附帶 `newlyUnlockedRecipes` 供前端發送「這好像可以做成...」的提示訊息。
   4. **後端直接持久化**：後端直接執行 `player.save()` 更新資料庫並回傳最新玩家資料物件，前端僅呼叫 `applyPlayerData` 渲染。
@@ -932,6 +968,84 @@ flowchart TD
      - 可消耗的最大精力：`maxAllowedEnergy = Math.max(0, (maxDrains + 1) * 15 - currentAccumulator - 0.001)`。
      - 依單次消耗計算最大次數：`maxBySatiety = Math.floor(maxAllowedEnergy / singleCost)`。
      - 當 `maxBySatiety <= 0` 時，行動（採集、製作、移動）前端按鈕一律禁用並統一顯示為「**飢渴中**」，後端予以阻擋（HTTP 400）。若請求次數超過 `maxBySatiety`，後端只執行至上限次數（扣至 0 為止）並於日誌提示中斷。
+
+---
+
+### 14. 戰鬥系統 (Combat System)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Player as 玩家
+    participant View as CombatPanel / CreaturesPanel
+    participant Store as useGameStore.js
+    participant Helper as gameHelpers.js
+    participant API as server/routes/api.js
+    participant DB as MongoDB
+
+    Player->>View: 點擊生物「戰鬥」按鈕
+    View->>Store: startBattle(creature)
+    Store->>Store: 比較 SPD 決定先手，構建 participants 抽象實體並啟動定時輪詢
+    loop 回合循環 (Turn-Based Loop)
+        alt 玩家行動回合 (currentTurn === 'player')
+            alt 處於控場 (canAct: false 如暈眩)
+                Store->>Store: 發布暈眩跳過行動日誌
+            else 手動模式 (Manual Mode)
+                Store->>View: 啟動 30 秒思考倒數 (turnTimeRemaining = 30)
+                alt 玩家於時間內點選技能
+                    Player->>View: 點擊技能按鈕 (chooseCombatSkill)
+                    View->>Store: executeCombatAction('player', 'enemy', skillId)
+                else 30 秒倒數歸零超時
+                    Store->>Store: 自動強制施放普通攻擊 SKILL_NORMAL_ATTACK
+                end
+            else 自動模式 (Auto Mode)
+                Store->>Helper: selectSkillByTactics(tactics, availableSkills, atkStatuses, defStatuses, cooldowns)
+                Helper-->>Store: 回傳戰術條件匹配之最優先技能
+                Store->>Store: 每 1 秒推進出招
+            end
+            Store->>Helper: calculateCombatTurn(player, enemy, selectedSkill, playerStatuses, enemyStatuses)
+            Helper-->>Store: 回傳 { isHit, totalDamage, hits, appliedEffects }
+            Store->>Store: 結算傷害、100% 附加狀態、回合結束維護衰減 (remainingTurns - 1)
+        else 敵方行動回合 (currentTurn === 'enemy')
+            Store->>Store: 控場檢查 (若被暈眩則跳過)
+            Store->>Helper: calculateCombatTurn(enemy, player, normalAttack, enemyStatuses, playerStatuses)
+            Store->>Store: 扣除玩家 HP、附加狀態、回合結束維護衰減
+        end
+    end
+    alt 敵方 HP <= 0 (獲勝結算)
+        Store->>Store: 結算掉落物 (drops) 並加入背包
+        Store->>API: PUT /api/player { hp, inventory, combatSkills }
+        API->>DB: 更新玩家最新血量與戰利品
+    else 玩家 HP <= 0 (戰敗結算)
+        Store->>API: PUT /api/player { hp: 0 }
+        API->>DB: 更新玩家戰敗血量
+    else 玩家主動逃跑 (fleeBattle)
+        Store->>API: PUT /api/player { hp: currentHp }
+        API->>DB: 更新玩家逃脫當前血量
+    end
+```
+
+- **涉及檔案與函式**：
+  - 前端視圖：`src/components/panels/CombatPanel.jsx`、`src/components/panels/TacticsModal.jsx`、`src/components/panels/CreaturesPanel.jsx`、`src/components/panels/GatherPanel.jsx`
+  - 前端狀態：`src/store/useGameStore.js` -> `startBattle(creature)`、`chooseCombatSkill(skillId)`、`tickCombat()`、`toggleAutoBattle()`、`updateBattleSettings(newSettings)`、`fleeBattle()`、`executeCombatAction(actorId, targetId, skillId)`
+  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
+  - 後端模型：`server/models/Player.js` (`battleSettings`, `autoTactics`)、`server/models/BattleSkill.js`、`server/models/StatusEffect.js`
+  - 後端路由：`server/routes/api.js` -> `router.put('/player')`、`router.get('/battle-skills')`、`router.get('/status-effects')`
+- **關鍵功能與運作機制**：
+  1. **手動思考 30 秒倒數與超時普攻**：
+     - 手動模式下輪到玩家回合時觸發 `turnTimeRemaining: 30` 秒平滑倒數。
+     - 玩家在倒數期間點擊技能立即出招，免去等待；若倒數歸零，系統自動替玩家執行普通攻擊，杜絕掛機停滯。
+  2. **自動戰鬥戰術策略系統 (Gambits / Tactics)**：
+     - 玩家可設定技能施放優先順序，並綁定觸發條件（如自身無專注、敵方無暈眩等）。
+     - 自動模式維持 1 秒 1 回合的平滑節奏，依序評估戰術條件自動釋放招式；設定同步持久化至 MongoDB。
+  3. **面向多人戰鬥的參與者抽象 (Participants Abstraction)**：
+     - 狀態池改以 `participants: { [actorId]: Participant }` 字典維護，解耦單一玩家與單一生物的二元邏輯。
+     - 統一透過通用結算器 `executeCombatAction(actorId, targetId, skillId)` 執行行動，為未來的多人組隊協同作戰（Party Combat）提供即插即用的擴充能力。
+  4. **多段攻擊與狀態效果 100% 施加**：
+     - 多段招式（如迴旋斬 3 連擊）每段獨立隨機擲骰並彙整總傷害。
+     - 招式命中或自身增益時，100% 將狀態效果附加至目標狀態池中。
+  5. **純資料庫架構與安全隔離**：
+     - 執行期技能與狀態定義一律自 REST 端點載入，嚴禁直接 import 種子檔案。
 
 ---
 

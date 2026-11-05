@@ -44,6 +44,23 @@ export const STAT_ENERGY_MIN_MULTIPLIER = 0.5; // 最低倍率 0.5（最高節�
 // 耐久度相關常數
 export const PERMANENT_DURABILITY = -1; // 永久免損耗道具/設施的哨兵值耐久度 (-1)
 
+// 戰鬥系統常數 (Turn-Based Combat Constants)
+export const DEFAULT_ATTACK_SKILL_ID = 'SKILL_NORMAL_ATTACK'; // 預設基礎攻擊技能 ID
+export const COMBAT_TURN_TIMEOUT = 30; // 手動戰鬥玩家每回合決策倒數（30 秒）
+export const AUTO_COMBAT_INTERVAL = 1000; // 自動戰鬥每回合推進間隔（1 秒）
+export const WEAPON_TYPES = Object.freeze(['SWORD', 'UNARMED']); // 支援之武器分類
+export const COMBAT_SKILL_TYPES = Object.freeze(['SWORD', 'UNARMED']); // 戰鬥技能熟練度系別清單
+export const ARMOR_SLOTS = Object.freeze(['CHEST', 'LEG']); // 支援之防具裝備槽位
+
+// 自動戰鬥自訂條件定義 (Tactics Conditions)
+export const TACTIC_CONDITIONS = Object.freeze({
+  ALWAYS: { id: 'ALWAYS', label: '無條件（冷卻就緒即放）', labelEn: 'Always (When Ready)' },
+  SELF_NOT_HAS_STATUS: { id: 'SELF_NOT_HAS_STATUS', label: '我方未持有狀態時', labelEn: 'Self Lacks Status' },
+  SELF_HAS_STATUS: { id: 'SELF_HAS_STATUS', label: '我方持有狀態時', labelEn: 'Self Has Status' },
+  TARGET_NOT_HAS_STATUS: { id: 'TARGET_NOT_HAS_STATUS', label: '敵方未持有狀態時', labelEn: 'Target Lacks Status' },
+  TARGET_HAS_STATUS: { id: 'TARGET_HAS_STATUS', label: '敵方持有狀態時', labelEn: 'Target Has Status' },
+});
+
 export const GAME_CONSTANTS = Object.freeze({
   MAX_WATER,
   MAX_FOOD,
@@ -64,6 +81,13 @@ export const GAME_CONSTANTS = Object.freeze({
   STAT_ENERGY_DISCOUNT_PER_POINT,
   STAT_ENERGY_MIN_MULTIPLIER,
   PERMANENT_DURABILITY,
+  DEFAULT_ATTACK_SKILL_ID,
+  COMBAT_TURN_TIMEOUT,
+  AUTO_COMBAT_INTERVAL,
+  WEAPON_TYPES,
+  COMBAT_SKILL_TYPES,
+  ARMOR_SLOTS,
+  TACTIC_CONDITIONS,
 });
 
 export default GAME_CONSTANTS;
