@@ -703,8 +703,13 @@ export const applyToolsDurabilityDeduction = (
 
     if (newDur <= 0) {
       brokenInstanceIds.add(tool.instanceId);
+      const rawTool = tool?.toObject ? tool.toObject() : (tool?._doc ? { ...tool._doc } : { ...tool });
       brokenTools.push({
-        ...tool,
+        ...rawTool,
+        itemId: rawTool.itemId || tool.itemId,
+        instanceId: rawTool.instanceId || tool.instanceId,
+        customName: rawTool.customName || tool.customName,
+        customNameEn: rawTool.customNameEn || tool.customNameEn,
         durability: 0,
       });
     } else {

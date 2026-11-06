@@ -1612,9 +1612,11 @@ router.post('/player/gather', async (req, res) => {
     }
 
     for (const bTool of brokenTools) {
-      const dbI = allDbItems.find((d) => d.itemId === bTool.itemId);
-      const toolName = bTool.customName || dbI?.name || bTool.itemId;
-      const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
+      const rawTool = bTool?.toObject ? bTool.toObject() : (bTool?._doc || bTool);
+      const toolItemId = rawTool?.itemId || bTool?.itemId;
+      const dbI = allDbItems.find((d) => d.itemId === toolItemId);
+      const toolName = rawTool?.customName || dbI?.name || toolItemId || '工具';
+      const toolNameEn = rawTool?.customNameEn || dbI?.nameEn || dbI?.name || toolItemId || 'Tool';
       await GameLog.create({
         sender: '系統',
         senderEn: 'System',
@@ -2273,9 +2275,11 @@ router.post('/player/craft', async (req, res) => {
     }
 
     for (const bTool of brokenTools) {
-      const dbI = allDbItems.find((d) => d.itemId === bTool.itemId);
-      const toolName = bTool.customName || dbI?.name || bTool.itemId;
-      const toolNameEn = bTool.customNameEn || dbI?.nameEn || dbI?.name || bTool.itemId;
+      const rawTool = bTool?.toObject ? bTool.toObject() : (bTool?._doc || bTool);
+      const toolItemId = rawTool?.itemId || bTool?.itemId;
+      const dbI = allDbItems.find((d) => d.itemId === toolItemId);
+      const toolName = rawTool?.customName || dbI?.name || toolItemId || '工具';
+      const toolNameEn = rawTool?.customNameEn || dbI?.nameEn || dbI?.name || toolItemId || 'Tool';
       await GameLog.create({
         sender: '系統',
         senderEn: 'System',
