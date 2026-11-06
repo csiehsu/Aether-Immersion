@@ -757,10 +757,10 @@
   display: none;
 }
 
-/* Mobile Location Info Trigger & Popover (Above Left of Bottom Toolbar) */
+/* Mobile Location Info Trigger & Popover (Under TopHUD at Top-Left) */
 .mobile-location-wrapper {
   position: absolute;
-  top: 82px;
+  top: calc(135px + env(safe-area-inset-top, 0px));
   left: 14px;
   right: 14px;
   z-index: 10;
