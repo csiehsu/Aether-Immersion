@@ -1,25 +1,19 @@
 /* Overall Layout Wrapper */
 .app-container {
   width: 100%;
-  height: 100%;
   min-height: 100vh;
   min-height: 100dvh;
-  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #08192D;
-  overflow: hidden;
 }
 
 .game-root-wrapper {
   width: 100%;
-  height: 100%;
   min-height: 100vh;
   min-height: 100dvh;
-  max-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 /* Layout Toggle & Header Bar */
@@ -164,9 +158,7 @@
   align-items: center;
   position: relative;
   height: 100%;
-  min-height: 0;
   align-self: stretch;
-  overflow: hidden;
 }
 
 .port-viewport-frame {
@@ -2187,6 +2179,22 @@
 
 /* RESPONSIVE BEHAVIOR FOR DESKTOP VS MOBILE MODES */
 @media (min-width: 1025px) {
+  html, body {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+  }
+
+  #root,
+  .app-container,
+  .game-root-wrapper.view-mode-auto,
+  .game-root-wrapper.view-mode-desktop {
+    height: auto !important;
+    min-height: 100vh !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
   .game-root-wrapper.view-mode-auto .desktop-side-column,
   .game-root-wrapper.view-mode-desktop .desktop-side-column {
     display: flex;
@@ -2204,6 +2212,21 @@
 }
 
 @media (max-width: 1024px) {
+  html, body {
+    height: 100% !important;
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  #root,
+  .app-container,
+  .game-root-wrapper {
+    height: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
   .game-arena-container {
     padding: 0 !important;
     gap: 0 !important;
@@ -2234,6 +2257,13 @@
   .game-root-wrapper.view-mode-auto .bottom-toolbar {
     display: grid !important;
   }
+}
+
+.game-root-wrapper.view-mode-mobile {
+  height: 100% !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
 }
 
 .game-root-wrapper.view-mode-mobile .game-arena-container {
