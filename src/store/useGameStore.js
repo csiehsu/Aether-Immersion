@@ -34,6 +34,23 @@ let combatIntervalTimer = null;
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const STORAGE_PLAYER_ID_KEY = 'aether_player_id';
+const STORAGE_VIEW_MODE_KEY = 'aether_view_mode';
+
+/**
+ * 從 LocalStorage 讀取已儲存的介面版面偏好。
+ * @returns {'auto' | 'desktop' | 'mobile'} 介面顯示模式。
+ */
+const getInitialViewMode = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_VIEW_MODE_KEY);
+    if (saved === 'auto' || saved === 'desktop' || saved === 'mobile') {
+      return saved;
+    }
+  } catch (e) {
+    console.warn('[LocalStorage] Unable to read view mode:', e);
+  }
+  return 'auto';
+};
 
 /**
  * 從後端 API 載入特定集合資料並寫入 Zustand Store。
@@ -145,12 +162,19 @@ export const useGameStore = create((set, get) => ({
   screenMode: 'login',
 
   // View Mode ('auto' | 'desktop' | 'mobile')
-  viewMode: 'auto',
+  viewMode: getInitialViewMode(),
   /**
-   * 設定版面顯示模式。
+   * 設定版面顯示模式並記憶於客戶端 LocalStorage。
    * @param {'auto' | 'desktop' | 'mobile'} mode - 顯示模式。
    */
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) => {
+    try {
+      localStorage.setItem(STORAGE_VIEW_MODE_KEY, mode);
+    } catch (e) {
+      console.warn('[LocalStorage] Unable to save view mode:', e);
+    }
+    set({ viewMode: mode });
+  },
 
   // MongoDB Connection Status ('connecting' | 'connected' | 'offline')
   mongoStatus: 'connecting',
