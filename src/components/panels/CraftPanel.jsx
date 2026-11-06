@@ -536,17 +536,42 @@ export const CraftPanel = () => {
                   </div>
                 </div>
 
-                <div className="recipe-detail-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                  <QuantitySelector value={craftQty} onChange={setCraftQty} min={1} max={calculatedMaxCraft} />
-                  <button
-                    type="button"
-                    className={`btn-craft ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
-                    disabled={!isReadyToCraft}
-                    title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : !hasSatiety ? (language === 'en' ? 'Famished, cannot act' : '飢渴中，無法行動') : undefined}
-                    onClick={(e) => handleStartCraft(rec, e, isReadyToCraft, Math.min(craftQty, calculatedMaxCraft))}
-                  >
-                    {isComatose ? (t.comatose || '昏迷中') : !hasSatiety ? (language === 'en' ? 'Famished' : '飢渴中') : t.startCraft}
-                  </button>
+                <div className="detail-action-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' }}>
+                  <div className="detail-qty-section">
+                    <div className="detail-qty-label-row">
+                      <span className="detail-qty-label">{language === 'en' ? 'Quantity:' : '選取數量：'}</span>
+                    </div>
+                    <div className="detail-qty-control-row">
+                      <QuantitySelector
+                        value={craftQty}
+                        onChange={setCraftQty}
+                        min={1}
+                        max={calculatedMaxCraft}
+                        showMax={false}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="detail-buttons-row">
+                    <button
+                      type="button"
+                      className="btn-qty-max standalone"
+                      onClick={() => setCraftQty(Math.max(1, calculatedMaxCraft))}
+                      disabled={calculatedMaxCraft <= 1 || craftQty >= calculatedMaxCraft}
+                      title="最大值 (MAX)"
+                    >
+                      MAX
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-craft ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
+                      disabled={!isReadyToCraft}
+                      title={isComatose ? (t.comatoseCannotAct || '昏迷中，無法行動') : !hasSatiety ? (language === 'en' ? 'Famished, cannot act' : '飢渴中，無法行動') : undefined}
+                      onClick={(e) => handleStartCraft(rec, e, isReadyToCraft, Math.min(craftQty, calculatedMaxCraft))}
+                    >
+                      {isComatose ? (t.comatose || '昏迷中') : !hasSatiety ? (language === 'en' ? 'Famished' : '飢渴中') : t.startCraft}
+                    </button>
+                  </div>
                 </div>
               </div>
             );

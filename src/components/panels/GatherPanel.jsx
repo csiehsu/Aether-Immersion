@@ -287,35 +287,54 @@ export const GatherPanel = () => {
                                     ))}
                                   </div>
                                 )}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                                  <QuantitySelector
-                                    value={currentQty}
-                                    onChange={(val) => handleBuyQtyChange(goodie.itemId, val)}
-                                    min={1}
-                                    max={maxAffordableQty > 0 ? maxAffordableQty : 1}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="btn-buy"
-                                    disabled={!isAffordable}
-                                    style={{
-                                      height: '36px',
-                                      padding: '0 16px',
-                                      background: isAffordable ? '#10b981' : '#64748b',
-                                      color: '#ffffff',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      cursor: isAffordable ? 'pointer' : 'not-allowed',
-                                      fontWeight: 'bold',
-                                      opacity: isAffordable ? 1 : 0.6,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      performBuy(c, goodie.itemId, unitPrice, currentQty);
-                                    }}
-                                  >
-                                    {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
-                                  </button>
+                                <div className="detail-action-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                                  <div className="detail-qty-section">
+                                    <div className="detail-qty-label-row">
+                                      <span className="detail-qty-label">{language === 'en' ? 'Quantity:' : '選取數量：'}</span>
+                                    </div>
+                                    <div className="detail-qty-control-row">
+                                      <QuantitySelector
+                                        value={currentQty}
+                                        onChange={(val) => handleBuyQtyChange(goodie.itemId, val)}
+                                        min={1}
+                                        max={maxAffordableQty > 0 ? maxAffordableQty : 1}
+                                        showMax={false}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="detail-buttons-row">
+                                    <button
+                                      type="button"
+                                      className="btn-qty-max standalone"
+                                      onClick={() => handleBuyQtyChange(goodie.itemId, Math.max(1, maxAffordableQty))}
+                                      disabled={maxAffordableQty <= 1 || currentQty >= maxAffordableQty}
+                                      title="最大值 (MAX)"
+                                    >
+                                      MAX
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-buy"
+                                      disabled={!isAffordable}
+                                      style={{
+                                        height: '36px',
+                                        padding: '0 16px',
+                                        background: isAffordable ? '#10b981' : '#64748b',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: isAffordable ? 'pointer' : 'not-allowed',
+                                        fontWeight: 'bold',
+                                        opacity: isAffordable ? 1 : 0.6,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        performBuy(c, goodie.itemId, unitPrice, currentQty);
+                                      }}
+                                    >
+                                      {t.buyBtn || (language === 'en' ? 'Buy' : '購買')}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -359,36 +378,55 @@ export const GatherPanel = () => {
                                     </span>
                                   </div>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                                  <QuantitySelector
-                                    value={currentQty}
-                                    onChange={(val) => handleSellQtyChange(pItem.itemId, val)}
-                                    min={1}
-                                    max={Math.max(1, ownedQty)}
-                                    disabled={ownedQty === 0}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="btn-sell"
-                                    disabled={!isSellable}
-                                    style={{
-                                      height: '36px',
-                                      padding: '0 16px',
-                                      background: isSellable ? '#f59e0b' : '#64748b',
-                                      color: '#ffffff',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      cursor: isSellable ? 'pointer' : 'not-allowed',
-                                      fontWeight: 'bold',
-                                      opacity: isSellable ? 1 : 0.6,
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      performSell(c, pItem.itemId, unitPrice, currentQty);
-                                    }}
-                                  >
-                                    {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
-                                  </button>
+                                <div className="detail-action-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                                  <div className="detail-qty-section">
+                                    <div className="detail-qty-label-row">
+                                      <span className="detail-qty-label">{language === 'en' ? 'Quantity:' : '選取數量：'}</span>
+                                    </div>
+                                    <div className="detail-qty-control-row">
+                                      <QuantitySelector
+                                        value={currentQty}
+                                        onChange={(val) => handleSellQtyChange(pItem.itemId, val)}
+                                        min={1}
+                                        max={Math.max(1, ownedQty)}
+                                        disabled={ownedQty === 0}
+                                        showMax={false}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="detail-buttons-row">
+                                    <button
+                                      type="button"
+                                      className="btn-qty-max standalone"
+                                      onClick={() => handleSellQtyChange(pItem.itemId, Math.max(1, ownedQty))}
+                                      disabled={ownedQty <= 1 || currentQty >= ownedQty}
+                                      title="最大值 (MAX)"
+                                    >
+                                      MAX
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-sell"
+                                      disabled={!isSellable}
+                                      style={{
+                                        height: '36px',
+                                        padding: '0 16px',
+                                        background: isSellable ? '#f59e0b' : '#64748b',
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: isSellable ? 'pointer' : 'not-allowed',
+                                        fontWeight: 'bold',
+                                        opacity: isSellable ? 1 : 0.6,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        performSell(c, pItem.itemId, unitPrice, currentQty);
+                                      }}
+                                    >
+                                      {t.sellBtn || (language === 'en' ? 'Sell' : '出售')}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -765,31 +803,47 @@ export const GatherPanel = () => {
                     )}
 
                     <div className="detail-action-container">
-                      <div className="detail-qty-row">
-                        <span className="detail-qty-label">
-                          {t.gatherAttempts || (language === 'en' ? 'Attempts:' : '採集次數：')}
-                        </span>
-                        <QuantitySelector
-                          value={gatherQty}
-                          onChange={setGatherQty}
-                          min={1}
-                          max={calculatedMaxGather}
-                        />
+                      <div className="detail-qty-section">
+                        <div className="detail-qty-label-row">
+                          <span className="detail-qty-label">
+                            {t.gatherAttempts || (language === 'en' ? 'Attempts:' : '採集次數：')}
+                          </span>
+                        </div>
+                        <div className="detail-qty-control-row">
+                          <QuantitySelector
+                            value={gatherQty}
+                            onChange={setGatherQty}
+                            min={1}
+                            max={calculatedMaxGather}
+                            showMax={false}
+                          />
+                        </div>
                       </div>
-                      <div className="detail-buttons-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <span className="gather-cost">
-                            {t.costEnergy}: -{totalCost}
-                            {totalCost !== baseTotalCost && (
-                              <span style={{ color: totalCost < baseTotalCost ? '#10b981' : '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>
-                                ({totalCost < baseTotalCost ? '' : '+'}{Math.round(((totalCost - baseTotalCost) / baseTotalCost) * 100)}%)
-                              </span>
-                            )}
-                          </span>
-                          <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                            {language === 'en' ? 'Success Rate:' : '成功率：'}
-                            <strong style={{ color: '#38bdf8', marginLeft: '4px' }}>{finalSuccessRate}%</strong>
-                          </span>
+                      <div className="detail-buttons-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <button
+                            type="button"
+                            className="btn-qty-max standalone"
+                            onClick={() => setGatherQty(Math.max(1, calculatedMaxGather))}
+                            disabled={calculatedMaxGather <= 1 || gatherQty >= calculatedMaxGather}
+                            title="最大值 (MAX)"
+                          >
+                            MAX
+                          </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span className="gather-cost">
+                              {t.costEnergy}: -{totalCost}
+                              {totalCost !== baseTotalCost && (
+                                <span style={{ color: totalCost < baseTotalCost ? '#10b981' : '#ef4444', fontSize: '0.75rem', marginLeft: '4px' }}>
+                                  ({totalCost < baseTotalCost ? '' : '+'}{Math.round(((totalCost - baseTotalCost) / baseTotalCost) * 100)}%)
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                              {language === 'en' ? 'Success Rate:' : '成功率：'}
+                              <strong style={{ color: '#38bdf8', marginLeft: '4px' }}>{finalSuccessRate}%</strong>
+                            </span>
+                          </div>
                         </div>
                         <button
                           type="button"
@@ -964,48 +1018,67 @@ export const GatherPanel = () => {
 
                               {isDamaged ? (
                                 heldCount > 0 ? (
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                                    <QuantitySelector
-                                      value={Math.min(currentQty, maxQty)}
-                                      onChange={(newVal) =>
-                                        setRepairQtys((prev) => ({ ...prev, [r.itemId]: newVal }))
-                                      }
-                                      min={1}
-                                      max={maxQty}
-                                    />
-                                    <button
-                                      type="button"
-                                      className="btn-repair"
-                                      disabled={!canRepair}
-                                      style={{
-                                        padding: '4px 12px',
-                                        background: canRepair ? '#10b981' : '#475569',
-                                        color: '#fff',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        cursor: canRepair ? 'pointer' : 'not-allowed',
-                                        fontSize: '0.8rem',
-                                        fontWeight: 600,
-                                        transition: 'background 0.2s',
-                                      }}
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        const qtyToUse = Math.min(currentQty, maxQty);
-                                        setIsRepairing(true);
-                                        try {
-                                          const success = await repairBuilding(player.location, b.buildingId, r.itemId, qtyToUse);
-                                          if (success) {
-                                            setRepairQtys((prev) => ({ ...prev, [r.itemId]: 1 }));
+                                  <div className="detail-action-container" style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                                    <div className="detail-qty-section">
+                                      <div className="detail-qty-label-row">
+                                        <span className="detail-qty-label">{language === 'en' ? 'Quantity:' : '選取數量：'}</span>
+                                      </div>
+                                      <div className="detail-qty-control-row">
+                                        <QuantitySelector
+                                          value={Math.min(currentQty, maxQty)}
+                                          onChange={(newVal) =>
+                                            setRepairQtys((prev) => ({ ...prev, [r.itemId]: newVal }))
                                           }
-                                        } finally {
-                                          setIsRepairing(false);
-                                        }
-                                      }}
-                                    >
-                                      {isRepairing
-                                        ? (language === 'en' ? 'Repairing...' : '修復中...')
-                                        : (language === 'en' ? 'Repair' : '修復')}
-                                    </button>
+                                          min={1}
+                                          max={maxQty}
+                                          showMax={false}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="detail-buttons-row">
+                                      <button
+                                        type="button"
+                                        className="btn-qty-max standalone"
+                                        onClick={() => setRepairQtys((prev) => ({ ...prev, [r.itemId]: maxQty }))}
+                                        disabled={maxQty <= 1 || currentQty >= maxQty}
+                                        title="最大值 (MAX)"
+                                      >
+                                        MAX
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn-repair"
+                                        disabled={!canRepair}
+                                        style={{
+                                          padding: '4px 12px',
+                                          background: canRepair ? '#10b981' : '#475569',
+                                          color: '#fff',
+                                          border: 'none',
+                                          borderRadius: '4px',
+                                          cursor: canRepair ? 'pointer' : 'not-allowed',
+                                          fontSize: '0.8rem',
+                                          fontWeight: 600,
+                                          transition: 'background 0.2s',
+                                        }}
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          const qtyToUse = Math.min(currentQty, maxQty);
+                                          setIsRepairing(true);
+                                          try {
+                                            const success = await repairBuilding(player.location, b.buildingId, r.itemId, qtyToUse);
+                                            if (success) {
+                                              setRepairQtys((prev) => ({ ...prev, [r.itemId]: 1 }));
+                                            }
+                                          } finally {
+                                            setIsRepairing(false);
+                                          }
+                                        }}
+                                      >
+                                        {isRepairing
+                                          ? (language === 'en' ? 'Repairing...' : '修復中...')
+                                          : (language === 'en' ? 'Repair' : '修復')}
+                                      </button>
+                                    </div>
                                   </div>
                                 ) : (
                                   <div style={{ fontSize: '0.75rem', color: '#f87171', fontStyle: 'italic' }}>

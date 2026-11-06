@@ -1110,6 +1110,27 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.detail-qty-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.detail-qty-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.detail-qty-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+}
+
 .detail-qty-row {
   display: flex;
   align-items: center;
@@ -1131,6 +1152,7 @@
   justify-content: flex-end;
   gap: 8px;
   width: 100%;
+  flex-wrap: wrap;
 }
 
 .inventory-detail-desc,
@@ -1355,6 +1377,13 @@
 .btn-qty-max:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.btn-qty-max.standalone {
+  margin-right: auto;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  min-height: 32px;
 }
 
 .input-qty-number {

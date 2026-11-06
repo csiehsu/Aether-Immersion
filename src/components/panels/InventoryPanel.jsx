@@ -456,19 +456,35 @@ export const InventoryPanel = () => {
 
                 <div className="detail-action-container">
                   {showQuantitySelector && (
-                    <div className="detail-qty-row">
-                      <span className="detail-qty-label">
-                        {language === 'en' ? 'Quantity:' : '選取數量：'}
-                      </span>
-                      <QuantitySelector
-                        value={Math.min(actionQty, maxActionQty)}
-                        onChange={setActionQty}
-                        min={1}
-                        max={maxActionQty}
-                      />
+                    <div className="detail-qty-section">
+                      <div className="detail-qty-label-row">
+                        <span className="detail-qty-label">
+                          {language === 'en' ? 'Quantity:' : '選取數量：'}
+                        </span>
+                      </div>
+                      <div className="detail-qty-control-row">
+                        <QuantitySelector
+                          value={Math.min(actionQty, maxActionQty)}
+                          onChange={setActionQty}
+                          min={1}
+                          max={maxActionQty}
+                          showMax={false}
+                        />
+                      </div>
                     </div>
                   )}
                   <div className="detail-buttons-row">
+                    {showQuantitySelector && (
+                      <button
+                        type="button"
+                        className="btn-qty-max standalone"
+                        onClick={() => setActionQty(maxActionQty)}
+                        disabled={actionQty >= maxActionQty || maxActionQty <= 1}
+                        title="最大值 (MAX)"
+                      >
+                        MAX
+                      </button>
+                    )}
                     {(hasNutrition || isContainer) && (
                       <button
                         type="button"

@@ -345,19 +345,35 @@ export const LocationItemsPanel = () => {
 
                 <div className="detail-action-container">
                   {showQuantitySelector && (
-                    <div className="detail-qty-row">
-                      <span className="detail-qty-label">
-                        {language === 'en' ? 'Quantity:' : '選取數量：'}
-                      </span>
-                      <QuantitySelector
-                        value={Math.min(pickQty, maxPickQty)}
-                        onChange={setPickQty}
-                        min={1}
-                        max={maxPickQty}
-                      />
+                    <div className="detail-qty-section">
+                      <div className="detail-qty-label-row">
+                        <span className="detail-qty-label">
+                          {language === 'en' ? 'Quantity:' : '選取數量：'}
+                        </span>
+                      </div>
+                      <div className="detail-qty-control-row">
+                        <QuantitySelector
+                          value={Math.min(pickQty, maxPickQty)}
+                          onChange={setPickQty}
+                          min={1}
+                          max={maxPickQty}
+                          showMax={false}
+                        />
+                      </div>
                     </div>
                   )}
                   <div className="detail-buttons-row">
+                    {showQuantitySelector && (
+                      <button
+                        type="button"
+                        className="btn-qty-max standalone"
+                        onClick={() => setPickQty(maxPickQty)}
+                        disabled={pickQty >= maxPickQty || maxPickQty <= 1}
+                        title="最大值 (MAX)"
+                      >
+                        MAX
+                      </button>
+                    )}
                     {isQuestItem ? (
                       <button
                         type="button"
