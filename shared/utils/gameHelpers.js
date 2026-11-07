@@ -1362,6 +1362,89 @@ export const calculateFleeSuccess = (
 };
 
 /**
+ * 計算戰鬥失敗（HP 歸零退出戰鬥）時的屬性或精力扣除懲罰。
+ * 1. 於力量 (strength)、速度 (speed)、靈巧 (dexterity) 中挑選值大於 1 的屬性隨機扣除 1~3 點，最低扣至 1。
+ * 2. 若挑選到的屬性值僅有 1 則另挑一項（即優先從 > 1 的屬性池中隨機選擇）。
+ * 3. 若三項屬性均為 1，則隨機扣除精力 300~600 點，最低扣至 0。
+ * @param {Object} [stats={}] - 玩家當前屬性物件。
+ * @param {number} [currentEnergy=0] - 玩家當前精力數值。
+ * @returns {{
+ *   type: 'STAT' | 'ENERGY',
+ *   statKey: string|null,
+ *   statLabel: string,
+ *   statLabelEn: string,
+ *   amount: number,
+ *   rollAmount: number,
+ *   prevValue: number,
+ *   newValue: number,
+ *   updatedStats: Object,
+ *   updatedEnergy: number
+ * }} 懲罰結算結果物件。
+ */
+export const calculateCombatDefeatPenalty = (stats = {}, currentEnergy = 0) => {
+  const currentStrength = Math.max(1, Number(stats.strength) || 1);
+  const currentSpeed = Math.max(1, Number(stats.speed) || 1);
+  const currentDexterity = Math.max(1, Number(stats.dexterity) || 1);
+
+  const eligibleStats = [];
+  if (currentStrength > 1) eligibleStats.push('strength');
+  if (currentSpeed > 1) eligibleStats.push('speed');
+  if (currentDexterity > 1) eligibleStats.push('dexterity');
+
+  const statLabels = {
+    strength: { zh: '力量', en: 'Strength' },
+    speed: { zh: '速度', en: 'Speed' },
+    dexterity: { zh: '靈巧', en: 'Dexterity' },
+  };
+
+  if (eligibleStats.length > 0) {
+    const pickedKey = eligibleStats[Math.floor(Math.random() * eligibleStats.length)];
+    const rollAmount = Math.floor(Math.random() * 3) + 1; // 1 ~ 3 點
+    const prevValue = stats[pickedKey] !== undefined ? Number(stats[pickedKey]) : 1;
+    const newValue = Math.max(1, prevValue - rollAmount);
+    const actualDeduction = prevValue - newValue;
+
+    const updatedStats = {
+      ...stats,
+      [pickedKey]: newValue,
+    };
+
+    return {
+      type: 'STAT',
+      statKey: pickedKey,
+      statLabel: statLabels[pickedKey].zh,
+      statLabelEn: statLabels[pickedKey].en,
+      amount: actualDeduction,
+      rollAmount,
+      prevValue,
+      newValue,
+      updatedStats,
+      updatedEnergy: currentEnergy,
+    };
+  }
+
+  // 若三項均為 1，扣除精力 300 ~ 600 點，最低扣至 0
+  const safeEnergy = Math.max(0, Number(currentEnergy) || 0);
+  const rollAmount = Math.floor(Math.random() * 301) + 300; // 300 ~ 600 點
+  const newEnergy = Math.max(0, safeEnergy - rollAmount);
+  const actualDeduction = safeEnergy - newEnergy;
+
+  return {
+    type: 'ENERGY',
+    statKey: null,
+    statLabel: '精力',
+    statLabelEn: 'Energy',
+    amount: rollAmount,
+    actualDeduction,
+    rollAmount,
+    prevValue: safeEnergy,
+    newValue: newEnergy,
+    updatedStats: { ...stats },
+    updatedEnergy: newEnergy,
+  };
+};
+
+/**
  * 評估單項自動戰鬥戰術條件是否滿足。
  * @param {Object} tactic - 戰術規則物件 { condition, targetStatusId }。
  * @param {Array<Object>} [actorStatuses=[]] - 行動方當前生效中狀態清單。

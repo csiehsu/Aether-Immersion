@@ -5,6 +5,7 @@ import {
   addItemsToInventory,
   calculateCombatTurn,
   calculateFleeSuccess,
+  calculateCombatDefeatPenalty,
   isPlayerComatose,
   getStatusEffects,
   calculateEffectiveEnergyCost,
@@ -2293,6 +2294,9 @@ export const useGameStore = create((set, get) => ({
           combatIntervalTimer = null;
         }
 
+        const enemyName = participants.enemy?.name || '怪物';
+        const enemyNameEn = participants.enemy?.nameEn || participants.enemy?.name || 'Monster';
+
         get().addLog(
           '戰鬥系統',
           'Combat System',
@@ -2301,9 +2305,40 @@ export const useGameStore = create((set, get) => ({
           'event'
         );
 
+        // 計算戰敗懲罰：隨機扣除力量/速度/靈巧 1~3 點（最低扣至 1），若三項均為 1 則扣精力 300~600 點（最低扣至 0）
+        const penalty = calculateCombatDefeatPenalty(
+          state.player?.stats || participants.player?.stats,
+          state.player?.energy ?? 0
+        );
+
+        if (penalty.type === 'STAT') {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `受到了【${enemyName}】的致命一擊，導致【${penalty.statLabel}】降低了 ${penalty.amount} 點。`,
+            `Suffered a fatal blow from [${enemyNameEn}], causing [${penalty.statLabelEn}] to decrease by ${penalty.amount}.`,
+            'event'
+          );
+        } else {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `受到了【${enemyName}】的致命一擊導致昏迷了 ${penalty.amount} 點精力。`,
+            `Suffered a fatal blow from [${enemyNameEn}], falling comatose and losing ${penalty.amount} energy.`,
+            'event'
+          );
+        }
+
         set((s) => ({
           isBattling: false,
-          player: s.player ? { ...s.player, hp: 0 } : s.player,
+          player: s.player
+            ? {
+                ...s.player,
+                hp: 0,
+                stats: { ...s.player.stats, ...penalty.updatedStats },
+                energy: penalty.updatedEnergy,
+              }
+            : s.player,
           combatState: {
             ...s.combatState,
             isBattling: false,
@@ -2315,13 +2350,18 @@ export const useGameStore = create((set, get) => ({
         try {
           const pId = state.player?._id || '';
           if (pId) {
+            const syncPayload = {
+              hp: 0,
+              stats: penalty.updatedStats,
+              energy: penalty.updatedEnergy,
+            };
             const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
                 'x-player-id': pId,
               },
-              body: JSON.stringify({ hp: 0 }),
+              body: JSON.stringify(syncPayload),
             });
             if (res.ok) {
               const resData = await res.json();
@@ -2331,7 +2371,7 @@ export const useGameStore = create((set, get) => ({
             }
           }
         } catch (err) {
-          console.error('[Battle HP Sync Error]', err);
+          console.error('[Battle Defeat Sync Error]', err);
         }
         return true;
       }

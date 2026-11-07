@@ -238,6 +238,11 @@ AetherImmersion/
 - **戰利品掉落結算與持久化**：
   - 擊敗生物後隨機自 `drops` 清單依數量區間產生物品，若為裝備則自動初始化耐久度並加入背包。
   - 戰鬥結束（獲勝、戰敗或主動逃脫）後立即透過 `PUT /api/player` 將最新 HP（獲勝時含戰利品與戰鬥經驗值）持久化寫入 MongoDB。
+- **戰鬥失敗懲罰機制 (Combat Defeat Penalty)**：
+  - 當玩家在戰鬥中 HP 歸零（`participants.player.hp <= 0`）退出戰鬥時，調用通用演算法 `calculateCombatDefeatPenalty` 結算懲罰：
+    - **屬性扣除優先**：於力量（`strength`）、速度（`speed`）、靈巧（`dexterity`）中篩選數值大於 1 者隨機挑選一項，隨機扣除 1 ～ 3 點，最低扣至 1（若挑選到的屬性僅為 1 則另挑一項）。輸出「受到了【怪物】的致命一擊，導致【屬性】降低了 X 點。」專屬日誌。
+    - **精力透支保底**：若力量、速度、靈巧三項屬性均為 1，則轉為隨機扣除精力（`energy`）300 ～ 600 點，最低扣至 0。輸出「受到了【怪物】的致命一擊導致昏迷了 X 點精力。」專屬日誌。
+    - **狀態持久化存檔**：結算完成後立即退出戰鬥，並透過 `PUT /api/player` 將 `hp: 0` 以及更新後的 `stats` 與 `energy` 同步寫入 MongoDB。
 - **戰鬥逃跑與速度差判定機制 (Combat Flee Mechanism)**：
   - 玩家點擊逃跑（`fleeBattle`）時，系統透過核心通用計算函式（`calculateFleeSuccess`）依據雙方速度（`speed`，自動疊加狀態修飾詞）動態計算成功率：
     - **基礎成功率**：50%（`0.5`）。
@@ -1026,8 +1031,11 @@ sequenceDiagram
         Store->>API: PUT /api/player { hp, inventory, combatSkills }
         API->>DB: 更新玩家最新血量與戰利品
     else 玩家 HP <= 0 (戰敗結算)
-        Store->>API: PUT /api/player { hp: 0 }
-        API->>DB: 更新玩家戰敗血量
+        Store->>Helper: calculateCombatDefeatPenalty(player.stats, player.energy)
+        Helper-->>Store: 回傳 { type, statKey, amount, updatedStats, updatedEnergy }
+        Store->>Store: 發布致命一擊懲罰日誌，扣除屬性或精力
+        Store->>API: PUT /api/player { hp: 0, stats, energy }
+        API->>DB: 更新玩家戰敗血量與懲罰數值
     else 玩家主動逃跑 (fleeBattle)
         Store->>Helper: calculateFleeSuccess(player, enemy)
         alt 逃跑成功 (isSuccess: true)
@@ -1043,7 +1051,7 @@ sequenceDiagram
 - **涉及檔案與函式**：
   - 前端視圖：`src/components/panels/CombatPanel.jsx`、`src/components/panels/TacticsModal.jsx`、`src/components/panels/CreaturesPanel.jsx`、`src/components/panels/GatherPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `startBattle(creature)`、`chooseCombatSkill(skillId)`、`tickCombat()`、`toggleAutoBattle()`、`updateBattleSettings(newSettings)`、`fleeBattle()`、`executeCombatAction(actorId, targetId, skillId)`
-  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`calculateFleeSuccess()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
+  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`calculateFleeSuccess()`、`calculateCombatDefeatPenalty()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
   - 後端模型：`server/models/Player.js` (`battleSettings`, `autoTactics`)、`server/models/BattleSkill.js`、`server/models/StatusEffect.js`
   - 後端路由：`server/routes/api.js` -> `router.put('/player')`、`router.get('/battle-skills')`、`router.get('/status-effects')`
 - **關鍵功能與運作機制**：
@@ -1065,6 +1073,10 @@ sequenceDiagram
   6. **戰鬥逃跑演算法與失敗反擊機制**：
      - 調用純演算法 `calculateFleeSuccess`，依據雙方即時速度計算成功率（基礎 50%，速度差每多 100% 增加 50%，限制在 0% ～ 100%）。
      - 成功時脫離戰鬥並同步最新 HP；失敗時發布「【玩家】試圖逃跑，但被【怪物】攔住了！」日誌，消耗玩家回合後將行動權交由敵方出招反擊。
+  7. **戰鬥失敗懲罰機制 (Combat Defeat Penalty)**：
+     - 調用純演算法 `calculateCombatDefeatPenalty`，當玩家 HP 歸零戰敗時，優先自力量、速度、靈巧中挑選值大於 1 的屬性隨機扣除 1 ～ 3 點（最低扣至 1），並輸出「受到了【怪物】的致命一擊，導致【屬性】降低了 X 點。」。
+     - 若力量、速度、靈巧三項屬性均為 1，則轉為隨機扣除精力 300 ～ 600 點（最低扣至 0），輸出「受到了【怪物】的致命一擊導致昏迷了 X 點精力。」。
+     - 懲罰結果同步透過 `PUT /api/player` 持久化至 MongoDB。
 
 ---
 
