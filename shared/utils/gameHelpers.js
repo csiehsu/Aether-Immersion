@@ -1251,13 +1251,17 @@ export const calculateCombatTurn = (
   };
 
   for (let i = 0; i < hitCount; i++) {
-    const isHit = isPureBuff || Math.random() <= finalHitRate;
-    const dmg = isHit ? evaluateDamage() : 0;
-    hits.push({ hitIndex: i + 1, isHit, damage: dmg });
+    const roll = Math.random();
+    const isGreatSuccess = !isPureBuff && roll > 0.9;
+    const isHit = isPureBuff || isGreatSuccess || roll <= finalHitRate;
+    const baseDmg = isHit ? evaluateDamage() : 0;
+    const dmg = isGreatSuccess ? baseDmg * 2 : baseDmg;
+    hits.push({ hitIndex: i + 1, isHit, isGreatSuccess, damage: dmg });
   }
 
   const totalDamage = hits.reduce((sum, h) => sum + h.damage, 0);
   const anyHit = hits.some((h) => h.isHit);
+  const isGreatSuccess = hits.some((h) => h.isGreatSuccess);
 
   // 7. 狀態效果施加判定 (若技能命中或為自身純增益招式，100% 生成附加狀態)
   const appliedEffects = [];
@@ -1276,6 +1280,7 @@ export const calculateCombatTurn = (
   return {
     canAct: true,
     isHit: anyHit,
+    isGreatSuccess,
     damage: totalDamage,
     totalDamage,
     hitCount,

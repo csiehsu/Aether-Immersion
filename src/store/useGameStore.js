@@ -1998,7 +1998,25 @@ export const useGameStore = create((set, get) => ({
           set((s) => ({ player: { ...s.player, hp: target.hp } }));
         }
 
-        if (turnResult.hitCount > 1) {
+        if (turnResult.isGreatSuccess) {
+          if (turnResult.hitCount > 1) {
+            get().addLog(
+              '戰鬥系統',
+              'Combat System',
+              `【${actor.name}】施展【${skillDisplayName}】，連續發動 ${turnResult.hitCount} 次攻擊並擊中了【${target.name}】的要害！造成雙倍傷害 ${turnResult.totalDamage} 點！(${target.name}剩餘 HP: ${target.hp}/${target.maxHp})`,
+              `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}], landing ${turnResult.hitCount} hits and struck a vital point on [${target.nameEn || target.name}]! Dealt double damage ${turnResult.totalDamage}! (${target.nameEn || target.name} HP: ${target.hp}/${target.maxHp})`,
+              'event'
+            );
+          } else {
+            get().addLog(
+              '戰鬥系統',
+              'Combat System',
+              `【${actor.name}】使用【${skillDisplayName}】擊中了【${target.name}】的要害！造成雙倍傷害 ${turnResult.totalDamage} 點！(${target.name}剩餘 HP: ${target.hp}/${target.maxHp})`,
+              `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}] and struck a vital point on [${target.nameEn || target.name}]! Dealt double damage ${turnResult.totalDamage}! (${target.nameEn || target.name} HP: ${target.hp}/${target.maxHp})`,
+              'event'
+            );
+          }
+        } else if (turnResult.hitCount > 1) {
           get().addLog(
             '戰鬥系統',
             'Combat System',

@@ -227,6 +227,7 @@ AetherImmersion/
   - 戰鬥技能資料模型（`BattleSkill`）支援冷卻回合（`coolDown`）、連擊打擊次數（`hitCount`）、武器類型需求（`requiredWeaponTypes`）、角色等級門檻（`requiredLevel`）與附加狀態效果清單（`effects`）。
   - **資料驅動動態公式解析 (`evaluateCombatFormula`)**：命中公式（`hitRateFormula`）與傷害公式（`damageFormula`）統一透過沙盒化動態求值器直接解析執行，自動代入攻擊方與防守方經狀態增益與裝備加成後的上下文字典（嚴格採用全名：`strength`、`dexterity`、`speed`、`spiritual`、`defense`、`hp`、`maxHp` 等），杜絕傳統硬編碼變數。
   - **命中率判定**：依據技能公式動態求值（如普通攻擊 `(attacker.dexterity - defender.speed) / defender.speed * 0.25 + 0.5`，當攻擊方靈巧為 8、防守方速度為 1 時命中率達 100%），並疊加專注等狀態修飾詞，邊界安全限制於 0.1 ～ 1.0 之間。
+  - **大成功與暴擊要害機制 (Critical Hit / Great Success)**：每段攻擊結算命中時生成隨機命中數值（`roll = Math.random()`，0.0 ～ 1.0）。非純增益招式時，若算出的隨機命中數值大於 0.9（`roll > 0.9`），視為「大成功（擊中要害）」，必定命中且該段最終傷害變為 2 倍；觸發大成功時，戰鬥日誌呈現「【玩家】使用【招式】擊中了【怪物】的要害！造成雙倍傷害 XX 點！」專屬日誌回饋。若未觸發大成功，則依原本規則判定 `roll <= finalHitRate` 是否命中與結算基礎傷害。
   - **多段打擊招式**（如迴旋斬 `SKILL_SPINNING_SLASH` 3 段攻擊）：每段攻擊皆獨立進行命中判定與動態傷害求值，日誌精準回報連擊次數與累計總傷害。
   - **招式冷卻管理**（Cooldown）：施放具冷卻時間的招式後，冷卻計數於角色個人回合結束時逐回合遞減；冷卻期間智能輪替使用其他就緒技能或退回普通攻擊。
 - **狀態效果與控場/增減益系統 (Status Effects & Buff/Debuff)**：
@@ -1004,7 +1005,7 @@ sequenceDiagram
                 Store->>Store: 每 1 秒推進出招
             end
             Store->>Helper: calculateCombatTurn(player, enemy, selectedSkill, playerStatuses, enemyStatuses)
-            Helper-->>Store: 回傳 { isHit, totalDamage, hits, appliedEffects }
+            Helper-->>Store: 回傳 { isHit, isGreatSuccess, totalDamage, hits, appliedEffects }
             Store->>Store: 結算傷害、100% 附加狀態、回合結束維護衰減 (remainingTurns - 1)
         else 敵方行動回合 (currentTurn === 'enemy')
             Store->>Store: 控場檢查 (若被暈眩則跳過)
@@ -1041,8 +1042,9 @@ sequenceDiagram
   3. **面向多人戰鬥的參與者抽象 (Participants Abstraction)**：
      - 狀態池改以 `participants: { [actorId]: Participant }` 字典維護，解耦單一玩家與單一生物的二元邏輯。
      - 統一透過通用結算器 `executeCombatAction(actorId, targetId, skillId)` 執行行動，為未來的多人組隊協同作戰（Party Combat）提供即插即用的擴充能力。
-  4. **多段攻擊與狀態效果 100% 施加**：
-     - 多段招式（如迴旋斬 3 連擊）每段獨立隨機擲骰並彙整總傷害。
+  4. **多段打擊與大成功（擊中要害）機制**：
+     - 每段打擊結算時生成隨機命中數值 `roll = Math.random()`，若 `roll > 0.9` 且非純增益招式，判定為「大成功（擊中要害）」，必定命中且該段造成雙倍傷害，並輸出「【玩家】使用【招式】擊中了【怪物】的要害！造成雙倍傷害 XX 點！」專屬日誌。
+     - 多段招式（如迴旋斬 3 連擊）每段獨立隨機擲骰判定命中與大成功，並彙整總傷害與 hits 陣列。
      - 招式命中或自身增益時，100% 將狀態效果附加至目標狀態池中。
   5. **純資料庫架構與安全隔離**：
      - 執行期技能與狀態定義一律自 REST 端點載入，嚴禁直接 import 種子檔案。
