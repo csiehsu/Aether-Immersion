@@ -4,6 +4,7 @@ import {
   normalizePlayerStats,
   addItemsToInventory,
   calculateCombatTurn,
+  calculateFleeSuccess,
   isPlayerComatose,
   getStatusEffects,
   calculateEffectiveEnergyCost,
@@ -1818,60 +1819,133 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * 脫離/逃跑戰鬥，並將當前血量持久化寫回資料庫。
-   * @returns {Promise<boolean>}
+   * 脫離/逃跑戰鬥，依據玩家與怪物速度計算成功率。
+   * 成功時脫離戰鬥並將當前血量持久化寫回資料庫；失敗時消耗玩家回合並交由怪物反擊。
+   * @returns {Promise<boolean>} 是否成功逃跑。
    */
   fleeBattle: async () => {
     const { combatState, player } = get();
-    if (!combatState || !combatState.isBattling) return false;
+    if (!combatState || !combatState.isBattling || combatState.isResolvingAction) return false;
 
-    if (combatIntervalTimer) {
-      clearInterval(combatIntervalTimer);
-      combatIntervalTimer = null;
+    const playerParticipant = combatState.participants?.player;
+    const enemyParticipant = combatState.participants?.enemy;
+    const pName = playerParticipant?.name || player?.name || '冒險者';
+    const pNameEn = playerParticipant?.nameEn || player?.name || 'Adventurer';
+    const enemyName = enemyParticipant?.name || combatState.enemyCreature?.name || '怪物';
+    const enemyNameEn =
+      enemyParticipant?.nameEn ||
+      combatState.enemyCreature?.nameEn ||
+      enemyParticipant?.name ||
+      'Monster';
+
+    const fleeResult = calculateFleeSuccess(
+      playerParticipant || player,
+      enemyParticipant || combatState.enemyCreature
+    );
+
+    if (fleeResult.isSuccess) {
+      if (combatIntervalTimer) {
+        clearInterval(combatIntervalTimer);
+        combatIntervalTimer = null;
+      }
+
+      const currentHp = Math.max(0, playerParticipant?.hp ?? player?.hp ?? 0);
+      get().addLog(
+        '戰鬥系統',
+        'Combat System',
+        `【${pName}】脫離了戰鬥。(剩餘 HP: ${currentHp})`,
+        `[${pNameEn}] fled from combat. (Remaining HP: ${currentHp})`,
+        'event'
+      );
+
+      set((s) => ({
+        isBattling: false,
+        player: s.player ? { ...s.player, hp: currentHp } : s.player,
+        combatState: {
+          ...s.combatState,
+          isBattling: false,
+          isResolvingAction: false,
+        },
+      }));
+
+      try {
+        const pId = player?._id || '';
+        if (pId) {
+          const res = await fetch(`${API_BASE}/player`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-player-id': pId,
+            },
+            body: JSON.stringify({ hp: currentHp }),
+          });
+          if (res.ok) {
+            const resData = await res.json();
+            if (resData.success && resData.data) {
+              get().applyPlayerData(resData.data);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Battle Flee Sync Error]', err);
+      }
+      return true;
     }
 
-    const currentHp = Math.max(0, combatState.participants?.player?.hp ?? player?.hp ?? 0);
-    const pName = player?.name || '冒險者';
+    // 逃跑失敗
     get().addLog(
       '戰鬥系統',
       'Combat System',
-      `【${pName}】脫離了戰鬥。(剩餘 HP: ${currentHp})`,
-      `[${pName}] fled from combat. (Remaining HP: ${currentHp})`,
+      `【${pName}】試圖逃跑，但被【${enemyName}】攔住了！`,
+      `[${pNameEn}] tried to flee, but was blocked by [${enemyNameEn}]!`,
       'event'
     );
 
+    // 結算玩家當前回合的冷卻與狀態消退（逃跑行動已消耗玩家此回合）
+    const updatedPlayerParticipant = playerParticipant ? { ...playerParticipant } : null;
+    if (updatedPlayerParticipant) {
+      const remainingStatuses = [];
+      for (const s of (updatedPlayerParticipant.statuses || [])) {
+        s.remainingTurns -= 1;
+        if (s.remainingTurns <= 0) {
+          get().addLog(
+            '戰鬥系統',
+            'Combat System',
+            `【${updatedPlayerParticipant.name}】身上的【${s.name}】效果已消退。`,
+            `[${updatedPlayerParticipant.nameEn || updatedPlayerParticipant.name}]'s [${s.nameEn || s.name}] status has worn off.`,
+            'system'
+          );
+        } else {
+          remainingStatuses.push(s);
+        }
+      }
+      updatedPlayerParticipant.statuses = remainingStatuses;
+
+      const newCooldowns = { ...(updatedPlayerParticipant.cooldowns || {}) };
+      for (const k of Object.keys(newCooldowns)) {
+        if (newCooldowns[k] > 0) {
+          newCooldowns[k] -= 1;
+        }
+      }
+      updatedPlayerParticipant.cooldowns = newCooldowns;
+    }
+
+    // 將行動權切換至敵方，交由戰鬥時序定時器自動推進怪物出招
     set((s) => ({
-      isBattling: false,
-      player: s.player ? { ...s.player, hp: currentHp } : s.player,
       combatState: {
         ...s.combatState,
-        isBattling: false,
+        currentTurn: 'enemy',
+        turnTimeRemaining: COMBAT_TURN_TIMEOUT,
+        turnCount: (s.combatState.turnCount || 1) + 1,
         isResolvingAction: false,
+        participants: {
+          ...s.combatState.participants,
+          player: updatedPlayerParticipant || s.combatState.participants?.player,
+        },
       },
     }));
 
-    try {
-      const pId = player?._id || '';
-      if (pId) {
-        const res = await fetch(`${API_BASE}/player`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-player-id': pId,
-          },
-          body: JSON.stringify({ hp: currentHp }),
-        });
-        if (res.ok) {
-          const resData = await res.json();
-          if (resData.success && resData.data) {
-            get().applyPlayerData(resData.data);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[Battle Flee Sync Error]', err);
-    }
-    return true;
+    return false;
   },
 
   /**

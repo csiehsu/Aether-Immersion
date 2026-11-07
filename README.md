@@ -238,6 +238,14 @@ AetherImmersion/
 - **戰利品掉落結算與持久化**：
   - 擊敗生物後隨機自 `drops` 清單依數量區間產生物品，若為裝備則自動初始化耐久度並加入背包。
   - 戰鬥結束（獲勝、戰敗或主動逃脫）後立即透過 `PUT /api/player` 將最新 HP（獲勝時含戰利品與戰鬥經驗值）持久化寫入 MongoDB。
+- **戰鬥逃跑與速度差判定機制 (Combat Flee Mechanism)**：
+  - 玩家點擊逃跑（`fleeBattle`）時，系統透過核心通用計算函式（`calculateFleeSuccess`）依據雙方速度（`speed`，自動疊加狀態修飾詞）動態計算成功率：
+    - **基礎成功率**：50%（`0.5`）。
+    - **速度差加成**：速度差相對於怪物速度每多 100% 增加 50% 成功率（`0.5 + ((playerSpeed - enemySpeed) / enemySpeed) * 0.5`）。
+    - **安全邊界**：限制在 0% ～ 100% 之間。
+  - **逃跑判定與回合流轉**：
+    - **逃跑成功**：立即清除戰鬥時鐘、退出戰鬥狀態機（`isBattling = false`），並發送「【玩家】脫離了戰鬥」日誌，透過 `PUT /api/player` 同步保存當前血量。
+    - **逃跑失敗**：發布「【玩家】試圖逃跑，但被【怪物】攔住了！」日誌；玩家消耗當前回合（維護個人狀態持續時間與冷卻遞減），行動權切換至敵方（`currentTurn = 'enemy'`），交由戰鬥時鐘推進怪物進行反擊。
 - **純資料庫架構與安全隔離**：
   - 戰鬥技能與狀態資料於執行期一律由後端 REST API（`/api/battle-skills` 與 `/api/status-effects`）自 MongoDB 讀取，種子檔案（seeds）不被打包上傳至生產環境，客戶端嚴禁直接 import 種子檔案。
 
@@ -1021,15 +1029,21 @@ sequenceDiagram
         Store->>API: PUT /api/player { hp: 0 }
         API->>DB: 更新玩家戰敗血量
     else 玩家主動逃跑 (fleeBattle)
-        Store->>API: PUT /api/player { hp: currentHp }
-        API->>DB: 更新玩家逃脫當前血量
+        Store->>Helper: calculateFleeSuccess(player, enemy)
+        alt 逃跑成功 (isSuccess: true)
+            Store->>Store: 脫離戰鬥 (isBattling = false)
+            Store->>API: PUT /api/player { hp: currentHp }
+            API->>DB: 更新玩家逃脫當前血量
+        else 逃跑失敗 (isSuccess: false)
+            Store->>Store: 發布被攔住日誌，轉交敵方回合反擊 (currentTurn = 'enemy')
+        end
     end
 ```
 
 - **涉及檔案與函式**：
   - 前端視圖：`src/components/panels/CombatPanel.jsx`、`src/components/panels/TacticsModal.jsx`、`src/components/panels/CreaturesPanel.jsx`、`src/components/panels/GatherPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `startBattle(creature)`、`chooseCombatSkill(skillId)`、`tickCombat()`、`toggleAutoBattle()`、`updateBattleSettings(newSettings)`、`fleeBattle()`、`executeCombatAction(actorId, targetId, skillId)`
-  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
+  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`calculateFleeSuccess()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
   - 後端模型：`server/models/Player.js` (`battleSettings`, `autoTactics`)、`server/models/BattleSkill.js`、`server/models/StatusEffect.js`
   - 後端路由：`server/routes/api.js` -> `router.put('/player')`、`router.get('/battle-skills')`、`router.get('/status-effects')`
 - **關鍵功能與運作機制**：
@@ -1048,6 +1062,9 @@ sequenceDiagram
      - 招式命中或自身增益時，100% 將狀態效果附加至目標狀態池中。
   5. **純資料庫架構與安全隔離**：
      - 執行期技能與狀態定義一律自 REST 端點載入，嚴禁直接 import 種子檔案。
+  6. **戰鬥逃跑演算法與失敗反擊機制**：
+     - 調用純演算法 `calculateFleeSuccess`，依據雙方即時速度計算成功率（基礎 50%，速度差每多 100% 增加 50%，限制在 0% ～ 100%）。
+     - 成功時脫離戰鬥並同步最新 HP；失敗時發布「【玩家】試圖逃跑，但被【怪物】攔住了！」日誌，消耗玩家回合後將行動權交由敵方出招反擊。
 
 ---
 

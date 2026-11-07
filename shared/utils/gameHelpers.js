@@ -1297,6 +1297,71 @@ export const calculateCombatTurn = (
 };
 
 /**
+ * 計算戰鬥逃跑成功率與判定結果。
+ * 基礎成功率 50%，速度差相對於怪物每多 100% 增加 50% 成功率，邊界安全限制於 0% ~ 100%。
+ * @param {number|Object} playerOrSpeed - 玩家實體物件或速度數值。
+ * @param {number|Object} enemyOrSpeed - 怪物實體物件或速度數值。
+ * @param {Array<Object>} [playerStatuses=[]] - 玩家當前狀態效果清單。
+ * @param {Array<Object>} [enemyStatuses=[]] - 怪物當前狀態效果清單。
+ * @returns {{ isSuccess: boolean, fleeRate: number, roll: number, playerSpeed: number, enemySpeed: number }}
+ */
+export const calculateFleeSuccess = (
+  playerOrSpeed,
+  enemyOrSpeed,
+  playerStatuses = [],
+  enemyStatuses = []
+) => {
+  let playerSpeed =
+    typeof playerOrSpeed === 'number'
+      ? playerOrSpeed
+      : Number(playerOrSpeed?.stats?.speed ?? 1);
+  let enemySpeed =
+    typeof enemyOrSpeed === 'number'
+      ? enemyOrSpeed
+      : Number(enemyOrSpeed?.stats?.speed ?? 1);
+
+  const pStatuses = Array.isArray(playerOrSpeed?.statuses)
+    ? playerOrSpeed.statuses
+    : playerStatuses;
+  if (Array.isArray(pStatuses)) {
+    for (const s of pStatuses) {
+      if (s?.statModifiers?.speed) {
+        playerSpeed += Number(s.statModifiers.speed) || 0;
+      }
+    }
+  }
+
+  const eStatuses = Array.isArray(enemyOrSpeed?.statuses)
+    ? enemyOrSpeed.statuses
+    : enemyStatuses;
+  if (Array.isArray(eStatuses)) {
+    for (const s of eStatuses) {
+      if (s?.statModifiers?.speed) {
+        enemySpeed += Number(s.statModifiers.speed) || 0;
+      }
+    }
+  }
+
+  const safePlayerSpeed = Math.max(1, playerSpeed);
+  const safeEnemySpeed = Math.max(1, enemySpeed);
+
+  // 基礎 50% 成功率，速度差相對於怪物每多 100% 增加 50% 成功率，限制在 0% ~ 100%
+  const speedDiffRatio = (safePlayerSpeed - safeEnemySpeed) / safeEnemySpeed;
+  const rawRate = 0.5 + speedDiffRatio * 0.5;
+  const fleeRate = Math.max(0, Math.min(1.0, rawRate));
+  const roll = Math.random();
+  const isSuccess = fleeRate > 0 && roll <= fleeRate;
+
+  return {
+    isSuccess,
+    fleeRate,
+    roll,
+    playerSpeed: safePlayerSpeed,
+    enemySpeed: safeEnemySpeed,
+  };
+};
+
+/**
  * 評估單項自動戰鬥戰術條件是否滿足。
  * @param {Object} tactic - 戰術規則物件 { condition, targetStatusId }。
  * @param {Array<Object>} [actorStatuses=[]] - 行動方當前生效中狀態清單。
