@@ -244,6 +244,8 @@ export const MATERIAL_TYPE_LABELS = {
     QUEST_ITEM: '任務道具',
     BOAT_KEY: '小船鑰匙',
     ROASTING_BOX: '烘肉箱',
+    EEL: '鰻魚',
+    CRAB: '螃蟹',
   },
   'en': {
     FLOUR: 'Flour',
@@ -262,6 +264,8 @@ export const MATERIAL_TYPE_LABELS = {
     QUEST_ITEM: 'Quest Item',
     BOAT_KEY: 'Boat Key',
     ROASTING_BOX: 'Roasting Box',
+    EEL: 'Eel',
+    CRAB: 'Crab',
   },
 };
 

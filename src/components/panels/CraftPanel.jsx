@@ -411,6 +411,7 @@ export const CraftPanel = () => {
                       ? mappedOutput.map((item) => ({
                         itemId: item.itemId,
                         quantity: item.quantity || 1,
+                        chance: item.chance,
                       }))
                       : (rec.outputItems || []).map((out, idx) => {
                         let finalItemId = '';
@@ -425,6 +426,7 @@ export const CraftPanel = () => {
                         return {
                           itemId: finalItemId,
                           quantity: out.quantity || 1,
+                          chance: out.chance,
                         };
                       });
 
@@ -501,6 +503,11 @@ export const CraftPanel = () => {
                               )}
                               <span style={{ color: '#38bdf8', fontWeight: 600 }}>
                                 {previewDisplayName} x{outputQuantity}
+                                {out.chance !== undefined && (
+                                  <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginLeft: '6px', fontWeight: 'normal' }}>
+                                    ({calculateSuccessRate(out.chance, currentLevel)}%)
+                                  </span>
+                                )}
                               </span>
                             </div>
                           );

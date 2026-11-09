@@ -2128,6 +2128,7 @@ router.post('/player/craft', async (req, res) => {
       ? mappedOutput.map((item) => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
+        chance: item.chance,
         type: item.type,
       }))
       : (recipe.outputItems || []).map((out, idx) => {
@@ -2149,6 +2150,7 @@ router.post('/player/craft', async (req, res) => {
         return {
           itemId: finalItemId,
           quantity: out.quantity || 1,
+          chance: out.chance,
           type: out.type,
         };
       });
@@ -2160,43 +2162,102 @@ router.post('/player/craft', async (req, res) => {
     const baseSuccessRate = recipe.baseSuccessRate !== undefined ? Number(recipe.baseSuccessRate) : 75;
     const finalSuccessRate = calculateSuccessRate(baseSuccessRate, currentCraftSkillLevel);
 
+    const hasPerItemChance = effectiveOutputs.some((out) => typeof out.chance === 'number');
+
     let successCraftQty = 0;
     let failCraftQty = 0;
-    for (let i = 0; i < actualCraftQty; i++) {
-      if (Math.random() * 100 < finalSuccessRate) {
-        successCraftQty += 1;
-      } else {
-        failCraftQty += 1;
-      }
-    }
-
     const craftedItemsToAdd = [];
-    if (successCraftQty > 0) {
-      for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
-        const out = effectiveOutputs[outIdx];
-        const finalItemId = out.itemId;
-        const addQty = (out.quantity || 1) * successCraftQty;
-        const isPrimary = (outIdx === 0);
 
-        const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
-        const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
-        const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
-        const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
+    if (hasPerItemChance) {
+      // 獨立逐件產物抽籤模式（每項材料單獨計算產出機率）
+      for (let cIdx = 0; cIdx < actualCraftQty; cIdx++) {
+        let anyGainedInBatch = false;
+        for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
+          const out = effectiveOutputs[outIdx];
+          const finalItemId = out.itemId;
+          const targetChance = typeof out.chance === 'number' ? out.chance : baseSuccessRate;
+          const effectiveChance = calculateSuccessRate(targetChance, currentCraftSkillLevel);
+          const perBatchQty = out.quantity || 1;
 
-        const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
-        const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
-        const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+          let gainedCount = 0;
+          for (let q = 0; q < perBatchQty; q++) {
+            if (Math.random() * 100 < effectiveChance) {
+              gainedCount += 1;
+            }
+          }
 
-        craftedItemsToAdd.push({
-          itemId: finalItemId,
-          count: addQty,
-          options: {
-            durability: finalDurability,
-            maxDurability: finalMaxDurability,
-            ...(customName ? { customName, customNameEn } : {}),
-            ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
-          },
-        });
+          if (gainedCount > 0) {
+            anyGainedInBatch = true;
+            const isPrimary = (outIdx === 0);
+            const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
+            const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
+            const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
+            const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
+
+            const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
+            const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
+            const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+
+            const existingCrafted = craftedItemsToAdd.find((ci) => ci.itemId === finalItemId && !ci.options.customName);
+            if (existingCrafted) {
+              existingCrafted.count += gainedCount;
+            } else {
+              craftedItemsToAdd.push({
+                itemId: finalItemId,
+                count: gainedCount,
+                options: {
+                  durability: finalDurability,
+                  maxDurability: finalMaxDurability,
+                  ...(customName ? { customName, customNameEn } : {}),
+                  ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
+                },
+              });
+            }
+          }
+        }
+        if (anyGainedInBatch) {
+          successCraftQty += 1;
+        } else {
+          failCraftQty += 1;
+        }
+      }
+    } else {
+      // 一般配方維持原邏輯：整筆配方判定成功與失敗
+      for (let i = 0; i < actualCraftQty; i++) {
+        if (Math.random() * 100 < finalSuccessRate) {
+          successCraftQty += 1;
+        } else {
+          failCraftQty += 1;
+        }
+      }
+
+      if (successCraftQty > 0) {
+        for (let outIdx = 0; outIdx < effectiveOutputs.length; outIdx++) {
+          const out = effectiveOutputs[outIdx];
+          const finalItemId = out.itemId;
+          const addQty = (out.quantity || 1) * successCraftQty;
+          const isPrimary = (outIdx === 0);
+
+          const baseDbItem = allDbItems.find((i) => i.itemId === finalItemId) || initialItems.find((i) => i.itemId === finalItemId);
+          const customName = isPrimary && customPrefix && baseDbItem ? `${customPrefix}・${baseDbItem.name}` : '';
+          const customNameEn = isPrimary && customPrefixEn && baseDbItem ? `${customPrefixEn} ${baseDbItem.nameEn || baseDbItem.name}` : '';
+          const finalBonusNutrition = isPrimary && hasBonusNutrition ? bonusNutrition : undefined;
+
+          const baseDur = baseDbItem && baseDbItem.durability !== undefined && baseDbItem.durability > 0 ? baseDbItem.durability : -1;
+          const finalDurability = calculatedDurability > 0 ? calculatedDurability : baseDur;
+          const finalMaxDurability = finalDurability > 0 ? finalDurability : -1;
+
+          craftedItemsToAdd.push({
+            itemId: finalItemId,
+            count: addQty,
+            options: {
+              durability: finalDurability,
+              maxDurability: finalMaxDurability,
+              ...(customName ? { customName, customNameEn } : {}),
+              ...(finalBonusNutrition ? { bonusNutrition: finalBonusNutrition } : {}),
+            },
+          });
+        }
       }
     }
 
