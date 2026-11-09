@@ -99,7 +99,7 @@ AetherImmersion/
   - **社群外部救援機制 (Community Rescue)**：昏迷狀態**開放地面道具拾取 (`pickUpPlacedItem`) 與道具食用/飲用 (`consumeItem`)**。玩家可在遊戲外社群（Discord/LINE等）呼救，由隊友抵達同一地點丟棄食物或水，受困者拾取食用後恢復生存數值，即可順利甦醒解除昏迷！
 - **負重超載系統 (`isPlayerOverburdened`)**：
   - 基礎負重上限固定為 100 kg（`DEFAULT_MAX_WEIGHT = 100`，由 `calculateMaxWeight` 回傳），不受力量屬性加成（力量專注於影響採集類工作速度與物理攻擊力）。
-  - **海上開船載重擴充（因船而異）**：當玩家處於海面環境（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`）時，玩家搭乘的小船等載具可乘載貨物，系統自動依玩家背包所持船隻鑰匙/憑證道具（`type` 包含 `BOAT_KEY`）定義之 `cargoCapacity` 動態疊加載重量（小船鑰匙 `item024` 增加 100 kg，上限提升至 200 kg，載重因船而異），資料驅動支援未來各類型船舶無縫擴充。
+  - **海上開船載重擴充（因船而異）**：當玩家處於海面環境（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`）時，玩家搭乘的小船等載具可乘載貨物，系統自動依玩家背包所持船隻鑰匙道具（`type` 包含 `BOAT_KEY`）定義之 `cargoCapacity` 動態疊加載重量（小船鑰匙 `item024` 增加 100 kg，上限提升至 200 kg，載重因船而異），資料驅動支援未來各類型船舶無縫擴充。
   - 計算背包所有道具實體重量（含容器內裝液體的額外重量：`itemWeight + liquidWeight`）。
   - 當背包總重量嚴格大於負重上限時判定為超重，禁止進行地圖移動。
 
@@ -366,7 +366,7 @@ sequenceDiagram
   2. **動態精力折算**：透過 `calculateEffectiveEnergyCost` 依玩家飽食/水分狀態（充沛飽足 -10%、飢渴虛弱 +20%）計算實際消耗精力。
   3. **生存數值累加扣減**：呼叫 `applyEnergyConsumption`，每累計消耗 15 點精力扣除 1 點水分與 1 點飽食度；若處於充沛飽足狀態，每累計消耗 10 點精力恢復 1 點 HP。
   4. **地點探索記錄**：若目標地點為首次造訪，自動加入玩家的 `knownLocations` 清單並儲存至資料庫。
-  5. **船隻載具擴充負重上限（因船而異）**：基礎負重為 100 kg，不受力量影響。若身處海面開船，調用 `calculateMaxWeight` 自動累加玩家所持有之船隻鑰匙/憑證道具（`type` 包含 `BOAT_KEY`）定義之 `cargoCapacity`（小船鑰匙提供 100 kg 載重，總計 200 kg，上限因船而異）。
+  5. **船隻載具擴充負重上限（因船而異）**：基礎負重為 100 kg，不受力量影響。若身處海面開船，調用 `calculateMaxWeight` 自動累加玩家所持有之船隻鑰匙道具（`type` 包含 `BOAT_KEY`）定義之 `cargoCapacity`（小船鑰匙提供 100 kg 載重，總計 200 kg，上限因船而異）。
 
 ---
 

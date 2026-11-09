@@ -831,13 +831,11 @@ export const checkTravelRequirements = (connection, inventory = [], allDbItems =
       });
       const typeNameMapZh = {
         BOAT_KEY: '小船鑰匙',
-        BOAT_VOUCHER: '小船鑰匙',
         LIGHT: '照明工具',
         MINING_TOOL: '採礦工具',
       };
       const typeNameMapEn = {
         BOAT_KEY: 'Boat Key',
-        BOAT_VOUCHER: 'Boat Key',
         LIGHT: 'Light Source',
         MINING_TOOL: 'Mining Tool',
       };
@@ -1764,7 +1762,7 @@ export const calculateMaxWeight = (player, items = [], locations = []) => {
       const dbItem = dbItemMap.get(inv.itemId);
       if (dbItem) {
         const types = Array.isArray(dbItem.type) ? dbItem.type : (dbItem.type ? [dbItem.type] : []);
-        if ((types.includes('BOAT_KEY') || types.includes('BOAT_VOUCHER')) && typeof dbItem.cargoCapacity === 'number' && dbItem.cargoCapacity > 0) {
+        if (types.includes('BOAT_KEY') && typeof dbItem.cargoCapacity === 'number' && dbItem.cargoCapacity > 0) {
           boatBonus = Math.max(boatBonus, dbItem.cargoCapacity);
         }
       } else if (inv.itemId === 'item024') {

@@ -239,7 +239,6 @@ export const MATERIAL_TYPE_LABELS = {
     FOOD: '食物',
     QUEST_ITEM: '任務道具',
     BOAT_KEY: '小船鑰匙',
-    BOAT_VOUCHER: '船票',
     ROASTING_BOX: '烘肉箱',
   },
   'en': {
@@ -258,7 +257,6 @@ export const MATERIAL_TYPE_LABELS = {
     FOOD: 'Food',
     QUEST_ITEM: 'Quest Item',
     BOAT_KEY: 'Boat Key',
-    BOAT_VOUCHER: 'Boat Voucher',
     ROASTING_BOX: 'Roasting Box',
   },
 };
