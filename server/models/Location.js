@@ -77,6 +77,8 @@ const LocationSchema = new mongoose.Schema(
     placedItems: [PlacedItemSchema],
     npcs: [{ type: String }],
     hasEvent: { type: Boolean, default: false },
+    hasGround: { type: Boolean, default: true },
+    terrainType: { type: String, default: 'LAND' },
   },
   { timestamps: true }
 );

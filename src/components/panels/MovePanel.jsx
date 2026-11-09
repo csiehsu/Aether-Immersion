@@ -42,9 +42,9 @@ export const MovePanel = () => {
   });
 
   const isComatose = isPlayerComatose(player);
-  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items, locations);
   const currentWeight = calculateCurrentWeight(inventory, items);
-  const maxWeight = calculateMaxWeight(player);
+  const maxWeight = calculateMaxWeight(player, items, locations);
 
   return (
     <CollapsiblePanel

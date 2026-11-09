@@ -1682,13 +1682,83 @@ export const addLifeSkillExp = (skillObj = {}, expToAdd = 0) => {
 };
 
 /**
- * 計算玩家負重上限。
- * 規則：負重上限為固定 100 kg，不再由力量屬性加成（力量改為影響採集類工作速度）。
- * @param {Object} [player] - 玩家物件（保留參數以維護向後相容性）。
- * @returns {number} 負重上限值（預設 100 kg）。
+ * 檢查指定地點是否允許放置地面道具。
+ * 規則：海面/無地面場景（hasGround === false 或 terrainType === 'SEA'）無法放置地面道具。
+ * @param {Object|string} locationOrId - 地點實體物件或地點識別碼 (locationId)。
+ * @param {Array<Object>} [locations=[]] - 全域地點資料陣列。
+ * @returns {boolean} 是否允許放置地面道具。
  */
-export const calculateMaxWeight = (player) => {
-  return DEFAULT_MAX_WEIGHT;
+export const canPlaceItemAtLocation = (locationOrId, locations = []) => {
+  if (!locationOrId) return true;
+  let loc = typeof locationOrId === 'object' ? locationOrId : null;
+  const locId = typeof locationOrId === 'string' ? locationOrId : loc?.locationId;
+  if (!loc && locId && Array.isArray(locations)) {
+    loc = locations.find((l) => l && l.locationId === locId);
+  }
+  if (loc) {
+    if (loc.hasGround === false || loc.terrainType === 'SEA') return false;
+    return true;
+  }
+  return locId !== 'AZURE_BAY_OFFSHORE';
+};
+
+/**
+ * 計算玩家負重上限。
+ * 規則：
+ * 1. 基礎上限固定為 100 kg（DEFAULT_MAX_WEIGHT = 100），不受力量屬性加成。
+ * 2. 玩家開船至海面（hasGround === false 或 terrainType === 'SEA'）時，小船等載具可乘載貨物，
+ *    依玩家持有的船隻道具（type 包含 'BOAT_VOUCHER' 且具備 cargoCapacity）動態疊加額外載重，
+ *    若持有小船鑰匙（cargoCapacity: 100）則上限擴充為 200 kg，此負重上限因船而異。
+ * @param {Object} [player] - 玩家物件。
+ * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @param {Array<Object>} [locations=[]] - 全域地點資料陣列。
+ * @returns {number} 負重上限值（kg）。
+ */
+export const calculateMaxWeight = (player, items = [], locations = []) => {
+  let maxWeight = DEFAULT_MAX_WEIGHT;
+  if (!player) return maxWeight;
+
+  const currentLocId = player.location;
+  let currentLoc = null;
+  if (Array.isArray(locations)) {
+    currentLoc = locations.find((l) => l && l.locationId === currentLocId);
+  }
+
+  const isWater = currentLoc
+    ? (currentLoc.hasGround === false || currentLoc.terrainType === 'SEA')
+    : currentLocId === 'AZURE_BAY_OFFSHORE';
+
+  if (isWater) {
+    let boatBonus = 0;
+    const dbItemMap = new Map();
+    if (Array.isArray(items)) {
+      for (const i of items) {
+        if (i && i.itemId) dbItemMap.set(i.itemId, i);
+      }
+    }
+
+    const invList = Array.isArray(player.inventory) ? player.inventory : [];
+    for (const inv of invList) {
+      const dbItem = dbItemMap.get(inv.itemId);
+      if (dbItem) {
+        const types = Array.isArray(dbItem.type) ? dbItem.type : (dbItem.type ? [dbItem.type] : []);
+        if (types.includes('BOAT_VOUCHER') && typeof dbItem.cargoCapacity === 'number' && dbItem.cargoCapacity > 0) {
+          boatBonus = Math.max(boatBonus, dbItem.cargoCapacity);
+        }
+      } else if (inv.itemId === 'item024') {
+        // Fallback 防禦：若 items 尚未加載，小船鑰匙預設提供 100 kg 載重
+        boatBonus = Math.max(boatBonus, 100);
+      }
+    }
+
+    // 若玩家身在海面但暫無背包載具資料，預設套用小船基礎載重 100 kg
+    if (boatBonus === 0 && isWater) {
+      boatBonus = 100;
+    }
+    maxWeight += boatBonus;
+  }
+
+  return maxWeight;
 };
 
 /**
@@ -1747,11 +1817,13 @@ export const calculateCurrentWeight = (inventory = [], items = []) => {
  * @param {Object} player - 玩家物件。
  * @param {Array<Object>} [inventory=[]] - 玩家背包陣列。
  * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @param {Array<Object>} [locations=[]] - 全域地點資料陣列。
  * @returns {boolean} 是否超重。
  */
-export const isPlayerOverburdened = (player, inventory = [], items = []) => {
+export const isPlayerOverburdened = (player, inventory = [], items = [], locations = []) => {
   if (!player) return false;
-  return calculateCurrentWeight(inventory, items) > calculateMaxWeight(player);
+  const currentInv = inventory && inventory.length > 0 ? inventory : (player.inventory || []);
+  return calculateCurrentWeight(currentInv, items) > calculateMaxWeight(player, items, locations);
 };
 
 

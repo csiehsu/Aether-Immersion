@@ -1671,18 +1671,15 @@ router.post('/player/travel', async (req, res) => {
     }
     await settlePlayerInventoryDecay(player, allDbItems);
 
-    const invItemIds = (player.inventory || []).map((i) => i.itemId);
-    let dbItems = allDbItems.filter((i) => invItemIds.includes(i.itemId));
-
-    if (isPlayerOverburdened(player, player.inventory, dbItems)) {
-      return res.status(400).json({ success: false, message: '背包負重超載，無法移動！' });
-    }
-
     let locationDoc = await Location.findOne({ locationId: player.location });
     if (!locationDoc) {
       locationDoc = initialLocations.find((l) => l.locationId === player.location);
     } else {
       await settleLocationPlacedItemsDecay(locationDoc, allDbItems);
+    }
+
+    if (isPlayerOverburdened(player, player.inventory, allDbItems, [locationDoc])) {
+      return res.status(400).json({ success: false, message: '背包負重超載，無法移動！' });
     }
 
     const targetLocDoc = await Location.findOne({ locationId: targetLocationId });
@@ -2739,6 +2736,10 @@ router.post('/player/drop-item', async (req, res) => {
       const location = await Location.findOne({ locationId });
       if (!location) {
         return res.status(404).json({ success: false, message: '找不到該地點！' });
+      }
+
+      if (location.hasGround === false || location.terrainType === 'SEA' || locationId === 'AZURE_BAY_OFFSHORE') {
+        return res.status(400).json({ success: false, message: '此處為海面，無法將物品放置於地上！' });
       }
 
       let allDbItems = await Item.find();

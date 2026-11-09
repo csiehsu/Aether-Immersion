@@ -9,6 +9,7 @@ import {
   isPlayerComatose,
   getStatusEffects,
   calculateEffectiveEnergyCost,
+  canPlaceItemAtLocation,
   isPlayerOverburdened,
   settleItemDecay,
   isDecayItem,
@@ -1230,6 +1231,18 @@ export const useGameStore = create((set, get) => ({
    * @returns {Promise<boolean>} 是否成功丟棄。
    */
   dropItem: async (locationId, itemKey, count = 1) => {
+    const targetLoc = (get().locations || []).find((l) => l && l.locationId === locationId);
+    if (!canPlaceItemAtLocation(targetLoc || locationId, get().locations)) {
+      get().addLog(
+        '背包系統',
+        'Inventory System',
+        '此處為海面，無法將物品放置於地上！',
+        'Cannot place items on the water surface!',
+        'system'
+      );
+      return false;
+    }
+
     const eq = get().player?.equipment || {};
     const isEquippedItem = itemKey === eq.weaponInstanceId || itemKey === eq.chestInstanceId || itemKey === eq.legInstanceId;
     if ((get().isBattling || get().combatState?.isBattling) && isEquippedItem) {

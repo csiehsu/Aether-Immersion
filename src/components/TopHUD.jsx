@@ -25,6 +25,7 @@ export const TopHUD = () => {
   const player = useGameStore((state) => state.player);
   const inventory = useGameStore((state) => state.inventory || []);
   const items = useGameStore((state) => state.items || []);
+  const locations = useGameStore((state) => state.locations || []);
   const user = useGameStore((state) => state.user);
   const language = useGameStore((state) => state.language);
   const setLanguage = useGameStore((state) => state.setLanguage);
@@ -48,8 +49,8 @@ export const TopHUD = () => {
   const isFullEnergy = displayEnergy >= maxEnergy;
   const isComatose = isPlayerComatose(player);
   const currentWeight = calculateCurrentWeight(inventory, items);
-  const maxWeight = calculateMaxWeight(player);
-  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const maxWeight = calculateMaxWeight(player, items, locations);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items, locations);
   const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
   const waterVal = player?.stats?.water ?? MAX_WATER;
   const foodVal = player?.stats?.food ?? MAX_FOOD;

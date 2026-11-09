@@ -28,10 +28,11 @@ export const BottomToolbar = ({ onItemClick, isOverlayOpen }) => {
   const inventory = useGameStore((state) => state.inventory || []);
   const player = useGameStore((state) => state.player || {});
   const items = useGameStore((state) => state.items || []);
+  const locations = useGameStore((state) => state.locations || []);
 
   const currentWeight = calculateCurrentWeight(inventory, items);
-  const maxWeight = calculateMaxWeight(player);
-  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const maxWeight = calculateMaxWeight(player, items, locations);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items, locations);
   const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
 
   /**

@@ -13,6 +13,7 @@ import {
   getWeightColor,
   checkNutritionOverLimit,
   calculateMaxConsumableQty,
+  canPlaceItemAtLocation,
 } from '../../utils/gameHelpers';
 
 /**
@@ -25,6 +26,7 @@ export const InventoryPanel = () => {
   const inventory = useGameStore((state) => state.inventory || []);
   const player = useGameStore((state) => state.player || {});
   const items = useGameStore((state) => state.items || []);
+  const locations = useGameStore((state) => state.locations || []);
   const consumeItem = useGameStore((state) => state.consumeItem);
   const dropItem = useGameStore((state) => state.dropItem);
   const equipWeapon = useGameStore((state) => state.equipWeapon);
@@ -40,9 +42,14 @@ export const InventoryPanel = () => {
   const [actionQty, setActionQty] = useState(1);
   const [isDropping, setIsDropping] = useState(false);
 
+  const currentLocation = useMemo(() => {
+    return (locations || []).find((l) => l && l.locationId === player?.location);
+  }, [locations, player?.location]);
+  const canDropAtLocation = canPlaceItemAtLocation(currentLocation || player?.location, locations);
+
   const currentWeight = calculateCurrentWeight(inventory, items);
-  const maxWeight = calculateMaxWeight(player);
-  const isOverburdened = isPlayerOverburdened(player, inventory, items);
+  const maxWeight = calculateMaxWeight(player, items, locations);
+  const isOverburdened = isPlayerOverburdened(player, inventory, items, locations);
   const weightPercent = maxWeight > 0 ? Math.min(100, Math.max(0, (currentWeight / maxWeight) * 100)) : 0;
 
   // 相同 ID 的物品統合成一個項目，統計總數量
@@ -633,22 +640,26 @@ export const InventoryPanel = () => {
                     <button
                       type="button"
                       className="btn-drop-item"
-                      disabled={isDropping}
+                      disabled={isDropping || !canDropAtLocation}
                       style={{
-                        background: isDropping ? '#6b7280' : '#dc2626',
-                        color: '#ffffff',
-                        border: 'none',
+                        background: !canDropAtLocation
+                          ? 'rgba(239, 68, 68, 0.12)'
+                          : isDropping
+                            ? '#6b7280'
+                            : '#dc2626',
+                        color: !canDropAtLocation ? '#ef4444' : '#ffffff',
+                        border: !canDropAtLocation ? '1px solid #ef4444' : 'none',
                         borderRadius: '4px',
                         padding: '6px 12px',
                         fontSize: '0.8125rem',
                         fontWeight: 600,
-                        cursor: isDropping ? 'not-allowed' : 'pointer',
+                        cursor: isDropping || !canDropAtLocation ? 'not-allowed' : 'pointer',
                         opacity: isDropping ? 0.7 : 1,
-                        transition: 'background 0.2s ease',
+                        transition: 'background 0.2s ease, color 0.2s ease',
                       }}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        if (isDropping || !dropItem) return;
+                        if (isDropping || !dropItem || !canDropAtLocation) return;
                         setIsDropping(true);
                         try {
                           const currentLocId = player?.location || 'AZURE_BAY_PORT';
@@ -668,9 +679,11 @@ export const InventoryPanel = () => {
                         }
                       }}
                     >
-                      {isDropping
-                        ? (language === 'en' ? 'Dropping...' : '丟棄中...')
-                        : (t.dropBtn || (language === 'en' ? 'Drop' : '丟棄'))}
+                      {!canDropAtLocation
+                        ? (language === 'en' ? 'Cannot Discard' : '無法丟棄')
+                        : isDropping
+                          ? (language === 'en' ? 'Dropping...' : '丟棄中...')
+                          : (t.dropBtn || (language === 'en' ? 'Drop' : '丟棄'))}
                     </button>
                   </div>
                 </div>
