@@ -185,7 +185,7 @@ AetherImmersion/
   - 驗證玩家目前位置與地點一致，介面提供實體小卡供玩家手動點選目標實體丟棄；若未指定實體，預設優先丟棄低耐久道具。
   - 受後端玩家動作鎖（Action Mutex）保護，同檔位易腐道具自動加權合併進地面既有堆疊。
   - 前端丟棄按鈕具備防連點狀態（`isDropping`），發送中禁用按鈕防止重複送出。
-  - **海面場景禁止放置機制 (`canPlaceItemAtLocation`)**：在海面等無地面場景（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`），概念上物品放了就會沉入海中，因此無法將物品放置於地上。後端 `POST /player/drop-item` API 進行權威安全攔截；前端物品詳情面板之「丟棄」按鈕自動設為禁用（`disabled`）、文字顯示為紅字「無法丟棄」。
+  - **海面場景丟棄直接銷毀機制 (`canPlaceItemAtLocation`)**：在海面等無地面場景（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`），概念上物品放了就會沉入海中，因此丟棄後不會進入現場地面物品堆中，而是直接消失銷毀；前端物品詳情面板之「丟棄」按鈕維持正常可用（防止玩家在近海撈取過重又無法丟棄形成無法移動的死循環），後端自背包扣除道具後略過寫入 `Location.placedItems`。
 - **拾取道具 (`POST /location/pickup-item`)**：
   - 介面提供現場實體小卡供玩家手動點選目標道具；點選後精確傳遞 `instanceId` 拾取，若未指定則預設優先拾取最高耐久道具。受後端動作鎖串行排隊保護。
   - 前端拾取按鈕具備防連點狀態（`isSubmitting`），發送中禁用按鈕防止並發競態導致的道具增殖。
@@ -760,8 +760,13 @@ sequenceDiagram
     API->>Helper: settlePlayerInventoryDecay / settleLocationPlacedItemsDecay
     API->>Helper: 目標實體優先匹配；若未手動指定則依 compareItemDurability 排序優先選取最低耐久道具
     API->>API: 從玩家背包扣除數量 (歸零則自背包移除)
-    API->>Helper: addItemToPlacedItems 保留道具完整 metadata 移至地面放置物
-    API->>DB: 同步儲存 Location.placedItems 與 Player.inventory
+    alt 有地面場景 (canPlaceItemAtLocation === true)
+        API->>Helper: addItemToPlacedItems 保留道具完整 metadata 移至地面放置物
+        API->>DB: 同步儲存 Location.placedItems 與 Player.inventory
+    else 海面等無地面場景 (canPlaceItemAtLocation === false)
+        Note over API: 物品直接沉入水中銷毀，略過寫入 Location.placedItems
+        API->>DB: 僅儲存 Player.inventory
+    end
     DB-->>API: 儲存成功
     API-->>Store: 回傳最新玩家資料與場景清單
     Store->>Store: applyPlayerData(data, { locations })
@@ -781,9 +786,9 @@ sequenceDiagram
      - 容器與耐用裝備（非易腐耐久品）：維持獨立實體。
      - 無耐久道具：自動與地面同類道具堆疊計數。
   5. **前後端並發保護**：前端介面於丟棄期間啟用 `isDropping` 停用按鈕防連點；後端以 `runPlayerActionWithLock` 串行排隊執行，防範多重丟棄覆寫。
-  6. **海面場景禁止放置地面物品**：
+  6. **海面場景丟棄銷毀機制**：
      - 調用純演算法 `canPlaceItemAtLocation` 進行判定（`hasGround: false` 或 `terrainType: 'SEA'`）。
-     - 若玩家身處海面場景，前端物品詳情之丟棄按鈕禁用並顯示紅字「無法丟棄」；後端 `POST /api/player/drop-item` 亦進行安全守衛，拒絕海面丟棄請求。
+     - 若玩家身處海面場景，前端「丟棄」按鈕維持可用，防止撈取過重無法移動且無法丟棄造成死循環；丟棄後物品直接沉入海中消失，後端從玩家背包扣除道具但略過加入 `Location.placedItems`。前端 Store 並輸出系統日誌「丟棄的物品已沉入海中消失。」。
 
 ---
 

@@ -55,6 +55,7 @@ import {
   checkRecipeUnlocks,
   checkTravelRequirements,
   checkNutritionOverLimit,
+  canPlaceItemAtLocation,
 } from '../../shared/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -2738,10 +2739,6 @@ router.post('/player/drop-item', async (req, res) => {
         return res.status(404).json({ success: false, message: '找不到該地點！' });
       }
 
-      if (location.hasGround === false || location.terrainType === 'SEA' || locationId === 'AZURE_BAY_OFFSHORE') {
-        return res.status(400).json({ success: false, message: '此處為海面，無法將物品放置於地上！' });
-      }
-
       let allDbItems = await Item.find();
       if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
       await settlePlayerInventoryDecay(player, allDbItems);
@@ -2825,13 +2822,17 @@ router.post('/player/drop-item', async (req, res) => {
       player.inventory = player.inventory.filter((_, idx) => !indicesToRemove.has(idx));
       player.markModified('inventory');
 
-      // 依堆疊規則將物品加入現場物品（同檔位自動加權平均合併）
-      for (const dItem of droppedItems) {
-        location.placedItems = addItemToPlacedItems(location.placedItems || [], dItem, allDbItems);
+      // 若場景具備地面，依堆疊規則將物品加入現場地面物品（同檔位自動加權平均合併）；
+      // 若為海面等無地面場景，物品丟棄後直接沉入水中消失銷毀，不進入現場物品堆
+      const canPlace = canPlaceItemAtLocation(location);
+      if (canPlace) {
+        for (const dItem of droppedItems) {
+          location.placedItems = addItemToPlacedItems(location.placedItems || [], dItem, allDbItems);
+        }
+        location.markModified('placedItems');
+        await location.save();
       }
-      location.markModified('placedItems');
 
-      await location.save();
       await player.save();
 
       const allLocations = await Location.find({});
