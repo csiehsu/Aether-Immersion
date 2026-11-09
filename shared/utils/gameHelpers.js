@@ -824,12 +824,34 @@ export const checkTravelRequirements = (connection, inventory = [], allDbItems =
     });
 
     if (!matchedTypeItem) {
+      const typeSample = (allDbItems || []).find((d) => {
+        const rawTypes = d?.type;
+        const types = Array.isArray(rawTypes) ? rawTypes : (rawTypes ? [rawTypes] : []);
+        return types.includes(reqItemType);
+      });
+      const typeNameMapZh = {
+        BOAT_KEY: '小船鑰匙',
+        BOAT_VOUCHER: '小船鑰匙',
+        LIGHT: '照明工具',
+        MINING_TOOL: '採礦工具',
+      };
+      const typeNameMapEn = {
+        BOAT_KEY: 'Boat Key',
+        BOAT_VOUCHER: 'Boat Key',
+        LIGHT: 'Light Source',
+        MINING_TOOL: 'Mining Tool',
+      };
+      const fallbackName = typeSample?.name || typeNameMapZh[reqItemType] || reqItemType;
+      const fallbackNameEn = typeSample?.nameEn || typeSample?.name || typeNameMapEn[reqItemType] || reqItemType;
+
       return {
         canTravel: false,
         requiredItemType: reqItemType,
+        requiredItemName: fallbackName,
+        requiredItemNameEn: fallbackNameEn,
         consumeOnTravel,
-        messageZh: `前往該地點需要具備相關道具！`,
-        messageEn: `Traveling to this location requires a suitable item!`,
+        messageZh: `前往該地點需要具備【${fallbackName}】！`,
+        messageEn: `Traveling to this location requires [${fallbackNameEn}]!`,
       };
     }
 
@@ -1707,7 +1729,7 @@ export const canPlaceItemAtLocation = (locationOrId, locations = []) => {
  * 規則：
  * 1. 基礎上限固定為 100 kg（DEFAULT_MAX_WEIGHT = 100），不受力量屬性加成。
  * 2. 玩家開船至海面（hasGround === false 或 terrainType === 'SEA'）時，小船等載具可乘載貨物，
- *    依玩家持有的船隻道具（type 包含 'BOAT_VOUCHER' 且具備 cargoCapacity）動態疊加額外載重，
+ *    依玩家持有的船隻道具（type 包含 'BOAT_KEY' 且具備 cargoCapacity）動態疊加額外載重，
  *    若持有小船鑰匙（cargoCapacity: 100）則上限擴充為 200 kg，此負重上限因船而異。
  * @param {Object} [player] - 玩家物件。
  * @param {Array<Object>} [items=[]] - 全域道具定義資料。
@@ -1718,7 +1740,7 @@ export const calculateMaxWeight = (player, items = [], locations = []) => {
   let maxWeight = DEFAULT_MAX_WEIGHT;
   if (!player) return maxWeight;
 
-  const currentLocId = player.location;
+  const currentLocId = player.location || player.currentLocationId;
   let currentLoc = null;
   if (Array.isArray(locations)) {
     currentLoc = locations.find((l) => l && l.locationId === currentLocId);
@@ -1742,7 +1764,7 @@ export const calculateMaxWeight = (player, items = [], locations = []) => {
       const dbItem = dbItemMap.get(inv.itemId);
       if (dbItem) {
         const types = Array.isArray(dbItem.type) ? dbItem.type : (dbItem.type ? [dbItem.type] : []);
-        if (types.includes('BOAT_VOUCHER') && typeof dbItem.cargoCapacity === 'number' && dbItem.cargoCapacity > 0) {
+        if ((types.includes('BOAT_KEY') || types.includes('BOAT_VOUCHER')) && typeof dbItem.cargoCapacity === 'number' && dbItem.cargoCapacity > 0) {
           boatBonus = Math.max(boatBonus, dbItem.cargoCapacity);
         }
       } else if (inv.itemId === 'item024') {
