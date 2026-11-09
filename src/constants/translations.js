@@ -246,6 +246,7 @@ export const MATERIAL_TYPE_LABELS = {
     ROASTING_BOX: '烘肉箱',
     EEL: '鰻魚',
     CRAB: '螃蟹',
+    SOUP_MEAT: '湯料',
   },
   'en': {
     FLOUR: 'Flour',
@@ -266,6 +267,7 @@ export const MATERIAL_TYPE_LABELS = {
     ROASTING_BOX: 'Roasting Box',
     EEL: 'Eel',
     CRAB: 'Crab',
+    SOUP_MEAT: 'Soup Meat',
   },
 };
 

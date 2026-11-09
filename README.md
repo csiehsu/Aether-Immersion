@@ -162,9 +162,9 @@ AetherImmersion/
   - 若配方帶有 `durabilityFormula`，以主材料耐久度代入公式動態計算產物耐久度。
 - **材料修飾詞機制 (Modifiers)**：
   - 支援投入修飾素材，依據 `recipe.modifiers` 自動賦予產物自訂名稱前綴與額外營養加成（`bonusNutrition`）。
-- **生物型別 Tag 驅動與通用配方動態產物 (`outputs`)**：
-  - 配方基底材料支援透過生物型別 Tag（如 `type: 'EEL'` 鰻魚、`type: 'CRAB'` 螃蟹）自動納入同類所有物種，保留未來擴充同類生物共用配方的彈性。
-  - 產物完全由 `outputs` 字典進行動態路由映射（可省略靜態 `outputItems`），投入黃鰻產出黃鰻肉塊、投入泳蟹產出泳蟹肉與肉餌。
+- **生物型別與食材類別 Tag 驅動與通用配方動態產物 (`outputs`)**：
+  - 配方基底材料支援透過生物或食材型別 Tag（如 `type: 'EEL'` 鰻魚、`type: 'CRAB'` 螃蟹、`type: 'SOUP_MEAT'` 湯料）自動納入同類所有物種與適用食材，保留未來擴充同類生物與共用料理配方的彈性。
+  - 產物完全由 `outputs` 字典進行動態路由映射（可省略靜態 `outputItems`），如投入黃鰻產出黃鰻肉塊、投入泳蟹產出泳蟹肉與肉餌；海鮮湯投入黃鰻肉塊產出海帶鰻魚湯、投入泳蟹肉產出海帶蟹肉湯。
 - **每項產物獨立機率抽籤 (Independent Item Chance)**：
   - 若產物定義了 `chance`（如宰殺配方單件成功率 50%），系統以該產物的數量為上限逐件獨立進行機率判定，每成功一次獲得 1 個產物，精準呈現「每項材料單獨計算」的產出機制。
 - **產物實體化與堆疊**：
@@ -509,7 +509,7 @@ sequenceDiagram
   5. **生活技能成功率與產出實體化**：
      - 一般配方依料理技能等級判定整批成功率；若產物物件定義了獨立單件成功率 `chance`（如【宰鰻魚】、【宰螃蟹】每件 50%），則依 `quantity` 進行逐件獨立機率抽籤（每成功一次切出 1 個），每項材料單獨計算。
      - 成功產物若具有耐久度，一律逐一指派全域唯一識別碼 `generateInstanceId()` 生成獨立實體，並記錄 `lastDecayedAt`。
-     - 配方產物可省略靜態 `outputItems`，全面由 `outputs` 字典依投入生物材料（`type: 'EEL'`, `type: 'CRAB'`）動態解析 `effectiveOutputs`。
+     - 配方產物可省略靜態 `outputItems`，全面由 `outputs` 字典依投入生物與食材材料（`type: 'EEL'`, `type: 'CRAB'`, `type: 'SOUP_MEAT'`）動態解析 `effectiveOutputs`。
   6. **生活技能經驗累積**：製作完成後依配方基礎經驗與投入材料加成經驗（`ingredientExp`），透過 `addLifeSkillExp` 累加烹飪經驗值。
   7. **建築物耐久度 1:1 消耗與後端阻擋**：
      - 若配方所需設施由場景中具備有限耐久度的建築物（`durability !== -1`）提供，後端嚴格驗證其 `currentDurability > 0`；若耐久度歸零則前後端同步阻擋。
