@@ -102,6 +102,9 @@ AetherImmersion/
   - **海上開船載重擴充（因船而異）**：當玩家處於海面環境（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`）時，玩家搭乘的小船等載具可乘載貨物，系統自動依玩家背包所持船隻鑰匙道具（`type` 包含 `BOAT_KEY`）定義之 `cargoCapacity` 動態疊加載重量（小船鑰匙 `item024` 增加 100 kg，上限提升至 200 kg，載重因船而異），資料驅動支援未來各類型船舶無縫擴充。
   - 計算背包所有道具實體重量（含容器內裝液體的額外重量：`itemWeight + liquidWeight`）。
   - 當背包總重量嚴格大於負重上限時判定為超重，禁止進行地圖移動。
+  - **海面丟棄即銷毀場景之防超載採集保護機制**：在海面等無地面場景（`hasGround: false` 或 `terrainType: 'SEA'`，如翠潯灣近海 `AZURE_BAY_OFFSHORE`）丟棄物品會直接沉沒消失。為避免玩家大量撈捕超重後陷入無法移動又必須丟棄魚穫的窘境：
+    - 若玩家當前已超重，前端採集按鈕全面禁用並以紅字顯示「過重了」，後端 API 亦進行 400 攔截「已過重，不能再塞了。」。
+    - 若玩家發起大量採集次數，系統於逐次產出時動態監控總重量；一旦背包重量超過上限，立即中止後續採集並依實際執行次數結算精力、水分、飽食、工具耐久度與經驗值，並發布系統日誌「已過重，不能再塞了。」。
 
 ### 2. 飽食度與生存狀態效果增減益機制 (Satiety & Status Effects)
 - **單一真相來源 (SSOT)**：前後端統一調用 `shared/constants/gameConstants.js` 與 `shared/utils/energyHelper.js`。
@@ -405,7 +408,7 @@ sequenceDiagram
   - 後端路由：`server/routes/api.js` -> `router.post('/player/gather')`
   - 核心輔助：`src/utils/gameHelpers.js` -> `calculateMaxExecutableByTools()`, `applyToolsDurabilityDeduction()`, `calculateSuccessRate()`, `addLifeSkillExp()`, `addItemsToInventory()`, `checkRecipeUnlocks()`
 - **關鍵功能與運作機制**：
-  1. **多重瓶頸綜合裁定**：依據玩家目前精力 (`maxByEnergy`)、肉餌儲量 (`maxByBait`)、背包工具耐久度 (`maxByTools`)、容器容量 (`maxByContainer`) 以及飽食度與水分可支撐上限 (`maxBySatiety`)，計算單次最大允許執行的實際次數 `actualQty = min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer, maxBySatiety)`。若因飽食度/水分歸零停止，輸出日誌「飢渴難耐，體能透支，只執行了X次便停止了。」；若 `maxBySatiety <= 0`，前端按鈕禁用顯示「飢渴中」。
+  1. **多重瓶頸綜合裁定**：依據玩家目前精力 (`maxByEnergy`)、肉餌儲量 (`maxByBait`)、背包工具耐久度 (`maxByTools`)、容器容量 (`maxByContainer`) 以及飽食度與水分可支撐上限 (`maxBySatiety`)，計算單次最大允許執行的實際次數 `actualQty = min(addQty, maxByEnergy, maxByBait, maxByTools, maxByContainer, maxBySatiety)`。若因飽食度/水分歸零停止，輸出日誌「飢渴難耐，體能透支，只執行了X次便停止了。」；若 `maxBySatiety <= 0`，前端按鈕禁用顯示「飢渴中」。在海面等無地面場景若玩家已超重，前端採集按鈕禁用並紅字顯示「過重了」；大量採集時若中途超重，則即刻中止後續採集並完成當前結算，系統日誌輸出「已過重，不能再塞了。」。
   2. **工具耐久扣除與損壞銷毀**：透過 `applyToolsDurabilityDeduction` 依耐久度升序選取的工具扣除耐久；耐久度扣至 `<= 0` 時自動自背包中移除，並於系統日誌中發布「[工具名稱]已損壞。」。
   3. **生活技能成功率加成**：調用 `calculateSuccessRate(baseChance, currentSkillLevel)`，生活技能每提升 1 級提供 +5% 成功率加成；每份採集產出皆逐一進行機率抽籤判定成功與失敗次數。
   4. **經驗累積與升級**：依產出數量與採集點設定之 `expPerUnit` 透過 `addLifeSkillExp` 累加對應生活技能經驗（採集 `GATHERING`、釣魚 `FISHING`、挖礦 `MINING`）。

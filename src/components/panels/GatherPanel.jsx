@@ -17,6 +17,8 @@ import {
   getDurabilityColor,
   calculateLiquidContainerCapacity,
   calculateSuccessRate,
+  canPlaceItemAtLocation,
+  isPlayerOverburdened,
 } from '../../utils/gameHelpers';
 import {
   getAvailableQuestForNpc,
@@ -673,10 +675,17 @@ export const GatherPanel = () => {
                   totalAvailableContainerCap = capInfo.totalAvailableCapacity;
                   hasAvailableContainer = totalAvailableContainerCap > 0;
                 }
-                const canGather = !isComatose && hasSatiety && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
+
+                const isWater = !canPlaceItemAtLocation(currentLocation || player?.location, locations);
+                const isOverburdened = isPlayerOverburdened(player, inventory, items, locations);
+                const isSeaOverburdened = isWater && isOverburdened;
+
+                const canGather = !isComatose && !isSeaOverburdened && hasSatiety && hasNonConsumableTools && hasEnoughBait && hasEnergy && hasAvailableContainer;
 
                 const buttonText = isComatose
                   ? (t.comatose || (language === 'en' ? 'Comatose' : '昏迷中'))
+                  : isSeaOverburdened
+                  ? (t.overburdenedBtn || (language === 'en' ? 'Overburdened' : '過重了'))
                   : !hasSatiety
                   ? (language === 'en' ? 'Famished' : '飢渴中')
                   : !hasNonConsumableTools
@@ -712,7 +721,7 @@ export const GatherPanel = () => {
                 const maxByEnergy = singleCost > 0 ? Math.floor(currentEnergy / singleCost) : Infinity;
                 const maxByBait = hasBaitRequirement ? totalBaitCount : Infinity;
                 const maxByContainer = isLiquidResource ? totalAvailableContainerCap : Infinity;
-                const calculatedMaxGather = (!hasNonConsumableTools || isComatose || !hasAvailableContainer || maxBySatiety <= 0)
+                const calculatedMaxGather = (!hasNonConsumableTools || isComatose || !hasAvailableContainer || maxBySatiety <= 0 || isSeaOverburdened)
                   ? 1
                   : Math.max(1, Math.min(maxByEnergy, maxByBait, maxByContainer, maxBySatiety));
 
@@ -850,6 +859,13 @@ export const GatherPanel = () => {
                           className={`btn-gather ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
                           disabled={!canGather}
                           title={buttonText}
+                          style={isSeaOverburdened ? {
+                            color: '#ef4444',
+                            border: '1px solid #ef4444',
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            cursor: 'not-allowed',
+                            fontWeight: 600,
+                          } : undefined}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!canGather) return;

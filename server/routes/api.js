@@ -56,6 +56,8 @@ import {
   checkTravelRequirements,
   checkNutritionOverLimit,
   canPlaceItemAtLocation,
+  calculateCurrentWeight,
+  calculateMaxWeight,
 } from '../../shared/utils/gameHelpers.js';
 
 const router = express.Router();
@@ -1358,6 +1360,12 @@ router.post('/player/gather', async (req, res) => {
     let allDbItems = await Item.find();
     if (!allDbItems || allDbItems.length === 0) allDbItems = initialItems;
     await settlePlayerInventoryDecay(player, allDbItems);
+
+    const isWater = !canPlaceItemAtLocation(locationDoc);
+    if (isWater && isPlayerOverburdened(player, player.inventory, allDbItems, [locationDoc])) {
+      return res.status(400).json({ success: false, message: '已過重，不能再塞了。' });
+    }
+
     const requiredToolTypes = spot.requiredToolTypes || [];
 
     const unitCost = spot.cost ?? 1;
@@ -1451,12 +1459,78 @@ router.post('/player/gather', async (req, res) => {
     const isLimitedByContainer = isLiquidResource && maxByContainer < addQty && actualQty === maxByContainer;
     const isLimitedBySatiety = maxBySatiety < addQty && actualQty === maxBySatiety;
 
-    const baseTotalCost = unitCost * actualQty;
+    // 結算生活技能經驗（採集、釣魚、挖礦）與成功率加成
+    const spotSkill = spot.skillType || (
+      requiredToolTypes.includes('MINING_TOOL')
+        ? 'MINING'
+        : (requiredToolTypes.includes('FISHING_NET') || requiredToolTypes.includes('LANDING_NET')
+          ? 'FISHING'
+          : 'GATHERING')
+    );
+    const currentSkillObj = player.lifeSkills?.[spotSkill] || { level: 0, exp: 0 };
+    const currentSkillLevel = currentSkillObj.level ?? 0;
+    const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
+    const finalSuccessRate = calculateSuccessRate(baseChance, currentSkillLevel);
+
+    const maxYield = Math.max(1, Number(spot.maxYield) || 1);
+    let executedQty = actualQty;
+    let gainedQty = 0;
+    let failQty = 0;
+    let isOverburdenedStopped = false;
+
+    if (isWater) {
+      const maxWeight = calculateMaxWeight(player, allDbItems, [locationDoc]);
+      let simInventory = player.inventory.map((i) => ({ ...i }));
+
+      for (let step = 1; step <= actualQty; step++) {
+        executedQty = step;
+        let stepSuccess = 0;
+        let stepFail = 0;
+        for (let y = 0; y < maxYield; y++) {
+          if (Math.random() * 100 < finalSuccessRate) {
+            stepSuccess += 1;
+          } else {
+            stepFail += 1;
+          }
+        }
+        gainedQty += stepSuccess;
+        failQty += stepFail;
+
+        if (stepSuccess > 0) {
+          if (isLiquidResource) {
+            simInventory = fillLiquidContainers(simInventory, itemId, stepSuccess, allDbItems);
+          } else {
+            const existing = simInventory.find((i) => i.itemId === itemId);
+            if (existing) {
+              existing.count = (existing.count || 1) + stepSuccess;
+            } else {
+              simInventory.push({ itemId, count: stepSuccess });
+            }
+          }
+          const curW = calculateCurrentWeight(simInventory, allDbItems);
+          if (curW > maxWeight) {
+            isOverburdenedStopped = true;
+            break;
+          }
+        }
+      }
+    } else {
+      const totalAttempts = actualQty * maxYield;
+      for (let i = 0; i < totalAttempts; i++) {
+        if (Math.random() * 100 < finalSuccessRate) {
+          gainedQty += 1;
+        } else {
+          failQty += 1;
+        }
+      }
+    }
+
+    const baseTotalCost = unitCost * executedQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
 
     // 扣除肉餌
     if (requiredToolTypes.includes('BAIT')) {
-      let remainingToDeduct = 1 * actualQty;
+      let remainingToDeduct = 1 * executedQty;
       for (const inv of player.inventory) {
         if (remainingToDeduct <= 0) break;
         const dbI = allDbItems.find((d) => d.itemId === inv.itemId);
@@ -1492,33 +1566,6 @@ router.post('/player/gather', async (req, res) => {
     );
     player.inventory = updatedInventory;
     player.markModified('inventory');
-
-    // 結算生活技能經驗（採集、釣魚、挖礦）與成功率加成
-    const spotSkill = spot.skillType || (
-      requiredToolTypes.includes('MINING_TOOL')
-        ? 'MINING'
-        : (requiredToolTypes.includes('FISHING_NET') || requiredToolTypes.includes('LANDING_NET')
-          ? 'FISHING'
-          : 'GATHERING')
-    );
-    const currentSkillObj = player.lifeSkills?.[spotSkill] || { level: 0, exp: 0 };
-    const currentSkillLevel = currentSkillObj.level ?? 0;
-    const baseChance = typeof spot.chance === 'number' ? spot.chance : 100;
-    const finalSuccessRate = calculateSuccessRate(baseChance, currentSkillLevel);
-
-    // 依據實際採集次數、單次獲得量上限與最終成功率進行逐件獨立抽籤判定
-    const maxYield = Math.max(1, Number(spot.maxYield) || 1);
-    const totalAttempts = actualQty * maxYield;
-    let successQty = 0;
-    let failQty = 0;
-    for (let i = 0; i < totalAttempts; i++) {
-      if (Math.random() * 100 < finalSuccessRate) {
-        successQty += 1;
-      } else {
-        failQty += 1;
-      }
-    }
-    const gainedQty = successQty;
 
     const expPerUnit = (typeof spot.expPerUnit === 'number')
       ? spot.expPerUnit
@@ -1569,12 +1616,24 @@ router.post('/player/gather', async (req, res) => {
     await GameLog.create({
       sender: '系統',
       senderEn: 'System',
-      text: `採集${targetItemName}${actualQty}次，獲得${gainedQty}個${failQty > 0 ? `，失敗${failQty}次` : ''}。`,
-      textEn: `Gathered ${targetItemNameEn} ${actualQty} times, gained ${gainedQty}${failQty > 0 ? `, failed ${failQty} times` : ''}.`,
+      text: `採集${targetItemName}${executedQty}次，獲得${gainedQty}個${failQty > 0 ? `，失敗${failQty}次` : ''}。`,
+      textEn: `Gathered ${targetItemNameEn} ${executedQty} times, gained ${gainedQty}${failQty > 0 ? `, failed ${failQty} times` : ''}.`,
       type: 'system',
       locationId: '',
       targetPlayerId,
     });
+
+    if (isOverburdenedStopped) {
+      await GameLog.create({
+        sender: '系統',
+        senderEn: 'System',
+        text: '已過重，不能再塞了。',
+        textEn: 'Overburdened, cannot carry any more.',
+        type: 'system',
+        locationId: '',
+        targetPlayerId,
+      });
+    }
 
     if (isLimitedByTools) {
       await GameLog.create({

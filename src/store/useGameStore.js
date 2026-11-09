@@ -817,6 +817,19 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
 
+    const currentLocation = locations.find((l) => l.locationId === player.location);
+    const isWater = !canPlaceItemAtLocation(currentLocation || player.location, locations);
+    if (isWater && isPlayerOverburdened(player, inventory, items, locations)) {
+      get().addLog(
+        '系統',
+        'System',
+        '已過重，不能再塞了。',
+        'Overburdened, cannot carry any more.',
+        'system'
+      );
+      return false;
+    }
+
     const addQty = Math.max(1, Number(qty) || 1);
     const baseTotalCost = cost * addQty;
     const totalCost = calculateEffectiveEnergyCost(player, baseTotalCost, 'GATHER');
@@ -826,7 +839,6 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
 
-    const currentLocation = locations.find((l) => l.locationId === player.location);
     const spot = (currentLocation?.gatherables || []).find((g) => g.itemId === itemId);
     const reqTools = spot?.requiredToolTypes || [];
 
