@@ -2358,11 +2358,40 @@ router.post('/player/craft', async (req, res) => {
     const recipeName = recipe.name || '道具';
     const recipeNameEn = recipe.nameEn || recipeName;
 
+    // 彙總本次製作產出的道具清單以產生系統日誌
+    const gainedItemsMap = new Map();
+    for (const ci of craftedItemsToAdd) {
+      if (!ci.count || ci.count <= 0) continue;
+      const baseDbItem = allDbItems.find((i) => i.itemId === ci.itemId) || initialItems.find((i) => i.itemId === ci.itemId);
+      const nameZh = ci.options?.customName || baseDbItem?.name || ci.itemId;
+      const nameEn = ci.options?.customNameEn || baseDbItem?.nameEn || baseDbItem?.name || ci.itemId;
+      const key = `${ci.itemId}___${nameZh}___${nameEn}`;
+      if (gainedItemsMap.has(key)) {
+        gainedItemsMap.get(key).count += ci.count;
+      } else {
+        gainedItemsMap.set(key, { nameZh, nameEn, count: ci.count });
+      }
+    }
+
+    const gainedItemsList = Array.from(gainedItemsMap.values());
+    let craftLogTextZh = '';
+    let craftLogTextEn = '';
+
+    if (gainedItemsList.length > 0) {
+      const gainedStrZh = gainedItemsList.map((item) => `${item.count}個${item.nameZh}`).join('、');
+      const gainedStrEn = gainedItemsList.map((item) => `${item.count} ${item.nameEn}`).join(', ');
+      craftLogTextZh = `製作${recipeName}${actualCraftQty}次，獲得${gainedStrZh}。`;
+      craftLogTextEn = `Crafted ${recipeNameEn} ${actualCraftQty} times, obtained ${gainedStrEn}.`;
+    } else {
+      craftLogTextZh = `製作${recipeName}${actualCraftQty}次，全都失敗了。`;
+      craftLogTextEn = `Crafted ${recipeNameEn} ${actualCraftQty} times, all failed.`;
+    }
+
     await GameLog.create({
       sender: '系統',
       senderEn: 'System',
-      text: `製作${recipeName}${actualCraftQty}次，失敗${failCraftQty}次。`,
-      textEn: `Crafted ${recipeNameEn} ${actualCraftQty} times, failed ${failCraftQty} times.`,
+      text: craftLogTextZh,
+      textEn: craftLogTextEn,
       type: 'system',
       locationId: '',
       targetPlayerId,
