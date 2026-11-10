@@ -1480,7 +1480,7 @@ router.post('/player/gather', async (req, res) => {
 
     if (isWater) {
       const maxWeight = calculateMaxWeight(player, allDbItems, [locationDoc]);
-      let simInventory = player.inventory.map((i) => ({ ...i }));
+      let simInventory = sanitizeInventoryItems(player.inventory);
 
       for (let step = 1; step <= actualQty; step++) {
         executedQty = step;

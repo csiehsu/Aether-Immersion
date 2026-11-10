@@ -685,7 +685,7 @@ export const GatherPanel = () => {
                 const buttonText = isComatose
                   ? (t.comatose || (language === 'en' ? 'Comatose' : '昏迷中'))
                   : isSeaOverburdened
-                  ? (t.overburdenedBtn || (language === 'en' ? 'Overburdened' : '過重了'))
+                  ? (t.overburdened || (language === 'en' ? 'Overburdened' : '負重超載'))
                   : !hasSatiety
                   ? (language === 'en' ? 'Famished' : '飢渴中')
                   : !hasNonConsumableTools
@@ -856,13 +856,13 @@ export const GatherPanel = () => {
                         </div>
                         <button
                           type="button"
-                          className={`btn-gather ${isComatose ? 'btn-comatose' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
+                          className={`btn-gather ${isComatose ? 'btn-comatose' : ''} ${isSeaOverburdened ? 'btn-overburdened' : ''} ${!hasSatiety && !isComatose ? 'btn-famished' : ''}`}
                           disabled={!canGather}
                           title={buttonText}
                           style={isSeaOverburdened ? {
                             color: '#ef4444',
                             border: '1px solid #ef4444',
-                            background: 'rgba(239, 68, 68, 0.12)',
+                            background: 'rgba(239, 68, 68, 0.15)',
                             cursor: 'not-allowed',
                             fontWeight: 600,
                           } : undefined}

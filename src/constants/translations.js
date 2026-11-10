@@ -25,7 +25,7 @@ export const translations = {
     obtain: '📦 獲得',
     costEnergy: '精力',
     gatherBtn: '採集',
-    overburdenedBtn: '過重了',
+    overburdenedBtn: '負重超載',
     cannotCarryMore: '已過重，不能再塞了。',
     observeBtn: '觀察',
     attackBtn: '攻擊',
