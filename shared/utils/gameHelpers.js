@@ -737,6 +737,76 @@ export const applyToolsDurabilityDeduction = (
 };
 
 /**
+ * 扣除裝備中武器之耐久度（戰鬥出招）。
+ * 多段連擊招式設定為整招扣 1 點。
+ * 耐久歸零時裝備直接碎裂損毀，自動自背包永久移除，並回傳 isBroken 與 brokenWeapon。
+ * 永久免損耗武器（durability === -1 / isPermanentItem）豁免扣損。
+ * @param {Array<Object>} [inventory=[]] - 玩家背包陣列。
+ * @param {string} [weaponInstanceId=''] - 當前裝備武器的 instanceId。
+ * @param {number} [amount=1] - 扣除之耐久度點數（預設 1 點）。
+ * @param {Array<Object>} [items=[]] - 全域道具定義資料。
+ * @returns {{ updatedInventory: Array<Object>, isBroken: boolean, brokenWeapon: Object|null }}
+ */
+export const applyWeaponDurabilityDeduction = (
+  inventory = [],
+  weaponInstanceId = '',
+  amount = 1,
+  items = []
+) => {
+  if (!weaponInstanceId || !Array.isArray(inventory) || inventory.length === 0 || amount <= 0) {
+    return { updatedInventory: [...inventory], isBroken: false, brokenWeapon: null };
+  }
+
+  const weaponIndex = inventory.findIndex((i) => i.instanceId === weaponInstanceId);
+  if (weaponIndex === -1) {
+    return { updatedInventory: [...inventory], isBroken: false, brokenWeapon: null };
+  }
+
+  const targetWeapon = inventory[weaponIndex];
+  const dbItem = (items || []).find((i) => i.itemId === targetWeapon.itemId);
+  if (isPermanentItem(targetWeapon, dbItem)) {
+    return { updatedInventory: [...inventory], isBroken: false, brokenWeapon: null };
+  }
+
+  const curDur = (targetWeapon?.durability !== undefined && targetWeapon?.durability !== null)
+    ? Number(targetWeapon.durability)
+    : ((dbItem?.durability !== undefined && dbItem?.durability !== null) ? Number(dbItem.durability) : -1);
+
+  if (curDur === -1) {
+    return { updatedInventory: [...inventory], isBroken: false, brokenWeapon: null };
+  }
+
+  const newDur = Math.max(0, curDur - amount);
+
+  if (newDur <= 0) {
+    const rawWeapon = targetWeapon?.toObject ? targetWeapon.toObject() : (targetWeapon?._doc ? { ...targetWeapon._doc } : { ...targetWeapon });
+    const updatedInventory = inventory.filter((i) => i.instanceId !== weaponInstanceId);
+    return {
+      updatedInventory,
+      isBroken: true,
+      brokenWeapon: { ...rawWeapon, durability: 0 },
+    };
+  }
+
+  const updatedInventory = inventory.map((item, idx) => {
+    if (idx === weaponIndex) {
+      return {
+        ...item,
+        durability: newDur,
+        maxDurability: item.maxDurability ?? dbItem?.durability ?? newDur,
+      };
+    }
+    return item;
+  });
+
+  return {
+    updatedInventory,
+    isBroken: false,
+    brokenWeapon: null,
+  };
+};
+
+/**
  * 檢查路徑連線的通行道具需求（驗證背包是否具備且符合 isToolUsable）。
  * 支援透過 requiredItemId 指定特定道具，或透過 requiredItemType 指定特定道具類型。
  *

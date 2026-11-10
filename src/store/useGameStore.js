@@ -18,6 +18,7 @@ import {
   getAvailableBattleSkills,
   calculateSkillLevel,
   roundExp,
+  applyWeaponDurabilityDeduction,
 } from '../utils/gameHelpers';
 import {
   MAX_WATER,
@@ -1901,7 +1902,11 @@ export const useGameStore = create((set, get) => ({
               'Content-Type': 'application/json',
               'x-player-id': pId,
             },
-            body: JSON.stringify({ hp: currentHp }),
+            body: JSON.stringify({
+              hp: currentHp,
+              inventory: get().inventory,
+              equipment: get().player?.equipment,
+            }),
           });
           if (res.ok) {
             const resData = await res.json();
@@ -2070,6 +2075,38 @@ export const useGameStore = create((set, get) => ({
         actor.cooldowns[selectedSkill.skillId] = selectedSkill.coolDown;
       }
 
+      // 玩家發動攻擊出招時扣除當前裝備武器 1 點耐久度（多段連擊招式整招扣 1 點）
+      let weaponBrokenThisTurn = false;
+      let brokenWeaponInfo = null;
+      if (actor.id === 'player' && selectedSkill.damageFormula !== '0') {
+        const weaponInstId = get().player?.equipment?.weaponInstanceId;
+        if (weaponInstId) {
+          const { updatedInventory, isBroken, brokenWeapon } = applyWeaponDurabilityDeduction(
+            get().inventory || [],
+            weaponInstId,
+            1,
+            state.items || []
+          );
+
+          if (isBroken && brokenWeapon) {
+            weaponBrokenThisTurn = true;
+            brokenWeaponInfo = brokenWeapon;
+
+            const updatedEquipment = {
+              ...(get().player?.equipment || {}),
+              weaponInstanceId: null,
+            };
+
+            set((s) => ({
+              inventory: updatedInventory,
+              player: s.player ? { ...s.player, equipment: updatedEquipment } : s.player,
+            }));
+          } else {
+            set({ inventory: updatedInventory });
+          }
+        }
+      }
+
       // 3. 戰鬥回合行動結算
       const turnResult = calculateCombatTurn(
         actor,
@@ -2139,6 +2176,25 @@ export const useGameStore = create((set, get) => ({
           `[${actor.nameEn || actor.name}] used [${skillDisplayNameEn}] on [${target.nameEn || target.name}], missed!`,
           'event'
         );
+      }
+
+      // 若當前回合玩家裝備之武器碎裂損毀，發布戰鬥損壞日誌並即時重置武器攻擊力
+      if (weaponBrokenThisTurn && brokenWeaponInfo) {
+        const baseItem = (state.items || []).find((i) => i.itemId === brokenWeaponInfo.itemId);
+        const weaponName = brokenWeaponInfo.customName || baseItem?.name || brokenWeaponInfo.itemId || '武器';
+        const weaponNameEn = brokenWeaponInfo.customNameEn || baseItem?.nameEn || baseItem?.name || brokenWeaponInfo.itemId || 'Weapon';
+
+        get().addLog(
+          '戰鬥系統',
+          'Combat System',
+          `${weaponName}已損壞。`,
+          `${weaponNameEn} has broken.`,
+          'event'
+        );
+        actor.weaponAttack = 0;
+        if (actor.weapon) {
+          actor.weapon = null;
+        }
       }
 
       // 4. 狀態效果 100% 施加判定
@@ -2296,6 +2352,7 @@ export const useGameStore = create((set, get) => ({
                 hp: participants.player.hp,
                 inventory: updatedInv,
                 combatSkills: currentCombatSkills,
+                equipment: get().player?.equipment,
               }),
             });
             if (res.ok) {
@@ -2377,6 +2434,8 @@ export const useGameStore = create((set, get) => ({
               hp: 0,
               stats: penalty.updatedStats,
               energy: penalty.updatedEnergy,
+              inventory: get().inventory,
+              equipment: get().player?.equipment,
             };
             const res = await fetch(`${API_BASE}/player`, {
               method: 'PUT',

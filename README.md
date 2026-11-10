@@ -229,11 +229,16 @@ AetherImmersion/
 - **多人戰鬥擴充架構 (Multiplayer Extensibility Architecture)**：
   - **參與者實體抽象 (Participant Map)**：將戰鬥雙方抽象為 `participants: { [actorId]: { id, name, team, hp, maxHp, stats, statuses, cooldowns } }`，不再綁死二元變數，未來組隊多人連線或多敵人群戰可無縫擴充至陣列。
   - **行動意圖與出招解耦 (Decoupled Action Resolver)**：透過通用結算器 `executeCombatAction(actorId, targetId, skillId)` 統一處理出招、命中計算、狀態施加與回合成熟，客戶端手動點擊、超時普攻、AI 戰術或是未來遠端玩家發送之行動指令均共享同一底層核心。
-- **武器與防具裝備、攻防加成與熟練度系統 (Weapon & Armor Equipment & Combat Skills)**：
+- **武器與防具裝備、攻防加成、熟練度與武器耗損系統 (Weapon & Armor Equipment, Combat Skills & Weapon Durability)**：
   - **武器與防具道具數值**：武器道具（`type` 包含 `WEAPON`）具備獨立攻擊力 `attack`（如石劍 `item035` 攻擊力 +5）；防具道具（`type` 包含 `ARMOR`）具備獨立防禦力 `defense` 與部位類型（如胸甲 `item036` 野豬皮衣防禦力 +3、腿甲 `item037` 野豬皮褲防禦力 +3）。背包面板中物品詳情區**純文字無圖示呈現**屬性與防禦加成，並提供「裝備/卸下」切換，格子與晶片明確標示「裝備中」徽章。
   - **戰鬥攻防加成計算**：計算戰鬥傷害時，攻擊方裝備武器之攻擊力自動疊加至基礎力量（`atkStr = (stats.str) + weaponAttack`）；防守方所有裝備防具之防禦力總和亦自動疊加至基礎防禦（`defDef = (stats.def) + armorDefense`），使防具切實減免所受之技能與普通攻擊傷害。
   - **動態招式判定（免學習）**：捨棄傳統技能學習門檻，改以「裝備對應武器類型」且「達到該武器系別的戰鬥技能等級」動態判定可用招式（`getAvailableBattleSkills`）。空手時為徒手（`UNARMED`），無法施展劍術招式；裝備劍（`SWORD`）且劍術等級 $\ge$ 1 時，刀背擊等專屬招式自動就緒可用；普通攻擊（`SKILL_NORMAL_ATTACK`）隨時可用。
   - **戰鬥中鎖定裝備（防洗機制）**：戰鬥進行期間全面鎖定裝備欄位，背包面板中「裝備/卸下武器」與「裝備/卸下防具」按鈕自動禁用並顯示「戰鬥中鎖定」狀態，禁止更換、卸下或丟棄當前裝備之武器與防具；前端狀態庫（`equipWeapon` / `equipArmor` / `unequipWeapon` / `unequipArmor`）亦設有防禦守衛，阻絕任何戰鬥中途換裝洗經驗或洗防禦之漏洞。
+  - **戰鬥武器耗損與碎裂損毀機制 (Weapon Durability & Shatter)**：
+    - **攻擊出招扣損**：玩家發動攻擊出招時（`damageFormula !== '0'`），調用純演算法 `applyWeaponDurabilityDeduction` 扣除當前裝備武器 1 點耐久度；永久免損耗武器（`durability === -1` 或 `isPermanentItem`）豁免扣損。
+    - **多段連擊整招扣損**：多段打擊招式（`hitCount > 1`，如迴旋斬）設定為整招扣 1 點耐久度，非逐段重複扣損。
+    - **耐久歸零碎裂卸除**：耐久扣至 0 時武器直接碎裂損毀，自動從身上卸下（`player.equipment.weaponInstanceId = null`）並自背包（`inventory`）中永久刪除，戰鬥日誌發布「`${weaponName}已損壞。`」（如「石劍已損壞。」），並即時將當前戰鬥參與者武器攻擊力加成歸零（`weaponAttack = 0`），後續回合無縫動態切換為徒手攻擊。
+    - **全結算出口持久化**：戰鬥獲勝（Victory）、戰敗（Defeat）與主動逃跑（Flee）皆透過 `PUT /api/player` 同步持久化最新背包（扣除耐久或移除碎裂之道具清單）與裝備欄狀態至 MongoDB，確保裝備耐久狀態絕不回溯。
   - **生物專屬經驗與熟練度提升**：擊敗特定野外生物時，獲得該生物定義之專屬戰鬥經驗值（`Npc.exp`），並嚴格依據該場戰鬥鎖定使用之武器系別（`combatState.battleWeaponType`，如持劍提升劍術 `SWORD`、空手提升徒手 `UNARMED`）累加熟練度；預設起始等級為 Lv.0，升級經驗比照生活技能門檻（`SKILL_EXP_THRESHOLDS`）；`TopHUD.jsx` 玩家選單中以純文字與進度條呈現，無圖示且無滑鼠懸停依賴，並即時反映基礎防禦與防具加成總和（如 `DEF: 0 (+6)`）。
 - **技能系統、公式動態求值與多段連擊 (Battle Skills & Dynamic Formula Evaluation)**：
   - 戰鬥技能資料模型（`BattleSkill`）支援冷卻回合（`coolDown`）、連擊打擊次數（`hitCount`）、武器類型需求（`requiredWeaponTypes`）、角色等級門檻（`requiredLevel`）與附加狀態效果清單（`effects`）。
@@ -1044,6 +1049,11 @@ sequenceDiagram
             end
             Store->>Helper: calculateCombatTurn(player, enemy, selectedSkill, playerStatuses, enemyStatuses)
             Helper-->>Store: 回傳 { isHit, isGreatSuccess, totalDamage, hits, appliedEffects }
+            Store->>Helper: applyWeaponDurabilityDeduction(inventory, weaponInstanceId, 1, items)
+            Helper-->>Store: 回傳 { updatedInventory, isBroken, brokenWeapon }
+            alt 武器碎裂損毀 (isBroken: true)
+                Store->>Store: 卸下武器 (weaponInstanceId = null)、自背包刪除、發布損壞日誌、weaponAttack = 0
+            end
             Store->>Store: 結算傷害、100% 附加狀態、回合結束維護衰減 (remainingTurns - 1)
         else 敵方行動回合 (currentTurn === 'enemy')
             Store->>Store: 控場檢查 (若被暈眩則跳過)
@@ -1053,20 +1063,20 @@ sequenceDiagram
     end
     alt 敵方 HP <= 0 (獲勝結算)
         Store->>Store: 結算掉落物 (drops) 並加入背包
-        Store->>API: PUT /api/player { hp, inventory, combatSkills }
-        API->>DB: 更新玩家最新血量與戰利品
+        Store->>API: PUT /api/player { hp, inventory, combatSkills, equipment }
+        API->>DB: 更新玩家最新血量、戰利品、技能熟練度與裝備狀態
     else 玩家 HP <= 0 (戰敗結算)
         Store->>Helper: calculateCombatDefeatPenalty(player.stats, player.energy)
         Helper-->>Store: 回傳 { type, statKey, amount, updatedStats, updatedEnergy }
         Store->>Store: 發布致命一擊懲罰日誌，扣除屬性或精力
-        Store->>API: PUT /api/player { hp: 0, stats, energy }
-        API->>DB: 更新玩家戰敗血量與懲罰數值
+        Store->>API: PUT /api/player { hp: 0, stats, energy, inventory, equipment }
+        API->>DB: 更新玩家戰敗血量、懲罰數值、耐久背包與裝備狀態
     else 玩家主動逃跑 (fleeBattle)
         Store->>Helper: calculateFleeSuccess(player, enemy)
         alt 逃跑成功 (isSuccess: true)
             Store->>Store: 脫離戰鬥 (isBattling = false)
-            Store->>API: PUT /api/player { hp: currentHp }
-            API->>DB: 更新玩家逃脫當前血量
+            Store->>API: PUT /api/player { hp: currentHp, inventory, equipment }
+            API->>DB: 更新玩家逃脫當前血量、耐久背包與裝備狀態
         else 逃跑失敗 (isSuccess: false)
             Store->>Store: 發布被攔住日誌，轉交敵方回合反擊 (currentTurn = 'enemy')
         end
@@ -1076,7 +1086,7 @@ sequenceDiagram
 - **涉及檔案與函式**：
   - 前端視圖：`src/components/panels/CombatPanel.jsx`、`src/components/panels/TacticsModal.jsx`、`src/components/panels/CreaturesPanel.jsx`、`src/components/panels/GatherPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `startBattle(creature)`、`chooseCombatSkill(skillId)`、`tickCombat()`、`toggleAutoBattle()`、`updateBattleSettings(newSettings)`、`fleeBattle()`、`executeCombatAction(actorId, targetId, skillId)`
-  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`calculateFleeSuccess()`、`calculateCombatDefeatPenalty()`、`selectSkillByTactics()`、`evaluateTacticCondition()`
+  - 核心通用演算法：`shared/utils/gameHelpers.js` -> `calculateCombatTurn()`、`calculateFleeSuccess()`、`calculateCombatDefeatPenalty()`、`selectSkillByTactics()`、`evaluateTacticCondition()`、`applyWeaponDurabilityDeduction()`
   - 後端模型：`server/models/Player.js` (`battleSettings`, `autoTactics`)、`server/models/BattleSkill.js`、`server/models/StatusEffect.js`
   - 後端路由：`server/routes/api.js` -> `router.put('/player')`、`router.get('/battle-skills')`、`router.get('/status-effects')`
 - **關鍵功能與運作機制**：
@@ -1097,11 +1107,15 @@ sequenceDiagram
      - 執行期技能與狀態定義一律自 REST 端點載入，嚴禁直接 import 種子檔案。
   6. **戰鬥逃跑演算法與失敗反擊機制**：
      - 調用純演算法 `calculateFleeSuccess`，依據雙方即時速度計算成功率（基礎 50%，速度差每多 100% 增加 50%，限制在 0% ～ 100%）。
-     - 成功時脫離戰鬥並同步最新 HP；失敗時發布「【玩家】試圖逃跑，但被【怪物】攔住了！」日誌，消耗玩家回合後將行動權交由敵方出招反擊。
+     - 成功時脫離戰鬥並同步最新 HP、最新背包耐久與裝備狀態；失敗時發布「【玩家】試圖逃跑，但被【怪物】攔住了！」日誌，消耗玩家回合後將行動權交由敵方出招反擊。
   7. **戰鬥失敗懲罰機制 (Combat Defeat Penalty)**：
      - 調用純演算法 `calculateCombatDefeatPenalty`，當玩家 HP 歸零戰敗時，優先自力量、速度、靈巧中挑選值大於 1 的屬性隨機扣除 1 ～ 3 點（最低扣至 1），並輸出「受到了【怪物】的致命一擊，導致【屬性】降低了 X 點。」。
      - 若力量、速度、靈巧三項屬性均為 1，則轉為隨機扣除精力 300 ～ 600 點（最低扣至 0），輸出「受到了【怪物】的致命一擊導致昏迷了 X 點精力。」。
-     - 懲罰結果同步透過 `PUT /api/player` 持久化至 MongoDB。
+     - 懲罰結果同步透過 `PUT /api/player` 連同背包與裝備狀態持久化至 MongoDB。
+  8. **戰鬥武器耗損與碎裂損毀機制 (Weapon Durability & Shatter)**：
+     - 攻擊出招扣除當前裝備武器 1 點耐久度；多段連擊招式整招扣除 1 點耐久度；永久免損耗武器豁免扣損。
+     - 耐久扣至 0 碎裂時，裝備自動自身上卸下（`weaponInstanceId: null`）並自背包永久刪除，戰鬥日誌發布「`${weaponName}已損壞。`」（如「石劍已損壞。」），重置攻擊方武器攻擊力（`weaponAttack = 0`），後續回合動態切換為徒手攻擊。
+     - 獲勝（Victory）、戰敗（Defeat）與逃跑（Flee）結算皆同步將最新背包與裝備狀態寫入 MongoDB。
 
 ---
 
