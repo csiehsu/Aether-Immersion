@@ -226,6 +226,7 @@ AetherImmersion/
   - **自動戰鬥模式 (Auto Mode)**：維持 1 秒 1 回合的流暢推進，系統自動依據玩家自訂之「戰術策略優先清單（Gambits）」進行條件決策出招。
   - **模式無縫切換**：戰鬥進行中玩家可隨時點擊一鍵切換手動/自動狀態，切換為手動立即重設 30 秒倒數，切換為自動則立即恢復 1 秒節奏。
 - **自動戰鬥戰術策略系統 (Gambits / Tactics System)**：
+  - **僅限已習得技能排程**：`TacticsModal` 戰術策略彈窗嚴格依據玩家當前裝備之武器與戰鬥技能熟練度等級（`combatSkills`），透過 `getAvailableBattleSkills` 動態過濾可用招式，未達到等級門檻或武器未匹配之未習得技能絕不列入戰術候選下拉清單。新創角色初始戰術預設為空清單（`tactics: []`），若未習得任何特殊招式則自動禁用新增並提示以普通攻擊為主。
   - 玩家可在 `TacticsModal` 中自由調整技能優先順序（Priority）與施放條件（Condition）：
     - `ALWAYS`：無條件（冷卻完畢即放）。
     - `SELF_NOT_HAS_STATUS` / `SELF_HAS_STATUS`：我方未持有/持有指定狀態時（如自身未擁有「專注」時優先開心眼）。
@@ -1102,6 +1103,7 @@ sequenceDiagram
      - 玩家在倒數期間點擊技能立即出招，免去等待；若倒數歸零，系統自動替玩家執行普通攻擊，杜絕掛機停滯。
   2. **自動戰鬥戰術策略系統 (Gambits / Tactics)**：
      - 玩家可設定技能施放優先順序，並綁定觸發條件（如自身無專注、敵方無暈眩等）。
+     - **已習得技能過濾**：戰術配置彈窗（`TacticsModal`）結合玩家當前裝備與戰鬥熟練度等級（`combatSkills`），透過 `getAvailableBattleSkills` 動態過濾候選清單，未習得招式絕不出現在排程選項中；新角色初始戰術預設為空。
      - 自動模式維持 1 秒 1 回合的平滑節奏，依序評估戰術條件自動釋放招式；設定同步持久化至 MongoDB。
   3. **面向多人戰鬥的參與者抽象 (Participants Abstraction)**：
      - 狀態池改以 `participants: { [actorId]: Participant }` 字典維護，解耦單一玩家與單一生物的二元邏輯。

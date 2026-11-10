@@ -534,12 +534,7 @@ const formatPlayerResponse = (playerDoc) => {
   p.hpRegenAccumulator = Number(p.hpRegenAccumulator) || 0;
   p.battleSettings = p.battleSettings || {
     isAutoBattle: false,
-    tactics: [
-      { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-      { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-      { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-      { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-    ],
+    tactics: [],
   };
   p.statusEffects = getStatusEffects(p);
   return p;

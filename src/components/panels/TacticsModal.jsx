@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGameStore } from '../../store/useGameStore';
 import { TACTIC_CONDITIONS } from '../../constants/gameConstants';
+import { getAvailableBattleSkills } from '../../utils/gameHelpers';
 
 /**
  * 自動戰鬥戰術策略配置彈窗元件 (Gambits / Auto Tactics Settings Modal)。
@@ -15,28 +16,31 @@ export const TacticsModal = ({ isOpen, onClose }) => {
   const battleSkills = useGameStore((state) => state.battleSkills || []);
   const statusEffects = useGameStore((state) => state.statusEffects || []);
   const updateBattleSettings = useGameStore((state) => state.updateBattleSettings);
+  const player = useGameStore((state) => state.player || {});
+  const getEquippedWeaponItem = useGameStore((state) => state.getEquippedWeaponItem);
   const language = useGameStore((state) => state.language);
 
   const isEn = language === 'en';
 
-  const defaultTactics = [
-    { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-    { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-    { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-    { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-  ];
+  // 取得玩家當前裝備與戰鬥技能熟練度
+  const equippedWeapon = getEquippedWeaponItem ? getEquippedWeaponItem() : null;
+  const combatSkills = player.combatSkills || {};
+
+  // 僅提取玩家當前已解鎖（達標）的可用特殊技能（排除普通攻擊）
+  const allAvailableSkills = getAvailableBattleSkills(battleSkills, equippedWeapon, combatSkills);
+  const availableSpecialSkills = allAvailableSkills.filter(
+    (s) => s.skillId !== 'SKILL_NORMAL_ATTACK' && s.skillId !== 'NORMAL_ATTACK'
+  );
+  const learnedSkillIds = new Set(availableSpecialSkills.map((s) => s.skillId));
 
   const [tactics, setTactics] = useState(() => {
-    return Array.isArray(battleSettings.tactics) && battleSettings.tactics.length > 0
-      ? battleSettings.tactics.map((t, idx) => ({ ...t, priority: idx + 1 }))
-      : defaultTactics;
+    const rawTactics = Array.isArray(battleSettings.tactics) ? battleSettings.tactics : [];
+    // 嚴格過濾：只載入玩家當前已解鎖擁有的技能戰術
+    const validTactics = rawTactics.filter((t) => learnedSkillIds.has(t.skillId));
+    return validTactics.map((t, idx) => ({ ...t, priority: idx + 1 }));
   });
 
   if (!isOpen) return null;
-
-  const availableSpecialSkills = battleSkills.filter(
-    (s) => s.skillId !== 'SKILL_NORMAL_ATTACK' && s.skillId !== 'NORMAL_ATTACK'
-  );
 
   const handleMoveUp = (index) => {
     if (index <= 0) return;
@@ -62,7 +66,8 @@ export const TacticsModal = ({ isOpen, onClose }) => {
   };
 
   const handleAdd = () => {
-    const defaultSkill = availableSpecialSkills[0]?.skillId || 'SKILL_MINDS_EYE';
+    if (availableSpecialSkills.length === 0) return;
+    const defaultSkill = availableSpecialSkills[0].skillId;
     const newTactic = {
       priority: tactics.length + 1,
       skillId: defaultSkill,
@@ -87,7 +92,7 @@ export const TacticsModal = ({ isOpen, onClose }) => {
   };
 
   const handleReset = () => {
-    setTactics(defaultTactics);
+    setTactics([]);
   };
 
   return (
@@ -161,7 +166,13 @@ export const TacticsModal = ({ isOpen, onClose }) => {
         <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {tactics.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#94a3b8', padding: '24px 0' }}>
-              {isEn ? 'No tactics configured. Normal Attack will be used every turn.' : '尚未配置任何戰術策略，戰鬥時將一律使用普通攻擊。'}
+              {availableSpecialSkills.length === 0
+                ? (isEn
+                    ? "You haven't learned any special skills yet. Normal Attack will be used every turn."
+                    : '目前尚無已學會的特殊技能，自動戰鬥將使用普通攻擊。')
+                : (isEn
+                    ? 'No tactics configured. Normal Attack will be used every turn.'
+                    : '尚未配置任何戰術策略，戰鬥時將一律使用普通攻擊。')}
             </div>
           ) : (
             tactics.map((t, idx) => {
@@ -325,13 +336,14 @@ export const TacticsModal = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={handleAdd}
+            disabled={availableSpecialSkills.length === 0}
             style={{
               padding: '8px 12px',
-              background: '#334155',
-              color: '#38bdf8',
+              background: availableSpecialSkills.length === 0 ? '#1e293b' : '#334155',
+              color: availableSpecialSkills.length === 0 ? '#64748b' : '#38bdf8',
               border: '1px dashed #475569',
               borderRadius: '6px',
-              cursor: 'pointer',
+              cursor: availableSpecialSkills.length === 0 ? 'not-allowed' : 'pointer',
               fontSize: '0.85rem',
               fontWeight: 500,
             }}
@@ -364,7 +376,7 @@ export const TacticsModal = ({ isOpen, onClose }) => {
               fontSize: '0.85rem',
             }}
           >
-            {isEn ? 'Reset Default' : '重設為預設'}
+            {isEn ? 'Clear All' : '清空戰術'}
           </button>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button

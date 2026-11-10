@@ -95,12 +95,7 @@ const BattleSettingsSchema = new mongoose.Schema(
     isAutoBattle: { type: Boolean, default: false },
     tactics: {
       type: [BattleTacticSchema],
-      default: () => [
-        { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-        { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-        { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-        { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-      ],
+      default: () => [],
     },
   },
   { _id: false }
@@ -225,12 +220,7 @@ const PlayerSchema = new mongoose.Schema(
       type: BattleSettingsSchema,
       default: () => ({
         isAutoBattle: false,
-        tactics: [
-          { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-          { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-          { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-          { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-        ],
+        tactics: [],
       }),
     },
   },

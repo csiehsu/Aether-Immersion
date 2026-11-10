@@ -255,12 +255,7 @@ export const useGameStore = create((set, get) => ({
   // 玩家自訂戰鬥設定（自動戰鬥開關、戰術優先條件清單）
   battleSettings: {
     isAutoBattle: false,
-    tactics: [
-      { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-      { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-      { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-      { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-    ],
+    tactics: [],
   },
 
   /**
@@ -2531,12 +2526,7 @@ export const useGameStore = create((set, get) => ({
 
     const savedBattleSettings = get().battleSettings || {
       isAutoBattle: false,
-      tactics: [
-        { priority: 1, skillId: 'SKILL_MINDS_EYE', condition: 'SELF_NOT_HAS_STATUS', targetStatusId: 'STATUS_FOCUSED' },
-        { priority: 2, skillId: 'SKILL_FLAT_STRIKE', condition: 'TARGET_NOT_HAS_STATUS', targetStatusId: 'STATUS_STUN' },
-        { priority: 3, skillId: 'SKILL_VOID_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-        { priority: 4, skillId: 'SKILL_SPINNING_SLASH', condition: 'ALWAYS', targetStatusId: '' },
-      ],
+      tactics: [],
     };
 
     const initialEquippedWeapon = get().getEquippedWeaponItem();
