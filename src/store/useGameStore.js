@@ -1096,7 +1096,8 @@ export const useGameStore = create((set, get) => ({
       } else {
         const err = await res.json().catch(() => ({}));
         const msg = err.message || '現在還不需要這個。';
-        get().addLog('系統', 'System', msg, msg, 'system');
+        const msgEn = err.messageEn || "You don't need this right now.";
+        get().addLog('系統', 'System', msg, msgEn, 'system');
       }
     } catch (err) {
       console.error('[Consume Error]', err);

@@ -55,6 +55,7 @@ import {
   checkRecipeUnlocks,
   checkTravelRequirements,
   checkNutritionOverLimit,
+  isMedicineNotNeeded,
   canPlaceItemAtLocation,
   calculateCurrentWeight,
   calculateMaxWeight,
@@ -1140,6 +1141,25 @@ router.post('/player/consume', async (req, res) => {
       ? (Array.isArray(dbItem.type) ? dbItem.type : [dbItem.type])
       : [];
     const isContainer = itemTypes.includes('CONTAINER') || (dbItem?.capacity > 0);
+
+    const targetNutrition = isContainer
+      ? ((allDbItems.find((i) => i.itemId === invItem.contents?.itemId)?.nutrition) || {})
+      : (dbItem?.nutrition || {});
+    const combinedNutrition = {
+      ...targetNutrition,
+      hp: (targetNutrition.hp || 0) + (invItem.bonusNutrition?.hp || 0),
+      energy: (targetNutrition.energy || 0) + (invItem.bonusNutrition?.energy || 0),
+      food: (targetNutrition.food || 0) + (invItem.bonusNutrition?.food || 0),
+      water: (targetNutrition.water || 0) + (invItem.bonusNutrition?.water || 0),
+    };
+
+    if (isMedicineNotNeeded(player, combinedNutrition, itemTypes)) {
+      return res.status(400).json({
+        success: false,
+        message: '現在還不需要這個。',
+        messageEn: "You don't need this right now.",
+      });
+    }
 
     let hpGain = 0;
     let strGain = 0;

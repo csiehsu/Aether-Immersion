@@ -13,6 +13,7 @@ import {
   getWeightColor,
   checkNutritionOverLimit,
   calculateMaxConsumableQty,
+  isMedicineNotNeeded,
 } from '../../utils/gameHelpers';
 
 /**
@@ -271,6 +272,9 @@ export const InventoryPanel = () => {
             const qtyToConsume = Math.min(actionQty, maxActionQty);
             const nutritionCheck = checkNutritionOverLimit(player, totalNutrition, qtyToConsume);
             const isOverLimit = (isContainer ? currentContainerLiquid > 0 : hasNutrition) && nutritionCheck.wouldExceed;
+            const isMedicine = dbItemTypes.includes('MEDICINE');
+            const isMedicineBlocked = isMedicine && isMedicineNotNeeded(player, totalNutrition, dbItemTypes);
+            const isUseBlocked = isMedicine ? isMedicineBlocked : isOverLimit;
 
             const availableSatietyQty = isContainer ? currentContainerLiquid : (repItem.count || 1);
             const fillQty = (hasNutrition || isContainer)
@@ -449,7 +453,7 @@ export const InventoryPanel = () => {
                   ) : null;
                 })()}
 
-                {isOverLimit && (
+                {isUseBlocked && (
                   <div style={{ fontSize: '0.78rem', color: '#f59e0b', fontWeight: 600, marginTop: '4px' }}>
                     <span>{t.notNeededNow || (language === 'en' ? "You don't need this right now." : '現在還不需要這個。')}</span>
                   </div>
@@ -486,7 +490,7 @@ export const InventoryPanel = () => {
                         MAX
                       </button>
                     )}
-                    {(hasNutrition || isContainer) && (
+                    {!isMedicine && (hasNutrition || isContainer) && (
                       <button
                         type="button"
                         className="btn-fill-satiety"
@@ -520,12 +524,18 @@ export const InventoryPanel = () => {
                     {(hasNutrition || isContainer) && (
                       <button
                         type="button"
-                        className="btn-use-item"
-                        disabled={(isContainer && currentContainerLiquid <= 0) || isOverLimit}
-                        style={(isContainer && currentContainerLiquid <= 0) || isOverLimit ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                        className={`btn-use-item ${isMedicineBlocked ? 'btn-not-needed' : ''}`}
+                        disabled={(isContainer && currentContainerLiquid <= 0) || isUseBlocked}
+                        style={
+                          isMedicineBlocked
+                            ? {}
+                            : ((isContainer && currentContainerLiquid <= 0) || isUseBlocked
+                                ? { opacity: 0.5, cursor: 'not-allowed' }
+                                : {})
+                        }
                         onClick={async (e) => {
                           e.stopPropagation();
-                          if ((isContainer && currentContainerLiquid <= 0) || isOverLimit) return;
+                          if ((isContainer && currentContainerLiquid <= 0) || isUseBlocked) return;
                           const qtyToConsume = Math.min(actionQty, maxActionQty);
                           const targetKey = repItem.instanceId || selectedGroup.itemId;
                           const success = await consumeItem(targetKey, qtyToConsume);
@@ -543,9 +553,11 @@ export const InventoryPanel = () => {
                           }
                         }}
                       >
-                        {isContainer
-                          ? (language === 'en' ? 'Drink' : '飲用')
-                          : (t.useBtn || (language === 'en' ? 'Use' : '使用'))}
+                        {isMedicineBlocked
+                          ? (t.notNeededBtn || (language === 'en' ? 'Not Needed' : '不需要'))
+                          : (isContainer
+                              ? (language === 'en' ? 'Drink' : '飲用')
+                              : (t.useBtn || (language === 'en' ? 'Use' : '使用')))}
                       </button>
                     )}
                     {Array.isArray(dbItem?.type) && dbItem.type.includes('WEAPON') && (() => {

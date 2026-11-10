@@ -125,8 +125,13 @@ AetherImmersion/
 - **後端權威處理 (`POST /api/player/consume`)**：全專案統一由後端安全校驗與結算，徹底杜絕前端隨意竄改屬性。
 - **營養數值累加機制 (Additive)**：
   - 食物道具的營養屬性（`hp`, `strength`, `speed`, `dexterity`, `defense`, `maxHp`, `water`, `food`）在食用時**直接累加至玩家能力值**，而非取代玩家數值。
-- **防溢防浪費控制**：
-  - 若食用或飲用後將導致飽食度或水分超過上限 120，系統自動阻止食用並輸出提示「現在還不需要這個。」。
+- **防溢防浪費控制與藥品阻擋機制**：
+  - **食物與飲水防溢出**：若食用或飲用後將導致飽食度或水分超過上限（`MAX_FOOD` / `MAX_WATER`），系統自動阻止食用並輸出提示「現在還不需要這個。」。
+  - **藥品滿值防浪費阻擋 (`isMedicineNotNeeded`)**：
+    - 凡標籤包含 `MEDICINE` 之藥品道具（如傷藥 `item038`），於使用時檢驗其所有正向回復項目。
+    - 只有當藥品提供回復的所有項目在玩家身上**皆已達當前最大上限**（生命值 $\ge$ `maxHp`、精力 $\ge$ `maxEnergy`、飽食度 $\ge$ `MAX_FOOD`、水分 $\ge$ `MAX_WATER`，食物和水分一律引用常數非寫死數值）時，才判定為不需要而阻擋使用。
+    - 若玩家生命或任何一項回復項目未滿（即使使用後數值會溢出），依然允許正常使用補血，杜絕殘血無法喝藥的問題。
+    - 阻擋時前端使用按鈕自動禁用並以紅字紅框顯示「不需要」（`btn-not-needed`），後端原子拒絕並於系統訊息發布「現在還不需要這個。」，藥品介面自動隱藏「吃飽」按鈕。
 - **容器飲用與保留邏輯**：
   - 若使用道具具有容器類型（`CONTAINER`），系統讀取其內部的 `contents: { itemId, amount }` 與內裝液體營養數值。
   - 飲用時僅扣減液體存量，累加水分數值至玩家屬性。
@@ -667,14 +672,16 @@ sequenceDiagram
   - 前端視圖：`src/components/panels/InventoryPanel.jsx`
   - 前端狀態：`src/store/useGameStore.js` -> `consumeItem(inventoryItemId, qty)`
   - 後端路由：`server/routes/api.js` -> `router.post('/player/consume')`
-  - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `settleItemDecay()`, `checkNutritionOverLimit()`, `calculateMaxConsumableQty()`
+  - 核心輔助：`shared/utils/gameHelpers.js` -> `compareItemDurability()`, `settleItemDecay()`, `checkNutritionOverLimit()`, `calculateMaxConsumableQty()`, `isMedicineNotNeeded()`
 - **關鍵功能與運作機制**：
   1. **手動選取與低耐久優先消耗**：介面提供獨立實體小卡供玩家手動點選目標食物；若玩家未手動點選，後端透過 `compareItemDurability` 排序預設優先消耗耐久度最低、最接近過期的食物實體。
   2. **獨立「吃飽」快捷按鈕**：
      - 排列於「使用」按鈕左側，外觀採用與數量選擇器 MAX 按鈕一致的金黃光澤視覺風格。
      - 透過共用核心函式 `calculateMaxConsumableQty`，結合玩家目前飽食度與持有數量，一鍵以最高安全數量直接食用。
-     - 專案禁用滑鼠懸停顯示（對行動裝置友善）；當無法再進食（`fillQty <= 0`）時，按鈕自動禁用並以灰字呈現「已飽」。
-  3. **防溢防浪費驗證**：若食用該食物所帶來的飽食度或水分增加量會導致玩家當前數值超過上限 120 (`MAX_FOOD` / `MAX_WATER`)，後端透過 `checkNutritionOverLimit` 自動拒絕操作並回傳提示「現在還不需要這個。」。
+     - 專案禁用滑鼠懸停顯示（對行動裝置友善）；當無法再進食（`fillQty <= 0`）時，按鈕自動禁用並以灰字呈現「已飽」；藥品介面自動隱藏吃飽按鈕。
+  3. **食物防溢出與藥品滿值阻擋驗證**：
+     - **食物/飲水**：若食用該食物所帶來的飽食度或水分增加量會導致玩家當前數值超過上限 (`MAX_FOOD` / `MAX_WATER`)，後端透過 `checkNutritionOverLimit` 自動拒絕操作並回傳提示「現在還不需要這個。」。
+     - **藥品 (`MEDICINE`)**：透過 `isMedicineNotNeeded` 驗證，僅當藥品補的所有項目在玩家身上**皆已達當前最大值**（生命值 $\ge$ `maxHp`、精力 $\ge$ `maxEnergy`、飽食 $\ge$ `MAX_FOOD`、水分 $\ge$ `MAX_WATER`）時觸發阻擋；前端使用按鈕禁用並紅字紅框顯示「不需要」，後端阻擋並發布系統訊息「現在還不需要這個。」。若生命未滿，即使吃藥溢出亦允許正常使用。
   4. **營養數值累加機制 (Additive)**：食物所含的各項營養數值（包含道具基礎 `nutrition` 與客製化料理附加的 `bonusNutrition`）直接以加法累加至玩家的各項基礎能力值（力量、速度、精巧、防禦、最大生命、當前生命、水分、飽食度），非覆寫。
   5. **日誌與原子持久化**：後端計算變動文字並直接 `player.save()` 寫入資料庫，前端接收回傳資料更新狀態並印出系統事件日誌。
 

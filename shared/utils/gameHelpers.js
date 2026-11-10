@@ -2185,4 +2185,57 @@ export const calculateTotalArmorDefense = (equippedArmors = []) => {
   return list.reduce((sum, item) => sum + (Number(item?.defense) || 0), 0);
 };
 
+/**
+ * 檢查藥品（包含 MEDICINE 類型標籤之道具）是否因為所回復的所有項目皆已達玩家當前最大值而不需要使用。
+ * 只有當藥品提供回復的所有正向項目（數值大於 0），在玩家身上都已經達到了對應的最大上限時，才判定為不需要（阻擋使用）。
+ * 若有任何一項未達上限，則判定仍有需要（不阻擋）。
+ * 食物和水嚴格採用 MAX_FOOD / MAX_WATER 常數進行上限比對，避免硬編碼。
+ *
+ * @param {Object} player - 玩家物件（包含 hp, energy, stats 等）。
+ * @param {Object} nutrition - 藥品提供的各項營養與回復數值（包含 hp, energy, food, water 等）。
+ * @param {Array<string>|string} [itemTypes=[]] - 道具的類型標籤（例如 ['FOOD', 'MEDICINE']）。
+ * @returns {boolean} 若為藥品且所有回復項目皆已滿則回傳 true，否則回傳 false。
+ */
+export const isMedicineNotNeeded = (player = {}, nutrition = {}, itemTypes = []) => {
+  if (!player || !nutrition) return false;
+
+  const types = Array.isArray(itemTypes) ? itemTypes : (itemTypes ? [itemTypes] : []);
+  const isMedicine = types.includes('MEDICINE');
+  if (!isMedicine) return false;
+
+  const stats = player.stats || {};
+  const currentHp = player.hp ?? MAX_HP;
+  const maxHp = stats.maxHp ?? player.maxHp ?? MAX_HP;
+
+  const currentEnergy = player.energy ?? MAX_ENERGY;
+  const maxEnergy = player.maxEnergy ?? MAX_ENERGY;
+
+  const currentFood = stats.food ?? MAX_FOOD;
+  const currentWater = stats.water ?? MAX_WATER;
+
+  // 收集藥品有提供的所有回復項目（> 0）
+  const restorationChecks = [];
+
+  if (Number(nutrition.hp) > 0) {
+    restorationChecks.push(currentHp >= maxHp);
+  }
+  if (Number(nutrition.energy) > 0) {
+    restorationChecks.push(currentEnergy >= maxEnergy);
+  }
+  if (Number(nutrition.food) > 0) {
+    restorationChecks.push(currentFood >= MAX_FOOD);
+  }
+  if (Number(nutrition.water) > 0) {
+    restorationChecks.push(currentWater >= MAX_WATER);
+  }
+
+  // 若藥品完全沒有提供上述任何正向回復項目，則不觸發藥品滿值阻擋
+  if (restorationChecks.length === 0) {
+    return false;
+  }
+
+  // 當藥品補的所有項目，玩家皆已滿時，回傳 true
+  return restorationChecks.every((isMaxed) => isMaxed === true);
+};
+
 

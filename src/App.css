@@ -1488,7 +1488,9 @@
 .btn-move.btn-overburdened,
 .btn-move.btn-overburdened:disabled,
 .btn-gather.btn-overburdened,
-.btn-gather.btn-overburdened:disabled {
+.btn-gather.btn-overburdened:disabled,
+.btn-use-item.btn-not-needed,
+.btn-use-item.btn-not-needed:disabled {
   background: rgba(239, 68, 68, 0.15) !important;
   color: #ef4444 !important;
   border: 1px solid #ef4444 !important;

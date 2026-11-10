@@ -95,6 +95,7 @@ export const translations = {
     weight: '重量',
     gatherAttempts: '採集次數：',
     notNeededNow: '現在還不需要這個。',
+    notNeededBtn: '不需要',
   },
   'en': {
     brand: 'Aether Immersion',
@@ -192,6 +193,7 @@ export const translations = {
     weight: 'Weight',
     gatherAttempts: 'Attempts:',
     notNeededNow: "You don't need this right now.",
+    notNeededBtn: 'Not Needed',
   },
 };
 
